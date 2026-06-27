@@ -1,0 +1,507 @@
+# coding=utf-8
+from __future__ import annotations
+
+import os
+from types import SimpleNamespace
+
+import pytest
+
+from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
+from pilot_proxy import cli
+
+CUSTOM_GNURADIO_PYTHON = "/custom/gnuradio-python"
+SMOKE_IQ_SAMPLES = "128"
+SMOKE_TS_PACKETS = "16"
+CHANNEL_14 = "14"
+THRESHOLD_SNR_SHELF_DB = "-26"
+PILOT_BELOW_DATA_DB = "11.3"
+DTV_BANDWIDTH_HZ_TEXT = "6000000"
+NORMALIZED_DTV_BANDWIDTH_HZ_TEXT = "6000000.0"
+MAX_DENOMINATOR_TEXT = "1024"
+PILOT_FREQUENCY_TOLERANCE_HZ_TEXT = "5"
+NORMALIZED_PILOT_FREQUENCY_TOLERANCE_HZ_TEXT = "5.0"
+NUM_INPUT_STREAMS_TEXT = "2"
+FRAME_SIZE_TEXT = "16384"
+CHECK_LAYOUT_ROWS_TEXT = "256, True, ok"
+SNR_START_DB_TEXT = "-60"
+NORMALIZED_SNR_START_DB_TEXT = "-60.0"
+SNR_STOP_DB_TEXT = "0"
+NORMALIZED_SNR_STOP_DB_TEXT = "0.0"
+SNR_STEP_DB_TEXT = "10"
+NORMALIZED_SNR_STEP_DB_TEXT = "10.0"
+FREQUENCY_OFFSET_HZ_TEXT = "1000"
+NORMALIZED_FREQUENCY_OFFSET_HZ_TEXT = "1000.0"
+CHANNEL_GAIN_DB_TEXT = "1.5"
+CHANNEL_PHASE_DEG_TEXT = "12"
+NORMALIZED_CHANNEL_PHASE_DEG_TEXT = "12.0"
+HISTOGRAM_BINS_TEXT = "12"
+REFERENCE_PROFILE = "configs/receiver_profiles/reference_800mhz_pfb.json"
+
+
+def test_generate_atsc_uses_gnuradio_python_and_disables_user_site(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setenv("PYTHONPATH", "existing")
+
+    result = cli.main(
+        [
+            "generate-atsc",
+            "--gnuradio-python",
+            CUSTOM_GNURADIO_PYTHON,
+            "--output-iq",
+            str(tmp_path / "out.cfile"),
+            "--output-ts",
+            str(tmp_path / "out.ts"),
+            "--num-iq-samples",
+            SMOKE_IQ_SAMPLES,
+            "--num-ts-packets",
+            SMOKE_TS_PACKETS,
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 1
+    cmd, cwd, env = calls[0]
+    assert cmd[:3] == [
+        CUSTOM_GNURADIO_PYTHON,
+        "-m",
+        "pilot_proxy.testbench.generate_atsc_signal",
+    ]
+    assert cwd == cli.REPO_ROOT
+    assert env["PYTHONNOUSERSITE"] == "1"
+    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(cli.SRC_ROOT)
+
+
+def test_detect_wrapper_forwards_public_calibration_controls(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "detect",
+            "--input-detector-matrix",
+            str(tmp_path / "matrix.npy"),
+            "--physical-channel",
+            CHANNEL_14,
+            "--pilot-below-data-db",
+            PILOT_BELOW_DATA_DB,
+            "--dtv-bandwidth-hz",
+            DTV_BANDWIDTH_HZ_TEXT,
+            "--pilot-frequency-tolerance-hz",
+            PILOT_FREQUENCY_TOLERANCE_HZ_TEXT,
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.detect"]
+    assert "--pilot-below-data-db" in cmd
+    assert cmd[cmd.index("--dtv-bandwidth-hz") + 1] == (
+        NORMALIZED_DTV_BANDWIDTH_HZ_TEXT
+    )
+    assert cmd[cmd.index("--pilot-frequency-tolerance-hz") + 1] == (
+        NORMALIZED_PILOT_FREQUENCY_TOLERANCE_HZ_TEXT
+    )
+    assert "--threshold-snr-shelf-db" not in cmd
+    assert "--max-denominator" not in cmd
+
+
+def test_detect_wrapper_has_default_detector_input(monkeypatch) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "detect",
+            "--physical-channel",
+            CHANNEL_14,
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert "--input-detector-matrix" in cmd
+    assert cmd[cmd.index("--input-detector-matrix") + 1].endswith(
+        "generated/detector_input/detector_matrix_i4.npy"
+    ) or cmd[cmd.index("--input-detector-matrix") + 1].endswith(
+        "generated\\detector_input\\detector_matrix_i4.npy"
+    )
+
+
+def test_evaluate_wrapper_forwards_num_input_streams(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "evaluate-snr",
+            "--input-iq",
+            str(tmp_path / "clean.cfile"),
+            "--output-dir",
+            str(tmp_path / "eval"),
+            "--requested-snr-shelf-db",
+            THRESHOLD_SNR_SHELF_DB,
+            "--snr-start-db",
+            SNR_START_DB_TEXT,
+            "--snr-stop-db",
+            SNR_STOP_DB_TEXT,
+            "--snr-step-db",
+            SNR_STEP_DB_TEXT,
+            "--frequency-offset-hz",
+            FREQUENCY_OFFSET_HZ_TEXT,
+            "--standard-frequency-offset-sweep",
+            "--channel-gain-db",
+            CHANNEL_GAIN_DB_TEXT,
+            "--channel-phase-deg",
+            CHANNEL_PHASE_DEG_TEXT,
+            "--num-input-streams",
+            NUM_INPUT_STREAMS_TEXT,
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.testbench.evaluate_snr"]
+    assert cmd[cmd.index("--num-input-streams") + 1] == NUM_INPUT_STREAMS_TEXT
+    assert cmd[cmd.index("--snr-start-db") + 1] == NORMALIZED_SNR_START_DB_TEXT
+    assert cmd[cmd.index("--snr-stop-db") + 1] == NORMALIZED_SNR_STOP_DB_TEXT
+    assert cmd[cmd.index("--snr-step-db") + 1] == NORMALIZED_SNR_STEP_DB_TEXT
+    assert cmd[cmd.index("--frequency-offset-hz") + 1] == (
+        NORMALIZED_FREQUENCY_OFFSET_HZ_TEXT
+    )
+    assert "--standard-frequency-offset-sweep" in cmd
+    assert cmd[cmd.index("--channel-gain-db") + 1] == CHANNEL_GAIN_DB_TEXT
+    assert cmd[cmd.index("--channel-phase-deg") + 1] == (
+        NORMALIZED_CHANNEL_PHASE_DEG_TEXT
+    )
+
+
+def test_plot_results_wrapper(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "plot-results",
+            "--input-csv",
+            str(tmp_path / "summary.csv"),
+            "--output-png",
+            str(tmp_path / "plot.png"),
+            "--title",
+            "custom",
+            "--smooth-window",
+            "5",
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.testbench.plot_results"]
+    assert cmd[cmd.index("--input-csv") + 1].endswith("summary.csv")
+    assert cmd[cmd.index("--output-png") + 1].endswith("plot.png")
+    assert cmd[cmd.index("--smooth-window") + 1] == "5"
+
+
+def test_summarize_results_wrapper(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "summarize-results",
+            "--input",
+            str(tmp_path / "result.json"),
+            "--output-dir",
+            str(tmp_path / "summary"),
+            "--bins",
+            HISTOGRAM_BINS_TEXT,
+            "--histograms",
+            "never",
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [
+        cli.sys.executable,
+        "-m",
+        "pilot_proxy.testbench.summarize_results",
+    ]
+    assert cmd[cmd.index("--input") + 1].endswith("result.json")
+    assert cmd[cmd.index("--bins") + 1] == HISTOGRAM_BINS_TEXT
+    assert cmd[cmd.index("--histograms") + 1] == "never"
+
+
+def test_quantize_wrapper_forwards_num_input_streams(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "quantize",
+            "--input-iq",
+            str(tmp_path / "clean.cfile"),
+            "--output-dir",
+            str(tmp_path / "detector"),
+            "--num-input-streams",
+            NUM_INPUT_STREAMS_TEXT,
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.testbench.quantize"]
+    assert cmd[cmd.index("--num-input-streams") + 1] == NUM_INPUT_STREAMS_TEXT
+
+
+def test_check_layout_reports_detector_rows(capsys) -> None:
+    result = cli.main(
+        [
+            "check-layout",
+            "--frame-size-samples",
+            FRAME_SIZE_TEXT,
+            "--num-input-streams",
+            NUM_INPUT_STREAMS_TEXT,
+        ]
+    )
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "detector_rows_per_frame" in out
+    assert CHECK_LAYOUT_ROWS_TEXT in out
+
+
+def test_check_profile_loads_nested_receiver_profile(capsys) -> None:
+    result = cli.main(
+        [
+            "check-profile",
+            "--receiver-profile",
+            REFERENCE_PROFILE,
+        ]
+    )
+
+    assert result == 0
+    out = capsys.readouterr().out
+    assert "receiver_profile_id" in out
+    assert "reference_800mhz_pfb_v1" in out
+
+
+def test_make_weights_from_reference_profile(tmp_path, capsys) -> None:
+    output = tmp_path / "weights.bin"
+
+    result = cli.main(
+        [
+            "make-weights",
+            "--receiver-profile",
+            REFERENCE_PROFILE,
+            "--physical-channel-range",
+            CHANNEL_14,
+            "--weight-coordinate-system",
+            WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert result == 0
+    assert output.exists()
+    assert output.with_suffix(output.suffix + ".manifest.json").exists()
+    out = capsys.readouterr().out
+    assert "physical_channels" in out
+    assert CHANNEL_14 in out
+
+
+def test_make_weights_requires_weight_coordinate_system(tmp_path) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(
+            [
+                "make-weights",
+                "--receiver-profile",
+                REFERENCE_PROFILE,
+                "--physical-channel-range",
+                CHANNEL_14,
+                "--output",
+                str(tmp_path / "weights.bin"),
+            ]
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_export_runtime_weight_bundle_wrapper(monkeypatch, tmp_path, capsys) -> None:
+    calls = []
+
+    def fake_export(**kwargs):
+        calls.append(kwargs)
+        return {
+            "detector_contract": tmp_path / "detector_contract.json",
+            "pilot_profiles": tmp_path / "pilot_profiles.json",
+        }
+
+    monkeypatch.setattr(cli, "export_runtime_weight_bundle", fake_export)
+
+    result = cli.main(
+        [
+            "export-runtime-weight-bundle",
+            "--receiver-profile",
+            REFERENCE_PROFILE,
+            "--physical-channel-range",
+            "14:15",
+            "--weight-coordinate-system",
+            WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+            "--output-dir",
+            str(tmp_path / "bundle"),
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 1
+    assert calls[0]["physical_channels"] == [14, 15]
+    assert calls[0]["weight_coordinate_system"] == (
+        WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
+    )
+    assert calls[0]["output_dir"] == tmp_path / "bundle"
+    out = capsys.readouterr().out
+    assert "detector_contract" in out
+    assert "pilot_profiles" in out
+
+
+def test_validate_runtime_weight_bundle_wrapper(monkeypatch, tmp_path, capsys) -> None:
+    calls = []
+
+    def fake_validate(**kwargs):
+        calls.append(kwargs)
+        return {
+            "valid": True,
+            "num_errors": 0,
+            "bundle_dir": str(kwargs["bundle_dir"]),
+            "errors": [],
+        }
+
+    monkeypatch.setattr(cli, "validate_runtime_weight_bundle", fake_validate)
+
+    result = cli.main(
+        [
+            "validate-runtime-weight-bundle",
+            "--bundle-dir",
+            str(tmp_path / "bundle"),
+            "--output-json",
+            str(tmp_path / "bundle_validation.json"),
+        ]
+    )
+
+    assert result == 0
+    assert len(calls) == 1
+    assert calls[0]["bundle_dir"] == tmp_path / "bundle"
+    assert calls[0]["output_json"] == tmp_path / "bundle_validation.json"
+    out = capsys.readouterr().out
+    assert "valid, num_errors, bundle_dir" in out
+
+
+def test_validate_products_wrapper(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "validate-products",
+            "--run-dir",
+            str(tmp_path / "run"),
+            "--output-json",
+            str(tmp_path / "validation.json"),
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.chime.validate_products"]
+    assert cmd[cmd.index("--run-dir") + 1].endswith("run")
+    assert cmd[cmd.index("--output-json") + 1].endswith("validation.json")
+
+
+def test_chime_run_wrapper_does_not_forward_detector_window(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    # noinspection PyShadowingNames
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "chime-run",
+            "--input-dir",
+            str(tmp_path / "input"),
+            "--output-dir",
+            str(tmp_path / "run"),
+            "--physical-channel",
+            CHANNEL_14,
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.chime.runner"]
+    assert "--detector-window-samples" not in cmd

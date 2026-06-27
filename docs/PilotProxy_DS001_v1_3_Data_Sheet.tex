@@ -1,0 +1,498 @@
+
+\documentclass[10pt,letterpaper]{article}
+
+\usepackage[letterpaper,margin=0.70in,headheight=22pt,headsep=16pt,footskip=24pt]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath,amssymb}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,calc,shapes.geometric,decorations.pathreplacing,fit}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{listings}
+\usepackage{xurl}
+\usepackage[hidelinks]{hyperref}
+\usepackage{lastpage}
+\usepackage{float}
+\usepackage{placeins}
+
+\definecolor{FStatRed}{HTML}{A00000}
+\definecolor{FStatGray}{HTML}{555555}
+\definecolor{FStatBlue}{HTML}{144E8C}
+\definecolor{LightGray}{HTML}{F3F3F3}
+\definecolor{MidGray}{HTML}{D9D9D9}
+\definecolor{DarkText}{HTML}{1A1A1A}
+\definecolor{GoodGreen}{HTML}{2B7A2B}
+\definecolor{WarnOrange}{HTML}{A65E00}
+
+\renewcommand{\familydefault}{\sfdefault}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{5pt}
+\renewcommand{\arraystretch}{1.15}
+\sloppy
+\setlist[itemize]{leftmargin=1.2em,itemsep=2pt,topsep=2pt}
+\setlist[enumerate]{leftmargin=1.4em,itemsep=2pt,topsep=2pt}
+
+\titleformat{\section}{\Large\bfseries\color{DarkText}}{}{0pt}{}[\vspace{-3pt}\color{FStatRed}\titlerule]
+\titleformat{\subsection}{\large\bfseries\color{DarkText}}{}{0pt}{}
+\titleformat{\subsubsection}{\normalsize\bfseries\color{DarkText}}{}{0pt}{}
+
+\newcommand{\code}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\apicode}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\yes}{\textcolor{GoodGreen}{Yes}}
+\newcommand{\no}{\textcolor{FStatGray}{No}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcolumntype{C}[1]{>{\centering\arraybackslash}p{#1}}
+\captionsetup{font=small,labelfont=bf}
+
+\lstdefinestyle{shell}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{MidGray},
+  backgroundcolor=\color{LightGray},
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstdefinestyle{cstyle}{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  frame=single,
+  rulecolor=\color{MidGray},
+  backgroundcolor=\color{LightGray},
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstset{style=shell}
+
+\newcommand{\notebox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{FStatBlue}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Note:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\importantbox}[1]{%
+  \vspace{4pt}\noindent\fcolorbox{FStatRed}{LightGray}{%
+  \begin{minipage}{0.965\linewidth}%
+  \textbf{Important:} #1%
+  \end{minipage}}\vspace{4pt}}
+
+\newcommand{\field}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\dB}{\,\mathrm{dB}}
+
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small PilotProxy-DS001}
+\fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.1.0}
+\fancyhead[R]{\small Product Specification}
+\fancyfoot[L]{\small PilotProxy-DS001 v1.3}
+\fancyfoot[C]{\small West Virginia University}
+\fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
+\renewcommand{\headrulewidth}{0.8pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{FStatRed}\leaders\hrule height \headrulewidth\hfill}}
+\renewcommand{\footrulewidth}{0.8pt}
+\renewcommand{\footrule}{\hbox to\headwidth{\color{FStatRed}\leaders\hrule height \footrulewidth\hfill}}
+
+\title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.1.0\\Product Specification}
+\author{West Virginia University}
+\date{PilotProxy-DS001 v1.3 \\ May 29, 2026}
+
+\begin{document}
+\thispagestyle{fancy}
+{\sffamily
+\begin{minipage}[t]{0.39\textwidth}
+  {\fontsize{24}{26}\selectfont\bfseries\color{FStatRed}PilotProxy}\par
+  {\small PilotProxy-DS001 v1.3, May 29, 2026}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.58\textwidth}
+  \raggedleft
+  {\fontsize{18}{20}\selectfont\bfseries CUDA F-Statistic DTV Pilot Detector v0.1.0}\par
+  {\small Product Specification}
+\end{minipage}
+}
+
+\vspace{0.14in}
+
+\begin{minipage}[t]{0.48\textwidth}
+\section*{Introduction}
+PilotProxy is a standalone CUDA F-statistic detector for ATSC 1.0 DTV pilot tones.  It estimates and detects sub-noise-floor DTV data-shelf signals by measuring pilot excess above a local reference floor.  The package includes a CUDA kernel, public C API, Python wrappers, a precomputed ATSC reference weight bank, and a GNU Radio based validation testbench.
+
+The project is intentionally packaged as a self-contained DTV pilot detector and testbench.  It does not require external receiver data products, instrument-specific metadata, or deployment-specific masking workflows.
+
+ATSC A/53 Part 2 defines the RF/transmission subsystem for ATSC digital television and the VSB transmission characteristics used by 8-VSB.  The package uses the ATSC pilot relationship, expressed here as the positive offset \(\mathrm{pilot\_below\_data\_db}=11.3\dB\), to convert a one-bin pilot-excess measurement to an equivalent DTV data-shelf SNR \cite{atsc_a53_part2_2011}.
+
+\subsection*{Features}
+\begin{itemize}
+  \item Standalone CUDA detector for sub-noise-floor ATSC 1.0 pilot detection.
+  \item Fixed 128-sample detector rows using packed complex 4+4 bit input.
+  \item Three matched-filter terms: target pilot bin, lower reference bin, upper reference bin.
+  \item Exact \code{uint64} target/reference power readback.
+  \item Detection by rational fixed-point threshold comparison; no division in the mask path.
+  \item Public threshold coordinate is DTV shelf SNR in dB.
+  \item Kernel threshold coordinate is equivalent fixed-point F-statistic half-threshold.
+  \item GNU Radio ATSC 1.0 waveform generation, audit, AWGN injection, quantization, and SNR evaluation.
+  \item Physical-channel helpers and shipped weights for U.S. UHF channels 14-36.
+\end{itemize}
+\end{minipage}
+\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\section*{PilotProxy Facts Table}
+\small
+\begin{tabularx}{\linewidth}{|>{\bfseries}L{0.43\linewidth}|Y|}
+\hline
+\multicolumn{2}{|c|}{\bfseries Core Specifics}\\ \hline
+Package version & 0.1.0 \\ \hline
+Kernel version & 1.0.0 \\ \hline
+Primary function & Estimate and detect sub-noise-floor ATSC 1.0 DTV signals using pilot excess \\ \hline
+Input data & Packed complex int4, one complex sample per \code{int8_t} \\ \hline
+Detector window & 128 packed complex samples \\ \hline
+Weight terms & 3: target, lower reference, upper reference \\ \hline
+Reference bins & Two total reference bins \\ \hline
+Raw statistic & \(F=2P_t/(P_{r1}+P_{r2})\) \\ \hline
+Pilot excess & \(\rho=F-1\) \\ \hline
+Production outputs & \code{num=P_t}, \code{den=P_r1+P_r2}, \code{mask} \\ \hline
+Power accumulation & \code{uint64} \\ \hline
+\multicolumn{2}{|c|}{\bfseries User-Facing Controls}\\ \hline
+Target selection & \code{physical_channel} or \code{dtv_pilot_mhz} selects precomputed weights \\ \hline
+Frame size & \code{frame_size_samples}; positive multiple of 128 \\ \hline
+Threshold & \code{threshold_snr_shelf_db}; converted by host software \\ \hline
+\multicolumn{2}{|c|}{\bfseries Reference Testbench}\\ \hline
+Reference ADC rate & 800 MS/s real input \\ \hline
+Reference band & 400-800 MHz \\ \hline
+PFB & 4-tap, 2048-point real-input PFB \\ \hline
+Usable coarse channels & 1024 positive-frequency channels \\ \hline
+Coarse-channel spacing & 390.625 kHz \\ \hline
+Fine detector-bin width & 3051.7578125 Hz \\ \hline
+Default physical channel & 14; 470-476 MHz band, pilot at 470.309441 MHz \\ \hline
+Shipped weight range & Physical channels 14-36 \\ \hline
+\multicolumn{2}{|c|}{\bfseries Implementation}\\ \hline
+CUDA dot-product path & DP4A production path; scalar integer validation path \\ \hline
+Default block threads & 64 \\ \hline
+Default grid cap & 4096 blocks \\ \hline
+Weight placement & Shared-memory preload enabled \\ \hline
+Execution policy & Device-affine, default stream \\ \hline
+\end{tabularx}
+\end{minipage}
+
+\vfill
+{\small\color{FStatGray}This product specification defines the standalone v0.1.0 detector contract.  The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses thresholdless positive-excess masking.  Performance is GPU-, compiler-, and integration-dependent and should be measured on the target system.}
+
+\newpage
+\tableofcontents
+\newpage
+
+\section{General Description}
+
+PilotProxy estimates a weak ATSC 1.0 signal that is below the broadband noise floor.  The DTV data shelf is spread across the nominal 6 MHz channel, while the ATSC pilot is narrow and can be measured with a matched detector.  The detector measures the pilot excess in one fine bin and converts that measurement to an equivalent 6 MHz data-shelf SNR.
+
+The CUDA kernel is intentionally narrower than the physical interpretation.  It receives a row-major packed detector matrix, a 3-term packed weight vector, and a rational half-threshold.  It returns accumulated powers and a mask.  It does not know about ATSC, dB, shelf SNR, or physical channels.
+
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[node distance=0.36cm,>=Latex]
+\tikzstyle{block}=[rectangle,rounded corners,draw=FStatBlue,thick,fill=LightGray,minimum height=0.62cm,text width=0.82\linewidth,align=center]
+\node[block] (a) {GNU Radio ATSC 1.0 waveform generator};
+\node[block,below=of a] (b) {Waveform audit: pilot frequency, pilot/data ratio, occupied bandwidth, shelf flatness};
+\node[block,below=of b] (c) {AWGN injection at requested data-shelf SNR};
+\node[block,below=of c] (d) {Reference PFB/channelizer: 4 taps, 2048-point real input, 1024 positive-frequency channels};
+\node[block,below=of d] (e) {Packed int4 detector matrix: row-major blocks of 128 complex samples};
+\node[block,below=of e] (f) {CUDA F-statistic kernel: exact uint64 target/reference powers and rational threshold mask};
+\node[block,below=of f] (g) {Report: $F$, $R_F$, $\rho$, $\mathrm{PNR}_{\mathrm{bin}}$, estimated shelf SNR, truth error, mask};
+\draw[->,thick] (a) -- (b);
+\draw[->,thick] (b) -- (c);
+\draw[->,thick] (c) -- (d);\draw[->,thick] (d) -- (e);
+\draw[->,thick] (e) -- (f);
+\draw[->,thick] (f) -- (g);
+\end{tikzpicture}
+\caption{Standalone validation flow.  The testbench is self-contained and uses the included reference front end.}
+\label{fig:validation_flow}
+\end{figure}
+
+
+\section{Signal Definitions}
+
+\subsection{Raw F-Statistic}
+
+For one evaluated frame, the kernel accumulates:
+\begin{equation}
+  P_t,\qquad P_{r1},\qquad P_{r2}.
+\end{equation}
+The target term \(P_t\) is centered on the ATSC pilot.  The two reference terms estimate the local non-pilot floor.  The deployed raw F-statistic is:
+\begin{equation}
+  \boxed{F=\frac{2P_t}{P_{r1}+P_{r2}}.}
+\end{equation}
+The production \code{NumDen} API writes:
+\begin{equation}
+  \code{num}=P_t,\qquad \code{den}=P_{r1}+P_{r2}.
+\end{equation}
+Therefore host code must use \(F=2\,\code{num}/\code{den}\), not \(\code{num}/\code{den}\).
+
+\subsection{Pilot Excess and PNR}
+
+The raw F-statistic level is:
+\begin{equation}
+  R_F=10\log_{10}F.
+\end{equation}
+This is not the physical pilot-to-noise ratio, because \(F=1\) means no pilot excess.  The operational pilot-excess ratio is:
+\begin{equation}
+  \boxed{\rho=F-1.}
+\end{equation}
+The one-bin pilot-excess PNR is:
+\begin{equation}
+  \boxed{\mathrm{PNR}_{\mathrm{bin},dB}=10\log_{10}(F-1).}
+\end{equation}
+If \(F\leq 1\), the dB-valued pilot-excess PNR is undefined and JSON reports encode it as \code{null}.
+
+\subsection{DTV Shelf SNR}
+
+The DTV data-shelf SNR is the ATSC data/sync shelf PSD relative to the non-DTV noise PSD.  The pilot is excluded from the data-shelf numerator.  The standard-mode conversion is:
+\begin{equation}
+  \boxed{\mathrm{SNR}_{\mathrm{shelf},dB}=
+  \mathrm{PNR}_{\mathrm{bin},dB}
+  -10\log_{10}\left(\frac{B_{\mathrm{DTV}}}{B_{\mathrm{bin}}}\right)
+  +\mathrm{pilot\_below\_data\_db}
+  -10\log_{10}(\eta_p).}
+\end{equation}
+The default constants are:
+\begin{equation}
+ B_{\mathrm{DTV}}=6\,\mathrm{MHz},\quad
+ B_{\mathrm{bin}}=3051.7578125\,\mathrm{Hz},\quad
+ \mathrm{pilot\_below\_data\_db}=11.3\dB,
+ \quad \eta_p=1.0.
+\end{equation}
+With these constants, the spreading loss is:
+\begin{equation}
+  10\log_{10}\left(\frac{6\times 10^6}{3051.7578125}\right)=32.936\dB.
+\end{equation}
+
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[x=1.0cm,y=1.0cm,>=Latex]
+  \draw[->,thick] (-0.2,0) -- (10.5,0) node[right]{frequency};
+  \draw[->,thick] (0,-0.2) -- (0,4.1) node[above]{power / PSD};
+  \draw[fill=LightGray,draw=none] (1.2,1.05) rectangle (8.8,1.72);
+  \draw[thick,FStatGray] (1.2,1.72) -- (8.8,1.72);
+  \draw[thick,FStatGray] (0.4,0.95) .. controls (0.9,1.25) and (1.0,1.55) .. (1.2,1.72);
+  \draw[thick,FStatGray] (8.8,1.72) .. controls (9.0,1.55) and (9.1,1.25) .. (9.6,0.95);
+  \draw[thick,FStatBlue] (0.4,1.0) -- (9.6,1.0);
+  \draw[thick,FStatRed] (2.0,1.0) -- (2.0,3.35);
+  \draw[fill=FStatRed,draw=FStatRed] (2.0,3.35) circle (0.055);
+  \draw[dashed,thick,WarnOrange] (1.52,1.0) -- (1.52,1.35);
+  \draw[dashed,thick,WarnOrange] (2.48,1.0) -- (2.48,1.35);
+  \draw[<->,thick,FStatRed] (2.20,1.0) -- (2.20,3.35) node[midway,right]{pilot excess};
+  \draw[<->,thick,FStatBlue] (8.95,1.0) -- (8.95,1.72) node[midway,right]{data shelf SNR};
+  \draw[decorate,decoration={brace,mirror,amplitude=5pt},thick] (1.2,-0.25) -- (8.8,-0.25)
+    node[midway,below=6pt]{nominal 6 MHz DTV channel};
+  \node[align=center] at (2.0,3.72) {ATSC pilot\\target bin $P_t$};
+  \node[align=center] at (1.05,1.55) {lower\\reference};
+  \node[align=center] at (3.05,1.55) {upper\\reference};
+  \node[align=left] at (6.1,2.12) {DTV data shelf\\below the non-DTV floor};
+  \node[align=left] at (6.2,0.65) {non-DTV noise floor};
+\end{tikzpicture}
+\caption{Definitions used by the standalone detector.  The kernel measures the target pilot-bin power relative to local reference bins.  Host software converts the one-bin pilot-excess measurement to a 6 MHz-equivalent DTV data-shelf SNR.}
+\label{fig:spectrum_definitions}
+\end{figure}
+
+
+\section{Threshold Interpretation}
+
+The public detection threshold is \code{threshold_snr_shelf_db}.  Host software converts it to the F-statistic coordinate and then to the rational half-threshold used by the kernel.
+
+\begin{align}
+\mathrm{PNR}_{\mathrm{bin,thr},dB} &= S_{\mathrm{shelf,thr},dB} - \mathrm{pilot\_below\_data\_db} + 10\log_{10}(B_{\mathrm{DTV}}/B_{\mathrm{bin}})+10\log_{10}(\eta_p),\\
+\rho_{\mathrm{thr}} &= 10^{\mathrm{PNR}_{\mathrm{bin,thr},dB}/10},\\
+F_{\mathrm{thr}} &= 1+\rho_{\mathrm{thr}},\\
+T_{\mathrm{half}} &= \frac{F_{\mathrm{thr}}}{2}=\frac{N_{\mathrm{half}}}{D_{\mathrm{half}}}.
+\end{align}
+The CUDA kernel evaluates:
+\begin{equation}
+  P_t D_{\mathrm{half}} \geq N_{\mathrm{half}}(P_{r1}+P_{r2}).
+\end{equation}
+
+\notebox{For a threshold of \(-26\dB\) shelf SNR with the included reference geometry, the package reports approximately \(\mathrm{PNR}_{\mathrm{bin}}=-4.364\dB\), \(F_{\mathrm{thr}}=1.36610123\), and \(T_{\mathrm{half}}\approx0.68305\).}
+
+\section{Channel and Frequency Support}
+
+The shipped weight bank covers physical channels 14 through 36.  The default target is physical channel 14.  U.S. channel 14 occupies 470-476 MHz, so the ATSC pilot is placed at 470.309441 MHz.  The U.S. television channel table assigns 6 MHz bands and lists channel 14 as 470-476 MHz \cite{ecfr_73603}.
+
+\begin{longtable}{|C{0.15\linewidth}|C{0.22\linewidth}|C{0.22\linewidth}|C{0.22\linewidth}|}
+\hline
+\textbf{Physical channel} & \textbf{Lower edge} & \textbf{Pilot} & \textbf{Coarse index}\\ \hline
+14 & 470.000 MHz & 470.309441 MHz & 179\\ \hline
+21 & 512.000 MHz & 512.309441 MHz & 287, edge wrapped\\ \hline
+36 & 602.000 MHz & 602.309441 MHz & 517\\ \hline
+\end{longtable}
+
+The nominal reference layout is \(-2,+2\) fine bins.  Physical channel 21 is near a coarse-channel boundary, so the lower reference wraps across the circular coarse-channel spectrum while preserving the requested two-bin spacing.  Detection and validation JSON reports copy the selected manifest row into \field{selected_weight_layout}.
+
+\section{Receiver Integration Contract}
+
+The CUDA detector core is receiver-independent.  Receiver integrations supply metadata and arrays above the kernel boundary:
+\begin{itemize}
+  \item \code{DetectorCoreProfile}: locked kernel contract, including \(K=128\), \(N=3\), int4 packed input, uint64 powers, and rational half-threshold input.
+  \item \code{ReceiverProfile}: RF band, channelizer geometry, spectral sense, frame size, number of input streams, quantization defaults, fine-bin ENBW, and pilot-capture efficiency.
+  \item \code{stream_map}: stream-index metadata for feed, polarization, beam, or other receiver paths.
+  \item Runtime commands such as \code{detect}, \code{evaluate-snr}, and \code{chime-run} bind those metadata files to concrete input arrays and output products.
+\end{itemize}
+
+The kernel still receives only packed rows, packed weights, uint64 powers, and a rational half-threshold.  For one selected DTV channel:
+\begin{equation}
+N_{\mathrm{rows}} = N_{\mathrm{input\ streams}}\,
+\frac{\mathrm{frame\_size\_samples}}{128}.
+\end{equation}
+The default combine mode is an incoherent power sum over streams.  Powers are summed before the statistic is formed:
+\begin{equation}
+F = \frac{2\sum_r P_{t,r}}{\sum_r P_{r1,r}+\sum_r P_{r2,r}},
+\end{equation}
+where \(r\) indexes detector rows.  The public result-schema name for this rule is \code{all_rows_summed_before_ratio}.  Per-stream diagnostic packing is available for integration debugging, but the public detection mode combines streams before forming \(F\).
+
+\section{Result Schema and Mask Convention}
+
+Every public JSON output includes a versioned \field{result_schema} object with \code{schema_version=pilot_proxy_result_v2}.  The schema records statistic definitions, layout metadata, calibration constants, threshold conversion fields, the fixed-point contract, and the mask convention.
+
+The fixed-point contract records:
+\begin{itemize}
+  \item \field{detector_window_samples=128};
+  \item \field{reference_offset_bins=2} nominally, with \field{skipped_guard_bins=1} and adaptive placement metadata copied from the weight manifest;
+  \item \field{packed_complex_bits=8};
+  \item \field{sample_bits_per_component=4};
+  \item \field{power_accumulator=uint64}.
+\end{itemize}
+
+The generic masking convention is exclusion masking:
+\begin{equation}
+\bar{P}_{\mathrm{after}} =
+\frac{\sum_b P_b(1-M_b)}{\sum_b (1-M_b)}.
+\end{equation}
+Here \(M_b=1\) means that block/sample is masked and excluded.  Masked samples are not zero-filled before averaging.
+
+\section{Reference PFB and Detector Resolution}
+
+The standalone testbench uses a neutral reference channelizer:
+\begin{itemize}
+  \item real ADC sample rate: 800 MS/s;
+  \item modeled band: 400 MHz bandwidth;
+  \item PFB: 4 taps, 2048-point real input;
+  \item usable positive-frequency channels: 1024;
+  \item coarse-channel spacing: \(800\,\mathrm{MHz}/2048=390.625\,\mathrm{kHz}\);
+  \item fine detector-bin spacing: \(390.625\,\mathrm{kHz}/128=3051.7578125\,\mathrm{Hz}\).
+\end{itemize}
+The fine detector-bin width is the bandwidth term used in the default SNR conversion.
+
+\section{Data Format}
+
+Each sample is one signed \code{int8_t} value containing a packed complex int4 sample:
+\begin{equation}
+  \text{bits }[7:4]=\mathrm{real},\qquad \text{bits }[3:0]=\mathrm{imag}.
+\end{equation}
+Each nibble is decoded as two's-complement signed int4 with range \([-8,7]\).  The generated weight bank uses the symmetric component range \([-7,7]\) to avoid the negative-minimum edge case in generated detector ROMs.
+
+Input matrices are row-major:
+\begin{equation}
+  \mathrm{d\_in}[m,k]=\mathrm{d\_in}[mK+k],\qquad K=128.
+\end{equation}
+For batched input:
+\begin{equation}
+  \mathrm{d\_in}[b,m,k]=\mathrm{d\_in}[(bM+m)K+k].
+\end{equation}
+
+\section{Fixed-Point Sizing}
+
+The locked 128-sample window is selected by the int4 dot-product growth bound.  One complex-product component is a sum of two int4-by-int4 products and is conservatively bounded by 128 per tap.  Accumulating 128 taps gives an absolute real/imaginary dot-product bound of 16384, which requires signed 16-bit storage.  A 256-sample power-of-two window would exceed the signed-int16 target.  The fixed-point design metadata also records that the magnitude-squared bound fits in \code{uint32} and the full block power sum fits in \code{uint64}.
+
+\section{C API Summary}
+
+\begin{longtable}{|L{0.36\linewidth}|L{0.56\linewidth}|}
+\hline
+\textbf{Function} & \textbf{Purpose}\\ \hline
+\apicode{FStat_GetSpecs} & Query detector-window samples, number of weight terms, component bits, and reference-bin offset.\\ \hline
+\apicode{FStat_GetFeatures} & Query DP4A use, uint64 accumulation use, and CUDA block size.\\ \hline
+\apicode{FStat_GetOptimizationFeatures} & Query weight-lane placement and grid cap.\\ \hline
+\apicode{FStat_Create} / \apicode{FStat_Create_Batch} & Create default-stream device-affine handle.\\ \hline
+\apicode{FStat_Compute_NumDen_Mask_RationalHalf} & Production detection path without overflow counter.\\ \hline
+\apicode{FStat_Compute_NumDen_Mask_RationalHalf_WithOverflowCount} & Production detection path with rational multiplication overflow counter.\\ \hline
+\apicode{FStat_Compute_Powers_U64} & Exact uint64 diagnostic/reference readback of all three power terms.\\ \hline
+\apicode{FStat_Compute_DiagnosticFloat} & Diagnostic float32 ratio output; not the primary validation path.\\ \hline
+\apicode{FStat_Destroy} & Destroy handle.\\ \hline
+\end{longtable}
+
+A zero reference denominator is treated as an invalid reference floor.  The mask is forced to zero, and helper routines return zero pilot excess unless the checked helper is used to detect invalidity.
+
+\section{Build and Validation}
+
+The package is intended to run from a cloned source tree:
+\begin{lstlisting}[style=shell]
+PYTHONPATH=src python -m pilot_proxy.cli --help
+python -m pip install -e .
+\end{lstlisting}
+Build the CUDA kernel:
+\begin{lstlisting}[style=shell]
+make build-kernel SM=89
+\end{lstlisting}
+Run Python tests and kernel tests on a CUDA-capable machine:
+\begin{lstlisting}[style=shell]
+PYTHONPATH=src python -m pytest tests -q
+make -C cuda test SM=89 DP4A=1
+\end{lstlisting}
+
+\begin{figure}[H]
+\centering
+\IfFileExists{../generated/dtv_snr_eval/dtv_snr_sweep.png}{%
+\includegraphics[width=0.88\linewidth]{../generated/dtv_snr_eval/dtv_snr_sweep.png}
+\caption{Example standalone shelf-SNR recovery sweep.  The plot uses the default \(-60\dB\) to \(0\dB\), 3 dB validation sweep, 10 independent Python-noise trials per SNR point, one input stream, and no plot smoothing.  It is intended as a source-tree validation artifact: the diagonal line is ideal input-equals-output behavior, the CPU curve is the unquantized floating-point reference, and the GPU curve is the packed-int4 fixed-point CUDA detector.}
+}{%
+\fbox{\parbox{0.86\linewidth}{\centering The optional generated SNR sweep figure was not found. Run the validation sweep and plot workflow to create \code{generated/dtv_snr_eval/dtv_snr_sweep.png}.}}
+\caption{Example standalone shelf-SNR recovery sweep.  The plot uses the default \(-60\dB\) to \(0\dB\), 3 dB validation sweep, 10 independent Python-noise trials per SNR point, one input stream, and no plot smoothing.  It is intended as a source-tree validation artifact: the diagonal line is ideal input-equals-output behavior, the CPU curve is the unquantized floating-point reference, and the GPU curve is the packed-int4 fixed-point CUDA detector.}
+}
+\label{fig:snr_sweep_10trial}
+\end{figure}
+
+The release-candidate source tree supplied for this document passed the Python release checks available in this environment.  CUDA and GNU Radio end-to-end tests must be run on the target machine before tagging a release.
+
+\section{Limitations}
+
+\begin{itemize}
+  \item v0.1.0 is source-tree/editable-install oriented.  Wheel packaging of CUDA and weight resources is not the primary supported mode.
+  \item The CUDA API is default-stream only.
+  \item The shipped weight bank covers physical channels 14-36 only.
+  \item Standalone validation is GNU Radio ATSC synthetic validation only; there is no CHIME/baseband file reader in v0.1.0.
+  \item Receiver profiles are an integration contract, not a validated telescope pipeline.
+  \item No operational threshold is derived from real telescope null statistics in v0.1.0.
+  \item The kernel detects pilot excess.  It does not decode ATSC transport streams.
+  \item Calibration constants are explicit.  Standard mode uses the ATSC 11.3 dB relationship; calibrated mode should record any override values.
+\end{itemize}
+
+\begin{thebibliography}{9}
+\bibitem{atsc_a53_part2_2011} Advanced Television Systems Committee, \emph{ATSC Digital Television Standard, Part 2: RF/Transmission System Characteristics}, A/53 Part 2:2011, 15 December 2011. \url{https://www.atsc.org/wp-content/uploads/2021/04/A53-Part-2-2011.pdf}
+\bibitem{ecfr_73603} Electronic Code of Federal Regulations, 47 CFR \S 73.603, \emph{Numerical designation of television channels}. \url{https://www.ecfr.gov/current/title-47/chapter-I/subchapter-C/part-73/subpart-E/section-73.603}
+\bibitem{gnuradio_noise} GNU Radio Manual, \emph{gr::analog::noise\_source}, complex noise-source amplitude convention. \url{https://www.gnuradio.org/doc/doxygen/classgr_1_1analog_1_1noise__source.html}
+\end{thebibliography}
+
+\section{Revision History}
+\begin{tabularx}{\linewidth}{|L{0.18\linewidth}|L{0.14\linewidth}|Y|}
+\hline
+\textbf{Date} & \textbf{Version} & \textbf{Revision}\\ \hline
+May 29, 2026 & 1.3 & Added receiver-profile integration contract, full stream-map example, and profile-driven weight generation.\\ \hline
+May 29, 2026 & 1.2 & Regenerated for standalone \code{pilot-proxy} v0.1.0.  Added strict PNR/SNR terminology, physical channel support, calibration fields, strict JSON behavior, channel-21 edge-wrap handling, and source-tree release notes.\\ \hline
+May 29, 2026 & 1.1 & Standalone DTV scope; instrument-specific material removed.\\ \hline
+May 29, 2026 & 1.0 & Initial kernel product specification.\\ \hline
+\end{tabularx}
+
+\end{document}

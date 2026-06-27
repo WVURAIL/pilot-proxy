@@ -1,0 +1,8 @@
+cff-version: 1.2.0
+title: "PilotProxy: Pilot-Informed F-Statistic Detector"
+version: "0.2.0.dev0"
+message: "If you use this software, cite it using this metadata."
+type: software
+authors:
+  - family-names: "Gormley"
+    given-names: "Dylan"

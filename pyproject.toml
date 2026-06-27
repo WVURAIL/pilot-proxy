@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-proxy"
+version = "0.2.0.dev0"
+description = "PilotProxy pilot-informed CUDA F-statistic detector with GNU Radio ATSC 1.0 testbench"
+readme = "README.md"
+license = {text = "BSD-3-Clause"}
+authors = [
+  {name = "Dylan Gormley"},
+]
+requires-python = ">=3.10"
+dependencies = [
+  "numpy",
+]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+]
+cuda = [
+  "cupy-cuda12x",
+]
+plot = [
+  "matplotlib",
+]
+chime = [
+  "h5py",
+  "pandas",
+  "matplotlib",
+]
+# datatrawl-driven real-data / CANFAR streaming path (offset + detector analyzers).
+# datatrawl is the shareable streaming engine: https://github.com/WVURAIL/datatrawl
+# Install it editable alongside (pip install -e path/to/datatrawl). Kept OPTIONAL so
+# the base install and every existing workflow are unchanged when it is absent.
+# datatrawl itself is NOT on PyPI -- install it editable from its repo FIRST
+# (pip install -e path/to/datatrawl), then `pip install -e .[datatrawl]` here only
+# needs to add h5py. Listing a bare "datatrawl" requirement would make pip try to
+# resolve it from PyPI and fail before the local checkout could satisfy it.
+datatrawl = [
+  "h5py",
+]
+
+[project.scripts]
+pilot-proxy = "pilot_proxy.cli:main"
+
+[project.entry-points."datatrawl.plugins"]
+# Discovered by datatrawl's `list`/`scan`/`doctor` once both packages are installed;
+# value is the module to import (its decorator registers the plugin).
+pilot-proxy-offset = "pilot_proxy.datatrawl_plugins.offset"
+pilot-proxy-detector = "pilot_proxy.datatrawl_plugins.detector"
+pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pilot_proxy*"]
+
+[tool.setuptools.data-files]
+"share/pilot-proxy/weights" = [
+  "weights/chime_dtv_weights_k128.bin",
+  "weights/chime_dtv_weights_k128.bin.manifest.json",
+]
+"share/pilot-proxy/configs/detector_core" = ["configs/detector_core/*.json"]
+"share/pilot-proxy/configs/receiver_profiles" = ["configs/receiver_profiles/*.json"]
+"share/pilot-proxy/configs/stream_maps" = ["configs/stream_maps/*.json"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+  "cuda: requires CUDA runtime/GPU",
+]

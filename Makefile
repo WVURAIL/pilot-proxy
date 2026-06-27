@@ -1,0 +1,95 @@
+PYTHON ?= python3
+GNURADIO_PYTHON ?= /usr/bin/python3
+GNURADIO_ENV ?= PYTHONNOUSERSITE=1
+CUDA_CACHE_DIR ?= $(HOME)/.cache/pilot_proxy
+CUDA_LIB := cuda/libfstatistic.so
+CACHED_CUDA_LIB := $(CUDA_CACHE_DIR)/libfstatistic.so
+PYTHON_TEST_ENV := MPLBACKEND=Agg PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PILOT_PROXY_USE_TEX=0 PYTHONPATH=src
+
+.PHONY: build-kernel test-kernel test-python test generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean
+
+build-kernel:
+	$(MAKE) -C cuda
+	mkdir -p $(CUDA_CACHE_DIR)
+	cp $(CUDA_LIB) $(CACHED_CUDA_LIB)
+	@echo "Staged $(CACHED_CUDA_LIB)"
+
+test-kernel:
+	$(MAKE) -C cuda test
+
+test-python:
+	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
+
+test: test-kernel test-python
+
+release-check:
+	bash scripts/check_no_legacy_guard_terms.sh
+	$(PYTHON_TEST_ENV) $(PYTHON) -m compileall -q src tests
+	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
+	$(MAKE) -C cuda clean test_c_header test_ref
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli check-profile \
+	    --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli check-layout \
+	    --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli check-layout \
+	    --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
+	    --stream-map configs/stream_maps/chime_feed_pol_example.json
+	tmpdir="$$(mktemp -d)"; \
+	trap 'rm -rf "$$tmpdir"' EXIT; \
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli export-runtime-weight-bundle \
+	    --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
+	    --weight-coordinate-system post_spectral_sense_normalization \
+	    --physical-channel-range 14:36 \
+	    --output-dir "$$tmpdir"; \
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli validate-runtime-weight-bundle \
+	    --bundle-dir "$$tmpdir"
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.cli list-channels
+	$(MAKE) -C cuda clean
+
+commit-check:
+	bash scripts/check_repo_clean_for_commit.sh
+
+release-clean:
+	rm -rf .pytest_cache .ruff_cache .idea generated inspection \
+	    src/pilot_proxy.egg-info docs/auxil docs/out
+	find src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+	$(MAKE) -C cuda clean
+
+freeze-check:
+	$(MAKE) release-check
+	$(MAKE) release-clean
+	$(MAKE) commit-check
+
+generate-atsc:
+	$(GNURADIO_ENV) PYTHONPATH=src $(GNURADIO_PYTHON) -m pilot_proxy.testbench.generate_atsc_signal
+
+audit-atsc:
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.testbench.audit_atsc_signal \
+	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile
+
+quantize:
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.testbench.quantize \
+	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
+	    --physical-channel 14 \
+	    --frame-size-samples 16384
+
+evaluate:
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.testbench.evaluate_snr \
+	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
+	    --physical-channel 14 \
+	    --frame-size-samples 16384 \
+	    --requested-snr-shelf-db -26 \
+	    --noise-trials 10 \
+	    --gnuradio-python $(GNURADIO_PYTHON)
+
+detect:
+	PYTHONPATH=src $(PYTHON) -m pilot_proxy.detect \
+	    --input-detector-matrix generated/detector_input/detector_matrix_i4.npy \
+	    --physical-channel 14
+
+clean-cache:
+	rm -f $(CACHED_CUDA_LIB)
+
+clean:
+	$(MAKE) -C cuda clean
+	rm -rf generated

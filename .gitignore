@@ -1,0 +1,46 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.idea/
+
+build/
+dist/
+*.egg-info/
+
+generated/
+*.cfile
+*.npy
+*.csv
+
+*.so
+*.o
+cuda/test_c_header
+cuda/test_fstat_cuda
+cuda/test_fstat_reference
+
+docs/out
+docs/auxil
+
+*.pdf
+*.png
+
+*.ipynb_checkpoints*
+
+# run outputs, staging, and partial downloads (never commit)
+*.npz
+*.part
+_staging/
+lcd_run_*/
+smoke_out/
+pilot_proxy_runs/
+
+# run outputs, staging, and downloads (never commit)
+*.npz
+*.part
+_staging/
+lcd_run_*/
+smoke_out/
+pilot_proxy_runs/
+
+# survey inventories / enum caches (regenerable; keep on disk, never commit)
+data/

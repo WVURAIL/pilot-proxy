@@ -1,0 +1,82 @@
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      # Mirrors the README "minimal CPU-only smoke test": no CUDA, GNU Radio,
+      # datatrawl, CADC, or HDF5 data required.
+      - run: python -m pip install -U pip setuptools wheel
+      - run: python -m pip install -e ".[test]"
+      - run: pilot-proxy --help
+      - run: python -m pytest tests/test_cli.py -q
+      - run: pilot-proxy check-profile --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
+      - run: pilot-proxy check-layout --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
+
+  cpu-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip setuptools wheel
+      - run: python -m pip install -e ".[chime,plot,test]"
+      - run: make release-check
+
+  datatrawl-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: WVURAIL/datatrawl
+          ref: bf8018a69a49af5263a10e68387bbec3fccec21b
+          path: datatrawl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip setuptools wheel
+      - run: python -m pip install -e "./datatrawl[cadc,survey]"
+      - run: python -m pip install -e ".[chime,plot,test]"
+      - run: python -m pytest tests/datatrawl -q
+        env:
+          MPLBACKEND: Agg
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
+          PILOT_PROXY_USE_TEX: "0"
+
+  wheel-resources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip build
+      - run: python -m build --wheel
+      - run: |
+          python -m venv /tmp/fstat-wheel-test
+          /tmp/fstat-wheel-test/bin/python -m pip install dist/*.whl
+          cd /tmp
+          /tmp/fstat-wheel-test/bin/python - <<'PY'
+          from pilot_proxy.detector_weights import DetectorWeightBank
+          from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH
+
+          assert DEFAULT_WEIGHTS_PATH.is_file(), DEFAULT_WEIGHTS_PATH
+          assert (CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json").is_file()
+          bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+          assert bank.supported_physical_channels() == list(range(14, 37))
+          PY

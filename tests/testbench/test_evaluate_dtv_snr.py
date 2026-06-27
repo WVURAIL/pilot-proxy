@@ -1,0 +1,211 @@
+# coding=utf-8
+from __future__ import annotations
+
+import argparse
+import math
+import sys
+
+import numpy as np
+import pytest
+
+from pilot_proxy.dtv_units import DB_POWER_FACTOR
+# noinspection PyProtectedMember
+from pilot_proxy.testbench.evaluate_snr import (
+    DEFAULT_SNR_SWEEP_MAX_DB,
+    DEFAULT_SNR_SWEEP_MIN_DB,
+    DEFAULT_SNR_SWEEP_STEP_DB,
+    STANDARD_FREQUENCY_OFFSET_SWEEP_HZ,
+    _positive_to_db,
+    _frequency_offset_values,
+    _requested_snr_shelf_values,
+    apply_channel_impairments,
+    add_complex_awgn_for_snr,
+    add_gnuradio_awgn_for_snr,
+    required_iq_samples,
+)
+
+IQ_SAMPLE_RATE_HZ = 10.0
+ADC_SAMPLE_RATE_HZ = 100.0
+OUTPUT_SAMPLES = 5
+PFB_TAPS = 4
+PFB_FFT_SIZE = 20
+REQUIRED_IQ_SAMPLES = 17
+
+RNG_SEED = 1234
+AWGN_TEST_SAMPLES = 200_000
+BANDWIDTH_AWGN_TEST_SAMPLES = 20_000
+GNURADIO_AWGN_TEST_SAMPLES = 50_000
+NEGATIVE_SNR_DB = -6.0
+ZERO_SNR_DB = 0.0
+UNIT_SIGNAL_POWER = 1.0
+BANDWIDTH_NOISE_POWER = 2.0
+FULL_SAMPLE_RATE_HZ = 10.0
+HALF_BANDWIDTH_HZ = 5.0
+HALF_BANDWIDTH_RATIO = 0.5
+ACTUAL_SNR_TOLERANCE_DB = 0.04
+GNURADIO_SNR_TOLERANCE_DB = 0.08
+POSITIVE_TO_DB_INPUT = 100.0
+POSITIVE_TO_DB_OUTPUT = 20.0
+
+SNR_EXPLICIT_DB = -30.0
+SNR_RANGE_START_DB = -20.0
+SNR_RANGE_STOP_DB = -10.0
+SNR_RANGE_STEP_DB = 5.0
+SNR_RANGE_EXPECTED = [-30.0, -20.0, -15.0, -10.0]
+DEFAULT_SNR_SWEEP_EXPECTED_COUNT = 21
+FREQUENCY_OFFSET_HZ = 1_000.0
+CHANNEL_GAIN_DB = 6.0
+CHANNEL_PHASE_DEG = 90.0
+CHANNEL_EFFECT_SAMPLE_RATE_HZ = 4_000.0
+DB_AMPLITUDE_FACTOR = 20.0
+
+
+def test_required_iq_samples_matches_adc_span() -> None:
+    required = required_iq_samples(
+        iq_sample_rate_hz=IQ_SAMPLE_RATE_HZ,
+        adc_sample_rate_hz=ADC_SAMPLE_RATE_HZ,
+        num_output_samples=OUTPUT_SAMPLES,
+        pfb_taps=PFB_TAPS,
+        pfb_fft_size=PFB_FFT_SIZE,
+    )
+
+    # (5 + 4 - 1) * 20 ADC samples, last index 159, at 0.1 IQ samples/ADC.
+    assert required == REQUIRED_IQ_SAMPLES
+
+
+def test_add_complex_awgn_for_snr_hits_requested_power_ratio() -> None:
+    rng = np.random.default_rng(RNG_SEED)
+    signal = np.ones(AWGN_TEST_SAMPLES, dtype=np.complex64)
+    noisy, signal_power, noise_power = add_complex_awgn_for_snr(
+        signal,
+        snr_db=NEGATIVE_SNR_DB,
+        rng=rng,
+    )
+
+    actual_noise = noisy - signal
+    actual_snr = DB_POWER_FACTOR * math.log10(
+        float(np.mean(np.abs(signal) ** 2))
+        / float(np.mean(np.abs(actual_noise) ** 2))
+    )
+
+    assert math.isclose(signal_power, UNIT_SIGNAL_POWER, rel_tol=1e-6)
+    assert math.isclose(
+        DB_POWER_FACTOR * math.log10(signal_power / noise_power),
+        NEGATIVE_SNR_DB,
+    )
+    assert math.isclose(actual_snr, NEGATIVE_SNR_DB, abs_tol=ACTUAL_SNR_TOLERANCE_DB)
+
+
+def test_add_complex_awgn_for_snr_accounts_for_noise_bandwidth() -> None:
+    rng = np.random.default_rng(RNG_SEED)
+    signal = np.ones(BANDWIDTH_AWGN_TEST_SAMPLES, dtype=np.complex64)
+    _, signal_power, noise_power = add_complex_awgn_for_snr(
+        signal,
+        snr_db=ZERO_SNR_DB,
+        rng=rng,
+        sample_rate_hz=FULL_SAMPLE_RATE_HZ,
+        snr_bandwidth_hz=HALF_BANDWIDTH_HZ,
+    )
+
+    assert math.isclose(signal_power, UNIT_SIGNAL_POWER, rel_tol=1e-6)
+    assert math.isclose(noise_power, BANDWIDTH_NOISE_POWER, rel_tol=1e-6)
+    in_band_noise_power = noise_power * HALF_BANDWIDTH_RATIO
+    assert math.isclose(
+        DB_POWER_FACTOR * math.log10(signal_power / in_band_noise_power),
+        ZERO_SNR_DB,
+    )
+
+
+def test_target_snr_values_accepts_explicit_values_and_range() -> None:
+    args = argparse.Namespace(
+        requested_snr_shelf_db=[SNR_EXPLICIT_DB],
+        snr_start_db=SNR_RANGE_START_DB,
+        snr_stop_db=SNR_RANGE_STOP_DB,
+        snr_step_db=SNR_RANGE_STEP_DB,
+    )
+
+    assert _requested_snr_shelf_values(args) == SNR_RANGE_EXPECTED
+
+
+def test_target_snr_values_default_to_public_sweep() -> None:
+    args = argparse.Namespace(
+        requested_snr_shelf_db=None,
+        snr_start_db=None,
+        snr_stop_db=None,
+        snr_step_db=None,
+    )
+
+    values = _requested_snr_shelf_values(args)
+
+    assert values[0] == DEFAULT_SNR_SWEEP_MIN_DB
+    assert values[-1] == DEFAULT_SNR_SWEEP_MAX_DB
+    assert len(values) == DEFAULT_SNR_SWEEP_EXPECTED_COUNT
+    assert values[1] - values[0] == DEFAULT_SNR_SWEEP_STEP_DB
+
+
+def test_frequency_offsets_support_standard_sweep_and_deduplication() -> None:
+    args = argparse.Namespace(
+        frequency_offset_hz=[0.0, FREQUENCY_OFFSET_HZ],
+        standard_frequency_offset_sweep=True,
+    )
+
+    assert _frequency_offset_values(args) == [
+        0.0,
+        FREQUENCY_OFFSET_HZ,
+        STANDARD_FREQUENCY_OFFSET_SWEEP_HZ[0],
+    ]
+
+
+def test_apply_channel_impairments_applies_gain_phase_and_frequency() -> None:
+    signal = np.ones(4, dtype=np.complex64)
+    shifted = apply_channel_impairments(
+        signal,
+        sample_rate_hz=CHANNEL_EFFECT_SAMPLE_RATE_HZ,
+        frequency_offset_hz=FREQUENCY_OFFSET_HZ,
+        gain_db=CHANNEL_GAIN_DB,
+        phase_deg=CHANNEL_PHASE_DEG,
+    )
+
+    assert shifted.shape == signal.shape
+    assert np.abs(shifted[0]) == pytest.approx(
+        10.0 ** (CHANNEL_GAIN_DB / DB_AMPLITUDE_FACTOR)
+    )
+    assert shifted[0].real == pytest.approx(0.0, abs=1e-6)
+    assert shifted[0].imag > 0.0
+    assert shifted[1].real < 0.0
+
+
+def test_positive_to_db_converts_float_audit_value() -> None:
+    assert math.isclose(_positive_to_db(POSITIVE_TO_DB_INPUT), POSITIVE_TO_DB_OUTPUT)
+    assert _positive_to_db(ZERO_SNR_DB) == float("-inf")
+
+
+def test_gnuradio_awgn_helper_hits_requested_band_snr(tmp_path) -> None:
+    pytest.importorskip("gnuradio")
+    signal = np.ones(GNURADIO_AWGN_TEST_SAMPLES, dtype=np.complex64)
+    input_path = tmp_path / "clean.cfile"
+    output_path = tmp_path / "noisy.cfile"
+    signal.tofile(input_path)
+
+    noisy, signal_power, noise_power, metadata = add_gnuradio_awgn_for_snr(
+        signal,
+        input_iq_path=input_path,
+        output_iq_path=output_path,
+        snr_db=ZERO_SNR_DB,
+        seed=RNG_SEED,
+        gnuradio_python=sys.executable,
+        sample_rate_hz=FULL_SAMPLE_RATE_HZ,
+        snr_bandwidth_hz=HALF_BANDWIDTH_HZ,
+    )
+
+    realized_noise = noisy - signal
+    realized_noise_power = float(np.mean(np.abs(realized_noise) ** 2))
+    realized_in_band_noise_power = realized_noise_power * HALF_BANDWIDTH_RATIO
+    realized_snr_db = DB_POWER_FACTOR * math.log10(
+        float(signal_power) / realized_in_band_noise_power
+    )
+
+    assert math.isclose(signal_power, UNIT_SIGNAL_POWER, rel_tol=1e-6)
+    assert math.isclose(noise_power, BANDWIDTH_NOISE_POWER, rel_tol=1e-6)
+    assert metadata["gnuradio_block"] == "analog.noise_source_c"
+    assert math.isclose(realized_snr_db, ZERO_SNR_DB, abs_tol=GNURADIO_SNR_TOLERANCE_DB)

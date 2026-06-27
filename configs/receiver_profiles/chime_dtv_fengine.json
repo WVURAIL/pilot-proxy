@@ -1,0 +1,68 @@
+{
+  "schema_version": "fstat_receiver_profile_v1",
+  "receiver_profile_id": "chime_dtv_fengine_v1",
+  "instrument_name": "CHIME",
+  "profile_status": "example_requires_data_product_verification",
+  "rf_band": {
+    "lower_hz": 400000000.0,
+    "upper_hz": 800000000.0,
+    "center_hz": 600000000.0,
+    "bandwidth_hz": 400000000.0
+  },
+  "digitizer": {
+    "adc_sample_rate_hz": 800000000.0,
+    "adc_bits": 8,
+    "num_adc_inputs": 2048,
+    "input_unit": "feed_polarization"
+  },
+  "channelizer": {
+    "type": "pfb",
+    "architecture": "fx_f_engine",
+    "input_sample_rate_hz": 800000000.0,
+    "pfb_fft_size": 2048,
+    "taps": 4,
+    "response": "implementation_specific",
+    "num_coarse_channels": 1024,
+    "coarse_channel_width_hz": 390625.0,
+    "coarse_channel_center_offset_hz": 390625.0,
+    "output_sample_rate_hz": 390625.0,
+    "spectral_sense": "inverted",
+    "frequency_axis": {
+      "spectral_sense": "inverted",
+      "order": "descending_rf",
+      "channel_index_to_rf_hz": "rf_hz = upper_hz - (coarse_channel_index + 1) * bandwidth_hz / num_adc_inputs",
+      "verification_required": true
+    }
+  },
+  "framing": {
+    "frame_size_samples": 16384,
+    "frame_size_unit": "channelized complex samples per input stream",
+    "frame_size_samples_may_be_overridden_per_run": true
+  },
+  "input_streams": {
+    "num_input_streams": 2048,
+    "stream_unit": "feed_polarization",
+    "stream_map_required": true,
+    "combine_default": "incoherent_power_sum_over_streams"
+  },
+  "quantization": {
+    "native_channelized_sample_format": "implementation_specific",
+    "adapter_output_format": "complex_int4_packed_int8",
+    "bits_per_component": 4,
+    "scale_mode_default": "per_stream",
+    "clip_sigma_default": 3.0,
+    "record_scale_by_stream": true,
+    "record_clip_fraction_by_stream": true
+  },
+  "detector_adapter": {
+    "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
+    "detector_window_samples": 128,
+    "windows_per_stream_formula": "frame_size_samples / detector_window_samples",
+    "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
+    "fine_bin_width_hz": 3051.7578125,
+    "fine_bin_enbw_hz": 3051.7578125,
+    "dtv_bandwidth_hz": 6000000.0,
+    "pilot_below_data_db": 11.3,
+    "pilot_capture_efficiency": 1.0
+  }
+}
