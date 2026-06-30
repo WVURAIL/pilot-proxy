@@ -41,7 +41,7 @@ metadata **without** GNU Radio, datatrawl, CADC credentials, CUDA, or CHIME HDF5
 data --- a good first step before any of the specialized workflows.
 
 ```bash
-git clone https://github.com/djgormley/pilot-proxy.git ~/pilot-proxy
+git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
 cd ~/pilot-proxy
 python -m pip install -U pip setuptools wheel
 python -m pip install -e ".[test]"
@@ -118,7 +118,7 @@ datatrawl plugins are discoverable:
 
 ```bash
 git clone https://github.com/WVURAIL/datatrawl.git ~/datatrawl
-git clone https://github.com/djgormley/pilot-proxy.git ~/pilot-proxy
+git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
 cd ~/pilot-proxy
 
 VENV_DIR=~/pilot-proxy-datatrawl DATATRAWL_DIR=~/datatrawl PILOT_PROXY_DIR=~/pilot-proxy bash scripts/setup_env.sh
