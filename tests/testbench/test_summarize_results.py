@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from pilot_proxy.testbench.summarize_results import (
     FSTAT_COLUMN,
     FSTAT_HISTOGRAM_NAME,
@@ -92,6 +94,11 @@ def test_summarize_result_json_skips_histograms_for_sweep_by_default(tmp_path) -
 
 
 def test_summarize_result_json_can_force_histograms_for_sweep(tmp_path) -> None:
+    # Forcing histograms needs matplotlib (the `plot`/`chime` extra); skip rather
+    # than hard-fail (SystemExit) on a minimal `.[test]` install without it,
+    # matching the gnuradio importorskip in test_evaluate_dtv_snr.py.
+    pytest.importorskip("matplotlib")
+
     input_json = tmp_path / "sweep.json"
     output_dir = tmp_path / "summary"
     input_json.write_text(

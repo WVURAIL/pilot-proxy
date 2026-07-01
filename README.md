@@ -234,6 +234,35 @@ Convert compute capability to `SM` by removing the decimal point. Examples:
 | 8.9 | 89 |
 | 9.0 | 90 |
 
+### CUDA toolchain (`nvcc`)
+
+Building the kernel needs the CUDA compiler, `nvcc`. Confirm it is on `PATH`:
+
+```bash
+nvcc --version || ls /usr/local/cuda*/bin/nvcc
+```
+
+On CANFAR CUDA images `nvcc` is often installed under `/usr/local/cuda/bin` but
+not on `PATH`. If so, either add it (persist it in `~/.bashrc`):
+
+```bash
+export PATH=/usr/local/cuda/bin:$PATH
+```
+
+or point the build at it directly --- `cuda/Makefile` honours `NVCC=`:
+
+```bash
+make build-kernel SM=89 NVCC=/usr/local/cuda/bin/nvcc
+```
+
+If `nvcc` is absent entirely, use a CANFAR image that ships the CUDA *toolkit*
+(e.g. `skaha/astroml-cuda`), or install one matching the runtime CUDA version
+(`conda install -c nvidia cuda-nvcc`, or your distro's `cuda-toolkit` package). A
+runtime-only image with CuPy but no compiler cannot build the kernel, and `make
+test` / `make test-kernel` fail at the `nvcc` step. On a CPU-only host, run `make
+test-python` (the Python suite) or `make release-check` (adds the CPU C/C++
+reference) instead --- neither needs a GPU.
+
 Build and stage the kernel:
 
 ```bash

@@ -2,7 +2,7 @@
   "artifacts": {
     "manifest_path": "weights/chime_dtv_weights_k128.bin.manifest.json",
     "weights_path": "weights/chime_dtv_weights_k128.bin",
-    "weights_git_blob_sha1": "65529cf248e56915f97a4ce403b55e7c754a7dc0"
+    "weights_sha256": "b0dce17a8ef5b24da1fa9d7e41bab019531a06549bd8eb20ce54e9a9c77e173b"
   },
   "forbidden_tone_policy": {
     "forbidden_collision_half_width_bins": 0.5,

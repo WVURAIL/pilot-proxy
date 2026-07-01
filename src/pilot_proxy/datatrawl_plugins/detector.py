@@ -145,6 +145,8 @@ _DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ = 10.0
 class PilotProxyDetectorAnalyzer(Analyzer):
     """Per-pilot CHIME F-statistic detector, parity with fstat's runner."""
 
+    requires_in_order = True
+
     info = PluginInfo(
         name="pilot-proxy-detector",
         kind="analyzer",

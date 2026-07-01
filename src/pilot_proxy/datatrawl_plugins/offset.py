@@ -64,6 +64,7 @@ _SCHEMA_VERSION = "pilotproxy_offset_datatrawl_v2"
 @_register_analyzer
 class PilotProxyOffsetAnalyzer(Analyzer):
     """Per-pilot CHIME frequency-offset diagnostic, parity with fstat."""
+    requires_in_order = True
 
     info = PluginInfo(
         name="pilot-proxy-offset",
