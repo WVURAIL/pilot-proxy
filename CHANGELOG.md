@@ -2,6 +2,14 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `pilot-proxy chime-combine`: standalone access to the scan's combine step,
+  so per-pilot checkpoint snapshots can be stacked into canonical products
+  mid-survey (validate-products / chime-plot / analyze-cleaning-tradeoff on
+  completed channels without waiting for the full scan). Frame-grid
+  mismatches between complete and partial channels are refused with the
+  existing diagnostic. `docs/PUBLICATION_VALIDATION.md` gains the mid-survey
+  execution guide.
+
 - `docs/PAPER_PLAN.md`: editorial plan for the publication (venue, section
   outline, figure/table inventory mapped to producing commands and status).
 

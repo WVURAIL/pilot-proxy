@@ -13,6 +13,33 @@ status:
 | 4 | Radiometer baseline comparison | 3 | free (same command) | shipped (`analyze-injection-recovery`) |
 | 5 | Cleaning tradeoff in science terms | 1 (products) | hours (post-hoc) | shipped (`analyze-cleaning-tradeoff`) |
 
+**Mid-survey execution.** Nothing below requires the production scan to
+finish, and running alongside it is safe by design: staging directories are
+per-invocation (concurrent scans cannot delete each other's files), per-pilot
+checkpoints are atomic renames (any `work/<freq_id>.npz` you read is a
+complete, consistent product), and the bounded runs below are a negligible
+CADC load next to the survey. Concretely, while the survey runs:
+
+- Items 2 (synthetic curves), 1 (control-channel scan), and 3-4 (the
+  injection ladder) run on a second GPU session in that order.
+- Item 1's DTV 18/20 zero-point checks need no new scan at all: snapshot the
+  survey's own checkpoints (`cp work/<freq_id>.npz snapshot/`), combine, and
+  read `mu0`/mask fractions from the snapshot --
+
+  ```bash
+  pilot-proxy chime-combine --product snapshot/<freq_id>.npz \
+    --output-dir snapshot_combined/<freq_id>
+  pilot-proxy validate-products --run-dir snapshot_combined/<freq_id>
+  ```
+
+- Item 5's machinery can be rehearsed the same way on any completed channel's
+  snapshot (`analyze-cleaning-tradeoff --run-dir snapshot_combined/<freq_id>`);
+  final numbers still come from the full combined survey.
+- `chime-combine` across multiple channels requires them to have processed
+  the same event set; combining a complete channel with a partial one is
+  refused with a frame-grid diagnostic. That refusal is correct -- combine
+  completed channels together, or one channel at a time.
+
 Run 1 first — it gates everything downstream on the corrected rule. Item 2 is
 independent and can run on the same GPU session. Items 4 and 5 are pure
 analysis over stored products; no new detector code.

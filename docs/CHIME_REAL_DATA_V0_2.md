@@ -287,6 +287,7 @@ products (procedures: `docs/PUBLICATION_VALIDATION.md`):
 pilot-proxy inject-pilot-tone        # copy real baseband with a known tone
 pilot-proxy analyze-cleaning-tradeoff  # post-hoc mask-threshold sweep
 pilot-proxy analyze-injection-recovery # ladder linearity + radiometer baseline
+pilot-proxy chime-combine              # stack per-pilot checkpoints -> canonical
 ```
 
 `inject-pilot-tone` works in the file's own integer domain (offset-binary

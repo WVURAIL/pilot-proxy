@@ -347,6 +347,33 @@ def _cmd_chime_run(args: argparse.Namespace) -> None:
     _run_module("pilot_proxy.chime.runner", argv)
 
 
+def _cmd_chime_combine(args: argparse.Namespace) -> None:
+    try:
+        from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
+    except ImportError as exc:
+        raise SystemExit(
+            "chime-combine needs the datatrawl integration installed "
+            "(pip install -e path/to/datatrawl alongside pilot-proxy)."
+        ) from exc
+
+    if args.products:
+        paths = [Path(p) for p in args.products]
+    else:
+        paths = sorted(Path(args.work_dir).glob(args.glob))
+    missing = [str(p) for p in paths if not Path(p).exists()]
+    if missing:
+        raise SystemExit(f"chime-combine: missing product file(s): {missing}")
+    if not paths:
+        raise SystemExit(
+            f"chime-combine: no per-pilot products matched {args.glob!r} under "
+            f"{args.work_dir}"
+        )
+    outputs = combine_detector_products(paths, args.output_dir)
+    print(f"Combined {len(paths)} pilot product(s) -> {args.output_dir}")
+    for label, path in outputs.items():
+        print(f"  {label}: {path}")
+
+
 def _cmd_inject_pilot_tone(args: argparse.Namespace) -> None:
     from pilot_proxy.chime.injection import inject_directory
 
@@ -1112,6 +1139,24 @@ def build_parser() -> argparse.ArgumentParser:
     chime_run.add_argument("--calibration-seconds", type=float, default=2.0)
     chime_run.add_argument("--plot", action="store_true")
     chime_run.set_defaults(func=_cmd_chime_run)
+
+    chime_combine = _add_command(
+        "chime-combine",
+        "Stack per-pilot detector products (work-dir <freq_id>.npz files) "
+        "into the canonical combined products. Same combine the scan runs at "
+        "completion; usable mid-survey on completed channels or snapshots.",
+    )
+    combine_source = chime_combine.add_mutually_exclusive_group(required=True)
+    combine_source.add_argument("--work-dir", type=Path, default=None,
+                                help="Directory of per-pilot <freq_id>.npz products.")
+    combine_source.add_argument("--product", type=Path, action="append",
+                                dest="products", default=None,
+                                help="Explicit per-pilot product path (repeatable).")
+    chime_combine.add_argument("--glob", default="*.npz",
+                               help="Product glob under --work-dir.")
+    chime_combine.add_argument("--output-dir", type=Path, required=True,
+                               help="Where the combined canonical products are written.")
+    chime_combine.set_defaults(func=_cmd_chime_combine)
 
     inject = _add_command(
         "inject-pilot-tone",
