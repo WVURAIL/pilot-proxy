@@ -4,6 +4,11 @@
 The public API keeps the raw F-statistic separate from the physical pilot excess.
 The F-statistic level is the base-10 logarithmic power level of F. The one-bin
 pilot-excess PNR applies the same logarithmic scale to F minus one.
+
+The data-shelf SNR is referenced to the full 6 MHz ATSC channel allocation:
+it is the average DTV data-shelf PSD over the allocation relative to the
+non-DTV noise-floor PSD in the same band (``DTV_BANDWIDTH_HZ = 6 MHz``), not
+an SNR in the occupied ~5.38 MHz symbol bandwidth.
 """
 
 from __future__ import annotations

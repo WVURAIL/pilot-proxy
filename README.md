@@ -1,5 +1,11 @@
 # PilotProxy
 
+<p align="center">
+  <a href="https://github.com/WVURAIL/pilot-proxy/actions/workflows/tests.yml"><img src="https://github.com/WVURAIL/pilot-proxy/actions/workflows/tests.yml/badge.svg" alt="tests"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-blue.svg" alt="python 3.10+"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
+</p>
+
 `pilot-proxy` is a standalone CUDA F-statistic detector and GNU Radio ATSC 1.0
 validation testbench for estimating and detecting sub-noise-floor ATSC 1.0 DTV
 signals by using the ATSC pilot tone as a proxy for the data shelf.
@@ -210,6 +216,12 @@ Convert compute capability to `SM` by removing the decimal point. Examples:
 | 8.9 | 89 |
 | 9.0 | 90 |
 
+The Python side of the GPU path uses CuPy. The integrated CHIME/CANFAR workflow
+installs it via `setup_env.sh` (which delegates to `datatrawl setup-cupy`); for the
+standalone workflow, install the build matching your CUDA runtime directly, e.g.
+`pip install "pilot-proxy[cuda]"` (CUDA 12.x) or the appropriate
+`cupy-cudaXXx` wheel for your driver.
+
 `setup_env.sh` detects your GPU's `SM` and builds the kernel for it automatically.
 The manual `make` examples below use `SM=89` (Ada) only as a placeholder ---
 substitute your own value (A100 = `80`).
@@ -364,3 +376,10 @@ make commit-check
 recommended path. The full explanation --- including how to override the reader
 when driving raw `datatrawl scan` directly --- is in
 [INTEGRATION.md](INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata).
+
+## Release history and citation
+
+Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md). A machine-readable
+software citation is provided in [`CITATION.cff`](CITATION.cff).
+
+The package and runtime report the same version with `pilot-proxy --version`.

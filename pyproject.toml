@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,11 +7,24 @@ name = "pilot-proxy"
 version = "0.2.0.dev0"
 description = "PilotProxy pilot-informed CUDA F-statistic detector with GNU Radio ATSC 1.0 testbench"
 readme = "README.md"
-license = {text = "BSD-3-Clause"}
-authors = [
-  {name = "Dylan Gormley"},
-]
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Dylan Gormley" },
+  { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
+]
+keywords = ["radio-astronomy", "RFI", "ATSC", "DTV-pilot", "F-statistic", "CUDA", "CHIME"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
 dependencies = [
   "numpy",
 ]

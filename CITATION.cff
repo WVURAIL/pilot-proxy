@@ -1,8 +1,21 @@
 cff-version: 1.2.0
+message: "If you use PilotProxy in research, please cite the software using this metadata."
 title: "PilotProxy: Pilot-Informed F-Statistic Detector"
-version: "0.2.0.dev0"
-message: "If you use this software, cite it using this metadata."
 type: software
+version: "0.2.0.dev0"
 authors:
   - family-names: "Gormley"
     given-names: "Dylan"
+    affiliation: "West Virginia University Radio Astronomy Instrumentation Lab (RAIL)"
+  - name: "WVU Radio Astronomy Instrumentation Lab (RAIL)"
+repository-code: "https://github.com/WVURAIL/pilot-proxy"
+url: "https://github.com/WVURAIL/pilot-proxy"
+license: MIT
+keywords:
+  - radio astronomy
+  - RFI mitigation
+  - ATSC
+  - DTV pilot
+  - F-statistic
+  - CUDA
+  - CHIME

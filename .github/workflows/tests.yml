@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v4
@@ -22,6 +22,7 @@ jobs:
       - run: python -m pip install -U pip setuptools wheel
       - run: python -m pip install -e ".[test]"
       - run: pilot-proxy --help
+      - run: pilot-proxy --version
       - run: python -m pytest tests/test_cli.py -q
       - run: pilot-proxy check-profile --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
       - run: pilot-proxy check-layout --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
@@ -44,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: WVURAIL/datatrawl
-          ref: bf8018a69a49af5263a10e68387bbec3fccec21b
+          ref: dae24392426469c84a3772f566c53becf2c986b2
           path: datatrawl
       - uses: actions/setup-python@v5
         with:
@@ -68,10 +69,10 @@ jobs:
       - run: python -m pip install -U pip build
       - run: python -m build --wheel
       - run: |
-          python -m venv /tmp/fstat-wheel-test
-          /tmp/fstat-wheel-test/bin/python -m pip install dist/*.whl
+          python -m venv /tmp/pilot-proxy-wheel-test
+          /tmp/pilot-proxy-wheel-test/bin/python -m pip install dist/*.whl
           cd /tmp
-          /tmp/fstat-wheel-test/bin/python - <<'PY'
+          /tmp/pilot-proxy-wheel-test/bin/python - <<'PY'
           from pilot_proxy.detector_weights import DetectorWeightBank
           from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH
 

@@ -568,6 +568,13 @@ def build_parser() -> argparse.ArgumentParser:
         description="Standalone CUDA F-statistic DTV pilot detector testbench",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
+    from pilot_proxy import __version__
+
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     def _add_command(name: str, summary: str) -> argparse.ArgumentParser:

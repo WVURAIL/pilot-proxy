@@ -2,7 +2,9 @@
  * @file f_statistic.cu
  * @brief GPU-accelerated F-statistic computation for narrowband signal detection.
  *
- * Implements a matched-filter F-statistic detector optimized for detecting
+ * Implements an F-statistic detector built from per-row matched filters
+ * (coherent within each K-sample row; row powers are combined incoherently
+ * across rows and feeds), optimized for detecting
  * DTV pilot tones in wideband spectral data. Uses fixed-point arithmetic
  * through the dot-product and power-accumulation stages.
  *

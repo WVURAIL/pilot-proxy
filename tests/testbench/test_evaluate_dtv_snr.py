@@ -209,3 +209,103 @@ def test_gnuradio_awgn_helper_hits_requested_band_snr(tmp_path) -> None:
     assert math.isclose(noise_power, BANDWIDTH_NOISE_POWER, rel_tol=1e-6)
     assert metadata["gnuradio_block"] == "analog.noise_source_c"
     assert math.isclose(realized_snr_db, ZERO_SNR_DB, abs_tol=GNURADIO_SNR_TOLERANCE_DB)
+
+
+def test_wilson_interval_closed_form() -> None:
+    from pilot_proxy.testbench.evaluate_snr import wilson_interval
+
+    # n=0 -> undefined
+    lo, hi = wilson_interval(0, 0)
+    assert lo != lo and hi != hi  # NaN
+    # symmetric midpoint case, n=100, k=50: lo/hi ~ 0.404 / 0.596
+    lo, hi = wilson_interval(50, 100)
+    assert lo == pytest.approx(0.40383, abs=2e-4)
+    assert hi == pytest.approx(0.59617, abs=2e-4)
+    # edge rates stay inside [0, 1] and are non-degenerate
+    lo, hi = wilson_interval(0, 10)
+    assert lo == 0.0 and 0.0 < hi < 0.35
+    lo, hi = wilson_interval(10, 10)
+    assert 0.65 < lo < 1.0 and hi == 1.0
+
+
+def test_summary_rows_report_detection_rates_with_wilson_bounds() -> None:
+    from pilot_proxy.testbench.evaluate_snr import (
+        _summarize_rows,
+        wilson_interval,
+    )
+
+    def _trial(pe: int, mask: int) -> dict:
+        return {
+            "requested_snr_shelf_db": -30.0,
+            "frequency_offset_hz": 0.0,
+            "channel_gain_db": 0.0,
+            "channel_phase_deg": 0.0,
+            "measured_truth_snr_shelf_db": -30.0,
+            "measured_truth_composite_atsc_snr_db": -20.0,
+            "estimated_snr_shelf_db": -30.0,
+            "snr_error_db": 0.0,
+            "fstat_raw": 1.0,
+            "fstat_level_db": 0.0,
+            "pnr_bin_db": 0.0,
+            "cpu_float_estimated_snr_shelf_db": -30.0,
+            "cpu_float_snr_error_db": 0.0,
+            "cpu_float_fstat_raw": 1.0,
+            "cpu_gpu_abs_diff": 0.0,
+            "cpu_float_gpu_snr_diff_db": 0.0,
+            "num_input_streams": 4,
+            "positive_excess": pe,
+            "mask": mask,
+        }
+
+    rows = [_trial(1, 1), _trial(1, 0), _trial(0, 0), _trial(1, 1)]
+    summary = _summarize_rows(
+        rows,
+        requested_values=[-30.0],
+        frequency_offset_values=[0.0],
+        composite_to_shelf_db=10.0,
+        num_input_streams=4,
+    )
+    assert len(summary) == 1
+    row = summary[0]
+    assert row["trials"] == 4
+    assert row["positive_excess_detection_rate"] == pytest.approx(0.75)
+    lo, hi = wilson_interval(3, 4)
+    assert row["positive_excess_detection_rate_wilson95_lo"] == pytest.approx(lo)
+    assert row["positive_excess_detection_rate_wilson95_hi"] == pytest.approx(hi)
+    assert row["threshold_detection_rate"] == pytest.approx(0.5)
+    lo, hi = wilson_interval(2, 4)
+    assert row["threshold_detection_rate_wilson95_lo"] == pytest.approx(lo)
+    assert row["threshold_detection_rate_wilson95_hi"] == pytest.approx(hi)
+
+
+def test_summary_rows_omit_detection_rates_for_legacy_trials() -> None:
+    from pilot_proxy.testbench.evaluate_snr import _summarize_rows
+
+    legacy = {
+        "requested_snr_shelf_db": -30.0,
+        "frequency_offset_hz": 0.0,
+        "channel_gain_db": 0.0,
+        "channel_phase_deg": 0.0,
+        "measured_truth_snr_shelf_db": -30.0,
+        "measured_truth_composite_atsc_snr_db": -20.0,
+        "estimated_snr_shelf_db": -30.0,
+        "snr_error_db": 0.0,
+        "fstat_raw": 1.0,
+        "fstat_level_db": 0.0,
+        "pnr_bin_db": 0.0,
+        "cpu_float_estimated_snr_shelf_db": -30.0,
+        "cpu_float_snr_error_db": 0.0,
+        "cpu_float_fstat_raw": 1.0,
+        "cpu_gpu_abs_diff": 0.0,
+        "cpu_float_gpu_snr_diff_db": 0.0,
+        "num_input_streams": 4,
+    }
+    summary = _summarize_rows(
+        [legacy],
+        requested_values=[-30.0],
+        frequency_offset_values=[0.0],
+        composite_to_shelf_db=10.0,
+        num_input_streams=4,
+    )
+    assert "positive_excess_detection_rate" not in summary[0]
+    assert "threshold_detection_rate" not in summary[0]

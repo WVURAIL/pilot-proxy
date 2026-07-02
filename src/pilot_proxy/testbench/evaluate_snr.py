@@ -30,6 +30,10 @@ from pilot_proxy.detector_geometry import (  # noqa: E402
     stream_time_block_to_detector_matrix,
 )
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz  # noqa: E402
+from pilot_proxy.detector_contract import (
+    norm_corrected_positive_excess,
+    weight_term_norms_sq,
+)
 from pilot_proxy.detector_reference import (  # noqa: E402
     REFERENCE_LOWER_TERM_INDEX,
     REFERENCE_TARGET_TERM_INDEX,
@@ -539,6 +543,7 @@ def _kernel_measurements(
             pilot_capture_efficiency=float(pilot_capture_efficiency),
         )
     )
+    _nt, _nl, _nu = weight_term_norms_sq(np.asarray(weights, dtype=np.int8))
     out = {
         "diagnostic_raw_float32": diagnostic_float,
         "diagnostic_level_db_float32": _positive_to_db(diagnostic_float),
@@ -551,6 +556,12 @@ def _kernel_measurements(
         "pilot_excess_linear": pilot_excess,
         "pnr_bin_db": pnr_bin_db,
         "estimated_snr_shelf_db": snr_shelf_db,
+        "positive_excess": norm_corrected_positive_excess(
+            p_target,
+            p_ref_sum,
+            target_norm_sq=_nt,
+            ref_norm_sum_sq=_nl + _nu,
+        ),
     }
     if threshold is not None:
         out["mask"] = int(mask)
@@ -903,6 +914,54 @@ def _evaluate_one_trial(
     return row
 
 
+def wilson_interval(
+    successes: int,
+    trials: int,
+    *,
+    z: float = 1.959963984540054,
+) -> tuple[float, float]:
+    """Wilson score 95% interval for a binomial proportion.
+
+    Detection-rate points on publication curves should carry these bounds;
+    they stay meaningful at rates near 0 or 1 where the normal approximation
+    fails. Returns (lo, hi); (nan, nan) when trials == 0.
+    """
+    n = int(trials)
+    if n <= 0:
+        return (float("nan"), float("nan"))
+    p = float(successes) / n
+    if successes <= 0:
+        p = 0.0
+    elif successes >= n:
+        p = 1.0
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    center = (p + z2 / (2.0 * n)) / denom
+    half = z * ((p * (1.0 - p) / n + z2 / (4.0 * n * n)) ** 0.5) / denom
+    lo = 0.0 if successes <= 0 else max(0.0, center - half)
+    hi = 1.0 if successes >= n else min(1.0, center + half)
+    return (lo, hi)
+
+
+def _detection_rate_fields(group: list[dict]) -> dict:
+    """Detection-rate summary fields with Wilson 95% bounds for one group."""
+    fields: dict = {}
+    n = len(group)
+    if n and all("positive_excess" in row for row in group):
+        detected = sum(int(row["positive_excess"]) for row in group)
+        lo, hi = wilson_interval(detected, n)
+        fields["positive_excess_detection_rate"] = detected / n
+        fields["positive_excess_detection_rate_wilson95_lo"] = lo
+        fields["positive_excess_detection_rate_wilson95_hi"] = hi
+    if n and all("mask" in row for row in group):
+        detected = sum(int(row["mask"]) for row in group)
+        lo, hi = wilson_interval(detected, n)
+        fields["threshold_detection_rate"] = detected / n
+        fields["threshold_detection_rate_wilson95_lo"] = lo
+        fields["threshold_detection_rate_wilson95_hi"] = hi
+    return fields
+
+
 def _summarize_rows(
     rows: list[dict[str, Any]],
     *,
@@ -1002,6 +1061,7 @@ def _summarize_rows(
                         cpu_gpu_snr_diff
                     ),
                     "trials": int(len(group)),
+                    **_detection_rate_fields(group),
                     "num_feeds": int(num_input_streams),
                     "num_input_streams": int(num_input_streams),
                     "cpu_gpu_abs_diff_max": _nanmax_or_nan(diffs),
@@ -1065,7 +1125,17 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_CHANNEL_PHASE_DEG,
         help="Static phase rotation applied before noise injection.",
     )
-    parser.add_argument("--noise-trials", type=int, default=DEFAULT_NOISE_TRIALS)
+    parser.add_argument(
+        "--noise-trials",
+        type=int,
+        default=DEFAULT_NOISE_TRIALS,
+        help=(
+            "Independent noise realizations per (offset, SNR) point. The "
+            "default is sized for quick sweeps; publication-grade "
+            "detection-rate curves need >= 100-1000 trials per point (the "
+            "summary reports Wilson 95%% intervals sized by this count)."
+        ),
+    )
     parser.add_argument(
         "--noise-source",
         choices=["gnuradio", "python"],

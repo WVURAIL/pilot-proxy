@@ -90,6 +90,29 @@ is the existing rational half-threshold with
 
 Masked frames are excluded from before/after averages; they are not zero-filled.
 
+## Dynamic Range and Frequency Capture
+
+Reported dB quantities saturate before the mask does. Two ceilings bound the
+raw F-statistic:
+
+- **int4 weight crosstalk.** Pilot power leaking into the reference terms
+  through the quantized weights bounds F at roughly `+39` to `+62` dB across
+  the shipped ATSC 14-36 bank (crosstalk `-37` to `-68` dB relative to the
+  target term, channel-dependent).
+- **Off-nominal pilot frequency.** A transmitter offset `df` from the nominal
+  pilot leaks into the exactly placed +/-2-bin references; at `|df| ~ 300 Hz`
+  this limits F to roughly `+29` dB regardless of pilot strength.
+
+Neither ceiling affects detection or masking - a saturated F is far above
+`mu0` - but reported `pnr_bin_db`/`snr_shelf_db` for very strong, offset
+transmitters read as lower bounds, not measurements.
+
+Capture loss from a frequency offset follows the K-sample rectangular-window
+response, `sinc^2(df / 3051.76 Hz)` per detector fine bin: at most `0.14` dB
+at `|df| <= 300 Hz` and `0.39` dB at `|df| <= 500 Hz`, negligible against the
+calibration uncertainties for every offset observed in the 23-channel survey.
+
+
 ## Reference-Placement Resolver
 
 Reference placement is adaptive and auditable:

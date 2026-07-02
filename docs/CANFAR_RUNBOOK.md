@@ -230,6 +230,25 @@ figures/*.png
 
 ---
 
+## H0 zero-point check
+
+Before (or alongside) the full run, verify the mask's zero-point on real data:
+
+1. Pick one **control frequency** with no ATSC pilot in band (any freq_id whose
+   coarse channel contains no transmitter from the census) and one quiet pilot
+   channel, and run the bounded smoke test on each.
+2. In `stats.json`, read `mu0_by_pilot`; in the products, compare the mean of
+   `fstat_raw` over valid frames against `mu0` (not against 1) and check the
+   mask fraction on the control channel sits near `0.5` rather than pinning
+   toward 0 or 1.
+3. A mask fraction far from `0.5` on a pilot-free channel indicates a
+   zero-point problem (wrong weights, wrong `mask_rule`, or structured
+   interference) and should be resolved before spending GPU-days on the full
+   archive.
+
+`tests/core/test_mask_zero_point.py` runs the same check against synthetic
+white noise at every CI run; this section is its on-sky counterpart.
+
 ## Full pilot detector run
 
 After the bounded detector smoke test passes:
