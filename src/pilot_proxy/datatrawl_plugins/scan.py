@@ -21,10 +21,8 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 _DETECTOR_ANALYZER = "pilot-proxy-detector"
-_OFFSET_ANALYZER = "pilot-proxy-offset"
 _READER_FOR_ANALYZER = {
     _DETECTOR_ANALYZER: "chime-baseband-packed",  # native int4 -> lossless kernel pack
-    _OFFSET_ANALYZER: "chime-baseband",            # complex64 for the noncoherent FFT
 }
 
 
@@ -81,21 +79,21 @@ def run_chime_scan(
 
     The detector analyzer's CUDA kernel is GPU-only, so ``--analyzer pilot-proxy-detector``
     requires a GPU node -- a missing ``cupy`` is caught up front (rather than
-    surfacing as every file failing to analyze). The offset analyzer is pure NumPy
-    and runs anywhere. There is no CPU detector path for production (the CPU
-    reference exists only as a test fixture), so there is no GPU/CPU toggle here.
+    surfacing as every file failing to analyze). There is no CPU detector path for
+    production (the CPU reference exists only as a test fixture), so there is no
+    GPU/CPU toggle here.
     """
     from datatrawl import pipeline, registry
     from datatrawl.instruments import load_instrument
     from datatrawl.interfaces import RunContext
 
-    from .combine import combine_detector_products, combine_offset_products
+    from .combine import combine_detector_products
 
     registry.load_plugins()  # bundled datatrawl plugins + fstat's entry-point plugins
-    if analyzer not in (_DETECTOR_ANALYZER, _OFFSET_ANALYZER):
+    if analyzer != _DETECTOR_ANALYZER:
         raise SystemExit(
             f"chime-scan: unknown analyzer {analyzer!r} "
-            f"(expected {_DETECTOR_ANALYZER!r} or {_OFFSET_ANALYZER!r})"
+            f"(expected {_DETECTOR_ANALYZER!r})"
         )
     reader_name = reader or _READER_FOR_ANALYZER[analyzer]
 
@@ -184,7 +182,7 @@ def run_chime_scan(
             + "\n  - ".join(_problems)
             + "\n  (a detector run needs a GPU node with a built "
             "cuda/libfstatistic.so and the weight bank -- run setup_env.sh on a "
-            "GPU node -- or use --analyzer pilot-proxy-offset for CPU-only diagnostics.)")
+            "GPU node.)")
 
     runs = analyzer_cls().plan_runs(ctx, select)
     if not runs:
@@ -235,8 +233,7 @@ def run_chime_scan(
                 f"{int(getattr(result, 'n_failed', 0))} of {len(units)} unit(s) "
                 f"failed, {int(getattr(result, 'n_quarantined', 0))} quarantined "
                 f"(see {quarantine_path}). For pilot-proxy-detector this is most often a "
-                f"missing GPU/cupy environment; use --analyzer pilot-proxy-offset for "
-                f"CPU-only diagnostics, or run on a GPU node."
+                f"missing GPU/cupy environment; run on a GPU node."
             )
         product_paths.append(out)
 
@@ -246,10 +243,7 @@ def run_chime_scan(
             f"(source={source}, select={select})"
         )
 
-    if analyzer == _DETECTOR_ANALYZER:
-        outputs = combine_detector_products(product_paths, output_dir)
-    else:
-        outputs = combine_offset_products(product_paths, output_dir)
+    outputs = combine_detector_products(product_paths, output_dir)
     if verbose:
         print(f"[chime-scan] combined {len(product_paths)} pilot product(s) -> {output_dir}",
               flush=True)

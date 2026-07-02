@@ -63,8 +63,8 @@ encoding: CHIME native offset-binary complex int4 packed in uint8
 ```
 
 CHIME `freq_id` and `chNNNN` labels are treated as data-product identifiers.
-For example, CHIME `ch0844` maps to FSTAT receiver-profile
-`coarse_channel_index = 843`; the CHIME label is one-based while the FSTAT
+For example, CHIME `ch0844` maps to PilotProxy receiver-profile
+`coarse_channel_index = 843`; the CHIME label is one-based while the PilotProxy
 coarse-channel index is zero-based.
 
 The adapter converts CHIME offset-binary int4 bytes to the detector kernel's
@@ -97,15 +97,13 @@ inverted-coordinate manifests when time reversal is active.
 Use this order for local 10 s CHIME calibration and as the CANFAR template:
 
 ```text
-chime-run --frequency-offset-diagnostic
-  -> choose-detector-k
+chime-run
   -> validate-products
 ```
 
 `K=128`, `reference_offset_bins=2`, `skipped_guard_bins=1`, and the shipped
-detector-coordinate weights remain the baseline. The frequency-offset and
-K-candidate products are calibration diagnostics; they do not change the locked
-detector ABI. The CHIME cleaning rule is positive excess:
+detector-coordinate weights remain the baseline. The CHIME cleaning rule is
+positive excess:
 
 ```text
 valid = p_ref_sum != 0
@@ -143,9 +141,8 @@ PYTHONPATH=src python -m pilot_proxy.cli check-layout \
   --num-selected-channels 1
 ```
 
-Combined positive-excess detector run with frequency-offset diagnostics. This is
-the current local/CANFAR pilot workflow; it reads the real samples once and
-writes detector, mask, offset, and time-averaged FFT-spectrum products into one
+Positive-excess detector run. This is the current local/CANFAR pilot workflow;
+it reads the real samples once and writes detector and mask products into one
 run directory:
 
 ```bash
@@ -153,26 +150,8 @@ PYTHONPATH=src python -m pilot_proxy.cli chime-run \
   --input-dir "$PILOT_PROXY_CHIME_INPUT_DIR" \
   --physical-channel-range 14:36 \
   --frames-per-chunk 2 \
-  --frequency-offset-diagnostic \
-  --frequency-offset-peak-search-half-width-hz 10000 \
-  --frequency-offset-backend auto \
-  --frequency-offset-stream-batch-size 2048 \
   --output-dir generated/chime_real/canfar_pilots_10s_positive_excess_full \
   --plot
-```
-
-Choose detector K candidates from the combined run's frequency-offset product.
-The normal report only includes the production baseline and serious follow-on
-candidate:
-
-```bash
-PYTHONPATH=src python -m pilot_proxy.cli choose-detector-k \
-  --frequency-offset generated/chime_real/canfar_pilots_10s_positive_excess_full/frequency_offset_outputs.npz \
-  --candidate-k 128 256 \
-  --candidate-reference-spacing-policy fixed_skipped_guard fixed_hz_reference_spacing \
-  --min-peak-prominence-db 25 \
-  --max-capture-loss-db 1.0 \
-  --output generated/chime_real/canfar_pilots_10s_positive_excess_full/tables/k_candidate_summary.csv
 ```
 
 Validate the combined products:
@@ -182,10 +161,6 @@ PYTHONPATH=src python -m pilot_proxy.cli validate-products \
   --run-dir generated/chime_real/canfar_pilots_10s_positive_excess_full \
   --output-json generated/chime_real/canfar_pilots_10s_positive_excess_full/product_validation.json
 ```
-
-Offset diagnostics in the local path are produced by
-`chime-run --frequency-offset-diagnostic`, which writes the offset products as
-part of the detector run.
 
 ## Output Products
 
@@ -221,15 +196,9 @@ zero-filled. Positive-excess runs write:
 
 ```text
 tables/fstat_summary_by_pilot.csv
-tables/frequency_offset_summary_by_pilot.csv
-tables/k_candidate_summary.csv
 tables/snr_shelf_histogram_summary.csv
 tables/mask_summary_by_pilot.csv
 tables/spectrum_before_after.csv
-figures/frequency_offset_histogram_by_pilot.png
-figures/frequency_offset_spectrogram.png
-figures/peak_prominence_spectrogram.png
-figures/frequency_offset_time_average_spectrum_by_pilot.png
 figures/snr_shelf_histogram_by_pilot.png
 figures/fstat_survival_by_pilot.png
 figures/fstat_level_spectrogram.png
@@ -292,20 +261,6 @@ upper_reference_requested_relative_to_target_hz
 `reference_placement_summary` from the weight manifest, including adaptive
 channels, DC-shifted references, edge-wrapped references, skipped-guard DC
 channels, and the forbidden-tone policy.
-
-`tables/k_candidate_summary.csv` also includes placement audit columns:
-
-```text
-reference_placement_status
-num_channels_with_adaptive_reference
-channels_with_adaptive_reference
-num_dc_shifted_references
-channels_with_dc_shifted_reference
-num_edge_wrapped_references
-channels_with_edge_wrapped_reference
-num_forbidden_tone_in_skipped_guard
-channels_with_forbidden_tone_in_skipped_guard
-```
 
 For the shipped K=128, reference-offset-2 baseline, DTV 21 wraps its lower
 reference across the coarse-channel edge rather than falling back to adjacent

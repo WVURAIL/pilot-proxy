@@ -50,19 +50,6 @@ from .frame_adapter import (
     estimate_global_complex_scale,
     pack_chime_block_for_detector,
 )
-from .frequency_offset import (
-    COORDINATE_SYSTEM as FREQUENCY_OFFSET_COORDINATE_SYSTEM,
-    DEFAULT_BACKEND as DEFAULT_FREQUENCY_OFFSET_BACKEND,
-    DEFAULT_PEAK_SEARCH_HALF_WIDTH_HZ,
-    DEFAULT_STREAM_BATCH_SIZE as DEFAULT_FREQUENCY_OFFSET_STREAM_BATCH_SIZE,
-    DEFAULT_WINDOW_NAME as DEFAULT_FREQUENCY_OFFSET_WINDOW_NAME,
-    _coarse_center_hz,
-    _window as frequency_offset_window,
-    _write_outputs as write_frequency_offset_outputs,
-    _write_summary_table as write_frequency_offset_summary,
-    estimate_peak_offset_from_power,
-    frame_noncoherent_fft_power,
-)
 from .hdf5_input import (
     CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
     PACKED_TWOS_COMPLEMENT_COMPLEX_INT4,
@@ -72,7 +59,6 @@ from .hdf5_input import (
 )
 from .products import (
     ensure_run_dirs,
-    relative_time_seconds,
     write_detector_outputs,
     write_input_manifest,
     write_mask_summary,
@@ -642,6 +628,19 @@ def _append_detection_rows(
         valid[frame, pilot_index] = 1 if den > 0 else 0
 
 
+def _coarse_center_hz(dataset, receiver_profile) -> float:
+    """Coarse-channel center frequency for a dataset (kept after offset-module removal)."""
+    if dataset.coarse_channel_center_hz is not None:
+        return float(dataset.coarse_channel_center_hz)
+    selection = receiver_frequency_to_channel(
+        float(dataset.pilot_frequency_hz),
+        receiver_profile,
+    )
+    return float(
+        receiver_profile.coarse_channel_center_hz(selection.coarse_channel_index)
+    )
+
+
 def run_chime_analysis(
     *,
     input_dir: Path,
@@ -663,16 +662,6 @@ def run_chime_analysis(
     dtv_bandwidth_hz: float = DTV_BANDWIDTH_HZ,
     pilot_capture_efficiency: float = PILOT_CAPTURE_EFFICIENCY,
     calibration_seconds: float = DEFAULT_CALIBRATION_SECONDS,
-    frequency_offset_diagnostic: bool = False,
-    frequency_offset_peak_search_half_width_hz: float = (
-        DEFAULT_PEAK_SEARCH_HALF_WIDTH_HZ
-    ),
-    frequency_offset_window_name: str = DEFAULT_FREQUENCY_OFFSET_WINDOW_NAME,
-    frequency_offset_stream_batch_size: int = (
-        DEFAULT_FREQUENCY_OFFSET_STREAM_BATCH_SIZE
-    ),
-    frequency_offset_backend: str = DEFAULT_FREQUENCY_OFFSET_BACKEND,
-    frequency_offset_min_peak_prominence_db: float | None = None,
     plot: bool = False,
     kernel: Any | None = None,
     detector_fn: DetectorFn = detect_packed_for_positive_excess,
@@ -756,7 +745,6 @@ def run_chime_analysis(
         ],
         dtype=np.float64,
     )
-    expected_pilot_offset_hz = pilot_frequency_hz - coarse_channel_center_hz
     layout_check = layout_uint64_bound_check(
         frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
@@ -783,60 +771,6 @@ def run_chime_analysis(
     mask = np.zeros(shape, dtype=np.uint8)
     valid = np.zeros(shape, dtype=np.uint8)
     baseband_power_linear = np.full(shape, np.nan, dtype=np.float64)
-    sample_rate_hz = float(receiver_profile.coarse_channel_width_hz)
-    offset_fft_size = int(frame_size_samples)
-    offset_fft_bin_width_hz = sample_rate_hz / float(offset_fft_size)
-    offset_window = (
-        frequency_offset_window(frequency_offset_window_name, offset_fft_size)
-        if frequency_offset_diagnostic
-        else None
-    )
-    offset_fft_frequency_axis_hz = (
-        np.fft.fftshift(
-            np.fft.fftfreq(offset_fft_size, d=1.0 / sample_rate_hz)
-        )
-        if frequency_offset_diagnostic
-        else None
-    )
-    peak_offset_hz = (
-        np.full(shape, np.nan, dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    frequency_offset_hz = (
-        np.full(shape, np.nan, dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    peak_power_linear = (
-        np.full(shape, np.nan, dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    local_floor_power_linear = (
-        np.full(shape, np.nan, dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    peak_prominence_db = (
-        np.full(shape, np.nan, dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    frequency_offset_valid = (
-        np.zeros(shape, dtype=np.uint8) if frequency_offset_diagnostic else None
-    )
-    time_average_spectrum_sum = (
-        np.zeros((int(len(selected)), offset_fft_size), dtype=np.float64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    time_average_spectrum_count = (
-        np.zeros(int(len(selected)), dtype=np.uint64)
-        if frequency_offset_diagnostic
-        else None
-    )
-    frequency_offset_backend_used = str(frequency_offset_backend)
 
     quantization_by_pilot: list[dict[str, Any]] = []
     selected_channel_by_pilot: list[int] = []
@@ -873,75 +807,6 @@ def run_chime_analysis(
                 start_sample=chunk.start_sample,
                 stop_sample=chunk.stop_sample,
             )
-            if frequency_offset_diagnostic:
-                if offset_window is None or offset_fft_frequency_axis_hz is None:
-                    raise RuntimeError("frequency-offset diagnostic was not initialized")
-                if (
-                    peak_offset_hz is None
-                    or frequency_offset_hz is None
-                    or peak_power_linear is None
-                    or local_floor_power_linear is None
-                    or peak_prominence_db is None
-                    or frequency_offset_valid is None
-                    or time_average_spectrum_sum is None
-                    or time_average_spectrum_count is None
-                ):
-                    raise RuntimeError("frequency-offset output arrays were not initialized")
-                for local_frame in range(int(chunk.frames_in_chunk)):
-                    sample_start = local_frame * int(frame_size_samples)
-                    sample_stop = sample_start + int(frame_size_samples)
-                    frame_block = block[:, :, sample_start:sample_stop]
-                    power_sum, frequency_offset_backend_used = (
-                        frame_noncoherent_fft_power(
-                            frame_block,
-                            sample_encoding=dataset.sample_encoding,
-                            spectral_sense=receiver_profile.spectral_sense,
-                            fft_size=offset_fft_size,
-                            stream_batch_size=int(
-                                frequency_offset_stream_batch_size
-                            ),
-                            window=offset_window,
-                            backend=str(frequency_offset_backend),
-                        )
-                    )
-                    time_average_spectrum_sum[pilot_index, :] += power_sum
-                    time_average_spectrum_count[pilot_index] += np.uint64(1)
-                    estimate = estimate_peak_offset_from_power(
-                        power_sum,
-                        sample_rate_hz=sample_rate_hz,
-                        expected_offset_hz=float(
-                            expected_pilot_offset_hz[pilot_index]
-                        ),
-                        fft_size=offset_fft_size,
-                        peak_search_half_width_hz=float(
-                            frequency_offset_peak_search_half_width_hz
-                        ),
-                    )
-                    output_frame = int(chunk.start_frame) + int(local_frame)
-                    peak_offset_hz[output_frame, pilot_index] = float(
-                        estimate["peak_offset_hz"]
-                    )
-                    frequency_offset_hz[output_frame, pilot_index] = float(
-                        estimate["frequency_offset_hz"]
-                    )
-                    peak_power_linear[output_frame, pilot_index] = float(
-                        estimate["peak_power_linear"]
-                    )
-                    local_floor_power_linear[output_frame, pilot_index] = float(
-                        estimate["local_floor_power_linear"]
-                    )
-                    prominence = float(estimate["peak_prominence_db"])
-                    peak_prominence_db[output_frame, pilot_index] = prominence
-                    valid_estimate = np.isfinite(
-                        frequency_offset_hz[output_frame, pilot_index]
-                    )
-                    if frequency_offset_min_peak_prominence_db is not None:
-                        valid_estimate = valid_estimate and prominence >= float(
-                            frequency_offset_min_peak_prominence_db
-                        )
-                    frequency_offset_valid[output_frame, pilot_index] = (
-                        1 if valid_estimate else 0
-                    )
             packed = pack_chime_block_for_detector(
                 block,
                 frame_size_samples=int(frame_size_samples),
@@ -1056,7 +921,6 @@ def run_chime_analysis(
         "max_frames": None if max_frames is None else int(max_frames),
         "absolute_time_used": False,
         "weight_coordinate": weight_coordinate,
-        "frequency_offset_diagnostic": bool(frequency_offset_diagnostic),
         "mask_policy": _positive_excess_mask_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
@@ -1066,21 +930,6 @@ def run_chime_analysis(
         run_config_payload["reference_placement_summary"] = (
             reference_placement_summary
         )
-    if frequency_offset_diagnostic:
-        run_config_payload["frequency_offset_config"] = {
-            "coordinate_system": FREQUENCY_OFFSET_COORDINATE_SYSTEM,
-            "fft_size": int(offset_fft_size),
-            "fft_bin_width_hz": float(offset_fft_bin_width_hz),
-            "sample_rate_hz": float(sample_rate_hz),
-            "stream_batch_size": int(frequency_offset_stream_batch_size),
-            "peak_search_half_width_hz": float(
-                frequency_offset_peak_search_half_width_hz
-            ),
-            "window_name": str(frequency_offset_window_name),
-            "backend_requested": str(frequency_offset_backend),
-            "backend_used": str(frequency_offset_backend_used),
-            "min_peak_prominence_db": frequency_offset_min_peak_prominence_db,
-        }
     run_config_path = write_run_config(run_dir, run_config_payload)
     stats_payload: dict[str, Any] = {
         "schema_version": CHIME_STATS_SCHEMA_VERSION,
@@ -1119,7 +968,6 @@ def run_chime_analysis(
         ],
         "kernel_version": _kernel_version_string(kernel_obj),
         "kernel_specs": kernel_specs_dict,
-        "frequency_offset_diagnostic": bool(frequency_offset_diagnostic),
         "mask_policy": _positive_excess_mask_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
@@ -1127,25 +975,6 @@ def run_chime_analysis(
     }
     if reference_placement_summary is not None:
         stats_payload["reference_placement_summary"] = reference_placement_summary
-    if frequency_offset_diagnostic:
-        stats_payload["frequency_offset_config"] = {
-            "coordinate_system": FREQUENCY_OFFSET_COORDINATE_SYSTEM,
-            "fft_size": int(offset_fft_size),
-            "fft_bin_width_hz": float(offset_fft_bin_width_hz),
-            "sample_rate_hz": float(sample_rate_hz),
-            "stream_batch_size": int(frequency_offset_stream_batch_size),
-            "peak_search_half_width_hz": float(
-                frequency_offset_peak_search_half_width_hz
-            ),
-            "window_name": str(frequency_offset_window_name),
-            "backend_requested": str(frequency_offset_backend),
-            "backend_used": str(frequency_offset_backend_used),
-            "input_spectral_sense": str(receiver_profile.spectral_sense),
-            "input_requires_time_reversal": bool(
-                spectral_sense_requires_time_reversal(receiver_profile.spectral_sense)
-            ),
-            "min_peak_prominence_db": frequency_offset_min_peak_prominence_db,
-        }
     stats_path = write_stats(run_dir, stats_payload)
     detector_outputs_path = write_detector_outputs(
         run_dir,
@@ -1185,74 +1014,6 @@ def run_chime_analysis(
         mask=mask,
         valid=valid,
     )
-    frequency_offset_outputs_path: Path | None = None
-    frequency_offset_summary_path: Path | None = None
-    if frequency_offset_diagnostic:
-        if (
-            peak_offset_hz is None
-            or frequency_offset_hz is None
-            or peak_power_linear is None
-            or local_floor_power_linear is None
-            or peak_prominence_db is None
-            or frequency_offset_valid is None
-            or offset_fft_frequency_axis_hz is None
-            or time_average_spectrum_sum is None
-            or time_average_spectrum_count is None
-        ):
-            raise RuntimeError("frequency-offset output arrays were not initialized")
-        time_average_spectrum_power_linear = np.full_like(
-            time_average_spectrum_sum,
-            np.nan,
-            dtype=np.float64,
-        )
-        nonzero_spectrum_counts = time_average_spectrum_count > 0
-        if np.any(nonzero_spectrum_counts):
-            time_average_spectrum_power_linear[nonzero_spectrum_counts, :] = (
-                time_average_spectrum_sum[nonzero_spectrum_counts, :]
-                / time_average_spectrum_count[nonzero_spectrum_counts, np.newaxis]
-            )
-        relative_time_s = relative_time_seconds(
-            frame_index,
-            frame_size_samples=int(frame_size_samples),
-            sample_rate_hz=sample_rate_hz,
-        )
-        frequency_offset_outputs_path = write_frequency_offset_outputs(
-            run_dir,
-            physical_channel=physical_channel,
-            pilot_frequency_hz=pilot_frequency_hz,
-            chime_frequency_hz=coarse_channel_center_hz,
-            coarse_channel_center_hz=coarse_channel_center_hz,
-            expected_pilot_offset_hz=expected_pilot_offset_hz,
-            frame_index=frame_index,
-            relative_time_s=relative_time_s,
-            peak_offset_hz=peak_offset_hz,
-            frequency_offset_hz=frequency_offset_hz,
-            peak_power_linear=peak_power_linear,
-            local_floor_power_linear=local_floor_power_linear,
-            peak_prominence_db=peak_prominence_db,
-            valid=frequency_offset_valid,
-            fft_size=int(offset_fft_size),
-            fft_bin_width_hz=float(offset_fft_bin_width_hz),
-            sample_rate_hz=float(sample_rate_hz),
-            window_name=str(frequency_offset_window_name),
-            peak_search_half_width_hz=float(
-                frequency_offset_peak_search_half_width_hz
-            ),
-            fft_frequency_axis_hz=offset_fft_frequency_axis_hz,
-            time_average_spectrum_power_linear=time_average_spectrum_power_linear,
-            time_average_spectrum_count=time_average_spectrum_count,
-        )
-        frequency_offset_summary_path = write_frequency_offset_summary(
-            run_dir,
-            physical_channel=physical_channel,
-            pilot_frequency_hz=pilot_frequency_hz,
-            chime_frequency_hz=coarse_channel_center_hz,
-            coarse_channel_center_hz=coarse_channel_center_hz,
-            expected_pilot_offset_hz=expected_pilot_offset_hz,
-            frequency_offset_hz=frequency_offset_hz,
-            peak_prominence_db=peak_prominence_db,
-            valid=frequency_offset_valid,
-        )
     mask_summary_path = write_mask_summary(
         run_dir,
         physical_channel=physical_channel,
@@ -1291,10 +1052,6 @@ def run_chime_analysis(
         outputs["mask_summary"] = mask_summary_path
     if spectrum_table_path is not None:
         outputs["spectrum_table"] = spectrum_table_path
-    if frequency_offset_outputs_path is not None:
-        outputs["frequency_offset_outputs"] = frequency_offset_outputs_path
-    if frequency_offset_summary_path is not None:
-        outputs["frequency_offset_summary"] = frequency_offset_summary_path
     return outputs
 
 
@@ -1335,36 +1092,6 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--calibration-seconds", type=float, default=DEFAULT_CALIBRATION_SECONDS
     )
-    parser.add_argument(
-        "--frequency-offset-diagnostic",
-        action="store_true",
-        help="Measure pilot frequency offsets during the same CHIME run.",
-    )
-    parser.add_argument(
-        "--frequency-offset-peak-search-half-width-hz",
-        type=float,
-        default=DEFAULT_PEAK_SEARCH_HALF_WIDTH_HZ,
-    )
-    parser.add_argument(
-        "--frequency-offset-window",
-        dest="frequency_offset_window_name",
-        default=DEFAULT_FREQUENCY_OFFSET_WINDOW_NAME,
-    )
-    parser.add_argument(
-        "--frequency-offset-stream-batch-size",
-        type=int,
-        default=DEFAULT_FREQUENCY_OFFSET_STREAM_BATCH_SIZE,
-    )
-    parser.add_argument(
-        "--frequency-offset-backend",
-        choices=["auto", "numpy", "cupy"],
-        default=DEFAULT_FREQUENCY_OFFSET_BACKEND,
-    )
-    parser.add_argument(
-        "--frequency-offset-min-peak-prominence-db",
-        type=float,
-        default=None,
-    )
     parser.add_argument("--plot", action="store_true")
     return parser
 
@@ -1390,16 +1117,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         dtv_bandwidth_hz=args.dtv_bandwidth_hz,
         pilot_capture_efficiency=args.pilot_capture_efficiency,
         calibration_seconds=args.calibration_seconds,
-        frequency_offset_diagnostic=args.frequency_offset_diagnostic,
-        frequency_offset_peak_search_half_width_hz=(
-            args.frequency_offset_peak_search_half_width_hz
-        ),
-        frequency_offset_window_name=args.frequency_offset_window_name,
-        frequency_offset_stream_batch_size=args.frequency_offset_stream_batch_size,
-        frequency_offset_backend=args.frequency_offset_backend,
-        frequency_offset_min_peak_prominence_db=(
-            args.frequency_offset_min_peak_prominence_db
-        ),
         plot=args.plot,
     )
     for label, path in outputs.items():

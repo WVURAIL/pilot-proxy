@@ -199,7 +199,11 @@ def test_weight_bank_rejects_manifest_binary_binding_mismatch(tmp_path) -> None:
         DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
     )
     manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
-    manifest["artifacts"]["weights_git_blob_sha1"] = "0" * 40
+    # The shipped manifest binds the binary via artifacts.weights_sha256 (v2);
+    # corrupt that field so the loader's manifest/binary check must reject it.
+    # (The legacy weights_git_blob_sha1 path is only reached when weights_sha256
+    # is absent, so tampering it here would be silently skipped.)
+    manifest["artifacts"]["weights_sha256"] = "0" * 64
     copied.with_suffix(copied.suffix + ".manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
     )

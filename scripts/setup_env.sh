@@ -10,7 +10,7 @@
 #   bash scripts/setup_env.sh
 #
 # Override defaults via environment variables:
-#   VENV_DIR=~/envs/fstat PYTHON=python3.12 \
+#   VENV_DIR=~/envs/pilot-proxy PYTHON=python3.12 \
 #     DATATRAWL_DIR=~/src/datatrawl PILOT_PROXY_DIR=~/src/pilot-proxy \
 #     bash scripts/setup_env.sh
 # =============================================================================
@@ -227,12 +227,12 @@ print("    canfar     :", "OK" if importlib.util.find_spec("canfar") else "MISSI
 PY
 
 echo "==> verifying datatrawl plugin discovery"
-datatrawl list | grep -E 'pilot-proxy-detector|pilot-proxy-offset|chime-baseband-packed' \
-    || { echo "ERROR: fstat plugins not discovered" >&2; exit 1; }
+datatrawl list | grep -E 'pilot-proxy-detector|chime-baseband-packed' \
+    || { echo "ERROR: PilotProxy plugins not discovered" >&2; exit 1; }
 echo "    survey CLI : datatrail -> $(command -v datatrail || echo 'NOT FOUND')"
 
 if command -v nvidia-smi >/dev/null 2>&1; then
-    echo "==> verifying fstat CUDA kernel load"
+    echo "==> verifying PilotProxy CUDA kernel load"
     (cd "${PILOT_PROXY_DIR}" && PYTHONPATH=src python - <<'PY'
 from pilot_proxy.kernel import FStatKernel
 kernel = FStatKernel()

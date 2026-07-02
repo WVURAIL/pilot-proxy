@@ -56,7 +56,7 @@ printed URL, then run the environment setup below inside that session's terminal
 
 ## Environment setup
 
-Use the setup script from the fstat checkout:
+Use the setup script from the pilot-proxy checkout:
 
 ```bash
 cd ~/pilot-proxy
@@ -69,14 +69,24 @@ source ~/pilot-proxy-datatrawl/bin/activate
 The script recreates the target venv. Do not point VENV_DIR at a venv you need to
 preserve.
 
+Manual fallback, if you do not want the script to recreate the venv:
+
+```bash
+python3.12 -m venv ~/pilot-proxy-datatrawl
+source ~/pilot-proxy-datatrawl/bin/activate
+python -m pip install -U pip setuptools wheel
+python -m pip install -e "$HOME/datatrawl[cadc,survey]"
+python -m pip install -e "$HOME/pilot-proxy[datatrawl,chime,test]"   # CuPy comes from the image via datatrawl's accel, so no cuda extra
+```
+
 Confirm plugin discovery:
 
 ```bash
-datatrawl list | grep -E 'pilot-proxy-detector|pilot-proxy-offset|chime-baseband-packed'
+datatrawl list | grep -E 'pilot-proxy-detector|chime-baseband-packed'
 ```
 
-On a CPU-only node, only the offset analyzer should be run. The detector analyzer
-requires a GPU node with CUDA/CuPy and a built/staged `libfstatistic.so`.
+The detector analyzer requires a GPU node with CUDA/CuPy and a built/staged
+`libfstatistic.so`.
 
 ---
 
@@ -163,45 +173,11 @@ datatrawl explore \
   --inventory data/chime-pilots/inventory.jsonl
 ```
 
-Run the fstat scan commands below from the same directory where `datatrawl survey`
+Run the `pilot-proxy chime-scan` commands below from the same directory where `datatrawl survey`
 wrote the `data/` tree. If you run from another directory, add
 `--source-root <survey-root>` to each `pilot-proxy chime-scan` command.
 
 Increase `--max-events` only after a bounded scan succeeds.
-
----
-
-## Bounded offset smoke test
-
-The offset analyzer is CPU-only and should be the first end-to-end test:
-
-```bash
-pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/offset_smoke_844" \
-  --source cadc-datatrail \
-  --inventory-name chime-pilots \
-  --analyzer pilot-proxy-offset \
-  --select 844 \
-  --max-files 1 \
-  --max-chunks-per-file 1
-```
-
-Expected products:
-
-```text
-frequency_offset_outputs.npz
-tables/frequency_offset_summary_by_pilot.csv
-_per_pilot/844.npz
-```
-
-Use `choose-detector-k` on offset products:
-
-```bash
-pilot-proxy choose-detector-k   --frequency-offset "$HOME/pilot_proxy_runs/offset_smoke_844/frequency_offset_outputs.npz"   --output "$HOME/pilot_proxy_runs/offset_smoke_844/tables/k_candidate_summary.csv"   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json
-```
-
-Offset-only directories are not full detector run directories. Do not expect them
-to pass detector product validation unless detector products are also present.
 
 ---
 
@@ -303,13 +279,12 @@ If filenames do not end in `_<freq_id>.h5`, pass:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `nvidia-smi: command not found` | CPU-only host or driver utility unavailable | Run only `pilot-proxy-offset`, or move detector run to GPU node |
+| `nvidia-smi: command not found` | CPU-only host or driver utility unavailable | Move detector run to a GPU node |
 | `nvcc: command not found` | CUDA compiler module/toolkit not loaded | Load CUDA module or set `NVCC`/`PATH` |
-| `pilot-proxy-detector needs cupy/CUDA` | Detector run on CPU-only env | Use GPU node or run `pilot-proxy-offset` only |
+| `pilot-proxy-detector needs cupy/CUDA` | Detector run on CPU-only env | Use a GPU node |
 | `no files matched` | `--select` does not match local filename/inventory `freq_id` | Run `datatrawl explore` or inspect filenames |
 | first file's center implies a different `freq_id` | filename/inventory mismatch | Fix filename regex or rebuild inventory |
 | combine rejects time alignment | selected pilots did not process the same events in same order | use matched files/inventory, or drop affected channel |
-| validation requires detector products | offset-only run passed to detector validator | validate detector runs only, or use offset-specific checks |
 | all frames invalid for a pilot | selected coarse channel does not contain pilot or no valid refs | verify `freq_id` selection and HDF5 metadata |
 
 ---
@@ -341,9 +316,8 @@ artifacts into the source tree.
 
 ## Compatibility note: datatrawl inventory metadata
 
-`pilot-proxy chime-scan` selects the correct reader per analyzer automatically
-(`chime-baseband` for `pilot-proxy-offset`, `chime-baseband-packed` for
-`pilot-proxy-detector`). When driving raw `datatrawl scan` directly, the detector run
+`pilot-proxy chime-scan` uses the `chime-baseband-packed` reader for
+`pilot-proxy-detector`. When driving raw `datatrawl scan` directly, the detector run
 must override the inferred reader. See
 [INTEGRATION.md](../INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata)
 for the full explanation and the override commands.

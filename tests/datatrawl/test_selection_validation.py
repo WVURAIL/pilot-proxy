@@ -23,7 +23,6 @@ from datatrawl.instruments import load_instrument
 from datatrawl.interfaces import RunContext
 
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
-from pilot_proxy.datatrawl_plugins.offset import PilotProxyOffsetAnalyzer
 from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
 from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
 
@@ -47,13 +46,9 @@ def _detector_ctx():
     })
 
 
-def _offset_ctx():
-    return RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID14], options={})
-
-
 # -- #1: omitted selection must fail, not silently mix -----------------------
 
-@pytest.mark.parametrize("analyzer_cls", [PilotProxyDetectorAnalyzer, PilotProxyOffsetAnalyzer])
+@pytest.mark.parametrize("analyzer_cls", [PilotProxyDetectorAnalyzer])
 def test_plan_runs_rejects_empty_selection(analyzer_cls):
     red = analyzer_cls()
     ctx = RunContext(instrument=load_instrument("chime"))
@@ -75,13 +70,6 @@ def test_detector_rejects_channel_mismatch():
     red = PilotProxyDetectorAnalyzer()
     red.begin(_detector_ctx(), {"f_center_hz": CH14_HZ, "nfft": 16384})
     # a later file that belongs to a different coarse channel must not be absorbed
-    with pytest.raises(ValueError, match="Refusing to mix coarse channels"):
-        red.consume_file(iter(()), {"f_center_hz": CH20_HZ})
-
-
-def test_offset_rejects_channel_mismatch():
-    red = PilotProxyOffsetAnalyzer()
-    red.begin(_offset_ctx(), {"f_center_hz": CH14_HZ, "nfft": 16384})
     with pytest.raises(ValueError, match="Refusing to mix coarse channels"):
         red.consume_file(iter(()), {"f_center_hz": CH20_HZ})
 
@@ -164,7 +152,7 @@ def test_combine_rejects_duplicate_physical_channel(tmp_path):
 
 
 # #9: a duplicate freq_id in --select must be rejected.
-@pytest.mark.parametrize("analyzer_cls", [PilotProxyDetectorAnalyzer, PilotProxyOffsetAnalyzer])
+@pytest.mark.parametrize("analyzer_cls", [PilotProxyDetectorAnalyzer])
 def test_plan_runs_rejects_duplicate_freq_id(analyzer_cls):
     red = analyzer_cls()
     ctx = RunContext(instrument=load_instrument("chime"))
@@ -192,12 +180,6 @@ def test_detector_rejects_first_file_freq_id_mismatch():
     # ctx requests freq_id 844, but the first file's centre is a different channel
     with pytest.raises(ValueError, match="requested freq_id 844"):
         red.begin(_detector_ctx(), {"f_center_hz": CH20_HZ, "nfft": 16384})
-
-
-def test_offset_rejects_first_file_freq_id_mismatch():
-    red = PilotProxyOffsetAnalyzer()
-    with pytest.raises(ValueError, match="requested freq_id 844"):
-        red.begin(_offset_ctx(), {"f_center_hz": CH20_HZ, "nfft": 16384})
 
 
 # #5: an out-of-band pilot must yield an explicitly invalid detector product and

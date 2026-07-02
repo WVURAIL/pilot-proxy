@@ -334,25 +334,6 @@ def _cmd_chime_run(args: argparse.Namespace) -> None:
         "--calibration-seconds",
         str(args.calibration_seconds),
     ]
-    if args.frequency_offset_diagnostic:
-        argv.append("--frequency-offset-diagnostic")
-    argv.extend(
-        [
-            "--frequency-offset-peak-search-half-width-hz",
-            str(args.frequency_offset_peak_search_half_width_hz),
-            "--frequency-offset-window",
-            str(args.frequency_offset_window_name),
-            "--frequency-offset-stream-batch-size",
-            str(args.frequency_offset_stream_batch_size),
-            "--frequency-offset-backend",
-            str(args.frequency_offset_backend),
-        ]
-    )
-    _add_optional_arg(
-        argv,
-        "--frequency-offset-min-peak-prominence-db",
-        args.frequency_offset_min_peak_prominence_db,
-    )
     if args.stream_map is not None:
         argv.extend(["--stream-map", str(args.stream_map)])
     _add_optional_arg(argv, "--dataset-path", args.dataset_path)
@@ -373,42 +354,12 @@ def _cmd_chime_plot(args: argparse.Namespace) -> None:
     _run_module("pilot_proxy.chime.plots", argv)
 
 
-def _cmd_choose_detector_k(args: argparse.Namespace) -> None:
-    argv = [
-        "--frequency-offset",
-        str(args.frequency_offset),
-        "--output",
-        str(args.output),
-        "--min-peak-prominence-db",
-        str(args.min_peak_prominence_db),
-        "--max-capture-loss-db",
-        str(args.max_capture_loss_db),
-        "--reference-k",
-        str(args.reference_k),
-        "--skipped-guard-bins",
-        str(args.skipped_guard_bins),
-        "--receiver-profile",
-        str(args.receiver_profile),
-    ]
-    if args.candidate_k:
-        argv.append("--candidate-k")
-        argv.extend(str(value) for value in args.candidate_k)
-    if args.candidate_reference_spacing_policy:
-        argv.append("--candidate-reference-spacing-policy")
-        argv.extend(str(value) for value in args.candidate_reference_spacing_policy)
-    if args.no_recenter:
-        argv.append("--no-recenter")
-    _run_module("pilot_proxy.chime.choose_detector_k", argv)
-
-
 def _cmd_validate_products(args: argparse.Namespace) -> None:
     argv = [
         "--run-dir",
         str(args.run_dir),
     ]
     _add_optional_arg(argv, "--output-json", args.output_json)
-    if args.offset_only:
-        argv.append("--offset-only")
     _run_module("pilot_proxy.chime.validate_products", argv)
 
 
@@ -432,11 +383,6 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
         "bin_enbw_hz": args.bin_enbw_hz,
         "dtv_bandwidth_hz": args.dtv_bandwidth_hz,
         "pilot_capture_efficiency": args.pilot_capture_efficiency,
-        "peak_search_half_width_hz": args.frequency_offset_peak_search_half_width_hz,
-        "window_name": args.frequency_offset_window_name,
-        "backend": args.frequency_offset_backend,
-        "stream_batch_size": args.frequency_offset_stream_batch_size,
-        "min_peak_prominence_db": args.frequency_offset_min_peak_prominence_db,
     }.items():
         if value is not None:
             analyzer_options[key] = value
@@ -1028,36 +974,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chime_run.add_argument("--dtv-bandwidth-hz", type=float, default=DTV_BANDWIDTH_HZ)
     chime_run.add_argument("--calibration-seconds", type=float, default=2.0)
-    chime_run.add_argument(
-        "--frequency-offset-diagnostic",
-        action="store_true",
-        help="Measure pilot frequency offsets during the same CHIME run.",
-    )
-    chime_run.add_argument(
-        "--frequency-offset-peak-search-half-width-hz",
-        type=float,
-        default=5_000.0,
-    )
-    chime_run.add_argument(
-        "--frequency-offset-window",
-        dest="frequency_offset_window_name",
-        default="hann",
-    )
-    chime_run.add_argument(
-        "--frequency-offset-stream-batch-size",
-        type=int,
-        default=128,
-    )
-    chime_run.add_argument(
-        "--frequency-offset-backend",
-        choices=["auto", "numpy", "cupy"],
-        default="auto",
-    )
-    chime_run.add_argument(
-        "--frequency-offset-min-peak-prominence-db",
-        type=float,
-        default=None,
-    )
     chime_run.add_argument("--plot", action="store_true")
     chime_run.set_defaults(func=_cmd_chime_run)
 
@@ -1070,41 +986,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chime_plot.set_defaults(func=_cmd_chime_plot)
 
-    choose_k = subparsers.add_parser("choose-detector-k")
-    choose_k.add_argument("--frequency-offset", type=Path, required=True)
-    choose_k.add_argument("--output", type=Path, required=True)
-    choose_k.add_argument(
-        "--candidate-k",
-        type=int,
-        nargs="+",
-        default=[128, 256],
-    )
-    choose_k.add_argument(
-        "--candidate-reference-spacing-policy",
-        choices=["fixed_skipped_guard", "fixed_hz_reference_spacing"],
-        nargs="+",
-        default=["fixed_skipped_guard", "fixed_hz_reference_spacing"],
-    )
-    choose_k.add_argument("--min-peak-prominence-db", type=float, default=25.0)
-    choose_k.add_argument("--max-capture-loss-db", type=float, default=1.0)
-    choose_k.add_argument("--reference-k", type=int, default=128)
-    choose_k.add_argument("--skipped-guard-bins", type=int, default=1)
-    choose_k.add_argument(
-        "--receiver-profile",
-        type=Path,
-        default=DEFAULT_CHIME_DTV_RECEIVER_PROFILE,
-    )
-    choose_k.add_argument("--no-recenter", action="store_true")
-    choose_k.set_defaults(func=_cmd_choose_detector_k)
-
     validate_products = subparsers.add_parser("validate-products")
     validate_products.add_argument("--run-dir", type=Path, required=True)
     validate_products.add_argument("--output-json", type=Path, default=None)
-    validate_products.add_argument(
-        "--offset-only",
-        action="store_true",
-        help="Validate a frequency-offset-only run directory without requiring detector products.",
-    )
     validate_products.set_defaults(func=_cmd_validate_products)
 
     chime_scan = subparsers.add_parser(
@@ -1137,7 +1021,7 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan.add_argument("--source", choices=["local", "cadc-datatrail"],
                             default="local",
                             help="local: files on disk; cadc-datatrail: stream from the archive.")
-    chime_scan.add_argument("--analyzer", choices=["pilot-proxy-detector", "pilot-proxy-offset"],
+    chime_scan.add_argument("--analyzer", choices=["pilot-proxy-detector"],
                             default="pilot-proxy-detector")
     chime_scan.add_argument("--select", required=True,
                             help="CHIME freq_id (coarse-channel indices): '844' "
@@ -1179,17 +1063,6 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan.add_argument("--bin-enbw-hz", type=float, default=None)
     chime_scan.add_argument("--dtv-bandwidth-hz", type=float, default=None)
     chime_scan.add_argument("--pilot-capture-efficiency", type=float, default=None)
-    chime_scan.add_argument(
-        "--frequency-offset-peak-search-half-width-hz", type=float, default=None
-    )
-    chime_scan.add_argument(
-        "--frequency-offset-window", dest="frequency_offset_window_name", default=None
-    )
-    chime_scan.add_argument(
-        "--frequency-offset-backend", choices=["auto", "numpy", "cupy"], default=None
-    )
-    chime_scan.add_argument("--frequency-offset-stream-batch-size", type=int, default=None)
-    chime_scan.add_argument("--frequency-offset-min-peak-prominence-db", type=float, default=None)
     chime_scan.add_argument(
         "--set", dest="set_option", action="append", default=[], metavar="KEY=VALUE",
         help="Analyzer option passed through to chime-scan ctx.options; repeat as needed.",

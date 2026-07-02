@@ -16,7 +16,6 @@ Key fields:
 - `output_dir`
 - `physical_channels`
 - `weight_coordinate`
-- `frequency_offset_diagnostic`
 - `mask_policy`
 - `reference_placement_summary`
 - `provenance`
@@ -132,33 +131,12 @@ Key arrays:
 - `masked_count_valid`, `unmasked_count_valid`: shape `(num_chunks, num_pilots)`
 - `mask_fraction_valid`, `mask_fraction_total`: shape `(num_chunks, num_pilots)`
 
-## Frequency-Offset NPZ
-
-### `frequency_offset_outputs.npz`
-
-Present when `frequency_offset_diagnostic = true`.
-
-| Array                                  |                        Shape | Dtype       | Units     | Meaning                                               |
-| -------------------------------------- | ---------------------------: | ----------- | --------- | ----------------------------------------------------- |
-| `physical_channel`                     |              `(num_pilots,)` | `int32`     | channel   | ATSC physical channel                                 |
-| `frame_index`                          |              `(num_frames,)` | `int64`     | frame     | Detector frame index                                  |
-| `relative_time_s`                      |              `(num_frames,)` | `float64`   | s         | Relative time                                         |
-| `peak_offset_hz`                       |   `(num_frames, num_pilots)` | `float64`   | Hz        | Measured pilot offset in coarse-channel coordinates   |
-| `frequency_offset_hz`                  |   `(num_frames, num_pilots)` | `float64`   | Hz        | Offset relative to expected pilot location            |
-| `peak_prominence_db`                   |   `(num_frames, num_pilots)` | `float64`   | dB        | Local peak prominence                                 |
-| `valid`                                |   `(num_frames, num_pilots)` | `uint8`     | 0/1       | Valid frequency-offset estimate                       |
-| `fft_frequency_axis_hz`                |                `(fft_size,)` | `float64`   | Hz        | FFT frequency axis                                    |
-| `time_average_spectrum_power_linear`   |     `(num_pilots, fft_size)` | `float64`   | power     | Time-averaged noncoherent FFT spectrum                |
-| `time_average_spectrum_count`          |              `(num_pilots,)` | `uint64`    | frames    | Frames accumulated per pilot                          |
-
 ## Tables
 
 Tables are written under `tables/`:
 
 - `fstat_summary_by_pilot.csv`
 - `mask_summary_by_pilot.csv`
-- `frequency_offset_summary_by_pilot.csv`
-- `k_candidate_summary.csv`
 - `snr_shelf_histogram_summary.csv`
 - `spectrum_before_after.csv`
 
@@ -166,10 +144,6 @@ Tables are written under `tables/`:
 
 Figures are written under `figures/`:
 
-- `frequency_offset_histogram_by_pilot.png`
-- `frequency_offset_spectrogram.png`
-- `peak_prominence_spectrogram.png`
-- `frequency_offset_time_average_spectrum_by_pilot.png`
 - `snr_shelf_histogram_by_pilot.png`
 - `fstat_survival_by_pilot.png`
 - `fstat_level_spectrogram.png`

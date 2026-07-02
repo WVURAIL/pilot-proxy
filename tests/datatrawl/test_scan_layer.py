@@ -13,6 +13,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import shutil
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -28,7 +29,50 @@ from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
 REPO_ROOT = Path(__file__).resolve().parents[2]
 NFFT = 16384
 N_FEEDS = 4
-# freq_id -> coarse-channel centre (MHz); pilots in-band for the offset analyzer
+K = 128
+
+
+def _stub_detector_fn(*, packed, weights, kernel):
+    """Trivial CPU detector: valid-schema per-block sums (plumbing only, not parity)."""
+    pk = np.asarray(packed)
+    if pk.ndim == 2:
+        pk = pk[None, ...]
+    n = int(pk.shape[0])
+    return {
+        "batch": n,
+        "detector_rows_per_block": int(pk.shape[1]),
+        "rational_overflow_count": 0,
+        "results": [
+            {"block_index": b, "mask": 0, "p_target_u64": 10, "p_ref_sum_u64": 20}
+            for b in range(n)
+        ],
+    }
+
+
+def _stub_kernel(k):
+    specs = SimpleNamespace(
+        K=k, N=3, bits=4, reference_offset_bins=2,
+        as_descriptive_dict=lambda: {
+            "detector_window_samples": k, "num_weight_terms": 3,
+            "sample_bits_per_component": 4, "reference_offset_bins": 2,
+        },
+    )
+    return SimpleNamespace(specs=specs, version=SimpleNamespace(as_string=lambda: "test"))
+
+
+def _cpu_detector_options():
+    """CPU detector injection so scan plumbing runs GPU-free."""
+    rng = np.random.default_rng(0)
+    weights_by_channel = {
+        ch: rng.integers(-120, 121, size=(3, K)).astype(np.int8)
+        for ch in range(10, 41)
+    }
+    return {
+        "detector_fn": _stub_detector_fn,
+        "kernel": _stub_kernel(K),
+        "weights_by_channel": weights_by_channel,
+    }
+# freq_id -> coarse-channel centre (MHz)
 CHAN_MHZ = {844: 470.3125, 829: 476.171875, 752: 506.171875}
 
 _HAS_CUPY = importlib.util.find_spec("cupy") is not None
@@ -68,13 +112,14 @@ def test_cadc_scan_enumerates_by_freq_id(tmp_path, monkeypatch):
 
     out = tmp_path / "out"
     run_chime_scan(output_dir=out, source="cadc-datatrail", inventory=inv,
-                   analyzer="pilot-proxy-offset", select="829,844", verbose=False)
+                   analyzer="pilot-proxy-detector", select="829,844",
+                   analyzer_options=_cpu_detector_options(), verbose=False)
 
     work = out / "_per_pilot"
     assert (work / "829.npz").exists()
     assert (work / "844.npz").exists()
     assert not (work / "752.npz").exists()   # listed in inventory but not selected
-    assert (out / "frequency_offset_outputs.npz").exists()  # combined product
+    assert (out / "chime_detector_outputs.npz").exists()  # combined product
 
 
 # -- #3: explicit per-source option validation -------------------------------
@@ -82,13 +127,13 @@ def test_cadc_scan_enumerates_by_freq_id(tmp_path, monkeypatch):
 def test_local_requires_input_dir(tmp_path):
     with pytest.raises(SystemExit, match="--input-dir"):
         run_chime_scan(output_dir=tmp_path / "o", source="local",
-                       analyzer="pilot-proxy-offset", select="844", verbose=False)
+                       analyzer="pilot-proxy-detector", select="844", verbose=False)
 
 
 def test_cadc_requires_inventory_or_root(tmp_path):
     with pytest.raises(SystemExit, match="--inventory"):
         run_chime_scan(output_dir=tmp_path / "o", source="cadc-datatrail",
-                       analyzer="pilot-proxy-offset", select="844", verbose=False)
+                       analyzer="pilot-proxy-detector", select="844", verbose=False)
 
 
 # -- #4: GPU preflight for the detector --------------------------------------
@@ -115,7 +160,8 @@ def test_all_units_failed_is_reported(tmp_path, monkeypatch):
     (data / "baseband_e_844.h5").write_bytes(b"not a valid hdf5 file")
     with pytest.raises(SystemExit, match="no usable product"):
         run_chime_scan(input_dir=data, output_dir=tmp_path / "o", source="local",
-                       analyzer="pilot-proxy-offset", select="844", verbose=False)
+                       analyzer="pilot-proxy-detector", select="844",
+                       analyzer_options=_cpu_detector_options(), verbose=False)
 
 
 def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):
@@ -141,11 +187,12 @@ def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):
 
     with pytest.raises(_Stop):                       # explicit value threads through
         run_chime_scan(input_dir=data, output_dir=tmp_path / "o1", source="local",
-                       analyzer="pilot-proxy-offset", select="829", checkpoint_every=7,
-                       verbose=False)
+                       analyzer="pilot-proxy-detector", select="829", checkpoint_every=7,
+                       analyzer_options=_cpu_detector_options(), verbose=False)
     assert seen["ckpt"] == 7
 
     with pytest.raises(_Stop):                       # unset -> engine default
         run_chime_scan(input_dir=data, output_dir=tmp_path / "o2", source="local",
-                       analyzer="pilot-proxy-offset", select="829", verbose=False)
+                       analyzer="pilot-proxy-detector", select="829",
+                       analyzer_options=_cpu_detector_options(), verbose=False)
     assert seen["ckpt"] == 50

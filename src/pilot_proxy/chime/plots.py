@@ -43,10 +43,6 @@ KNOWN_CHIME_FIGURES = frozenset({
     "baseband_spectrogram.png",
     "baseband_spectrum_before_after_mask.png",
     "mask_spectrogram.png",
-    "frequency_offset_histogram_by_pilot.png",
-    "frequency_offset_spectrogram.png",
-    "peak_prominence_spectrogram.png",
-    "frequency_offset_time_average_spectrum_by_pilot.png",
 })
 
 def _setup_matplotlib():
@@ -900,13 +896,8 @@ def clean_known_figures(run_dir: Path) -> None:
 def generate_chime_plots(run_dir: Path) -> list[Path]:
     run = Path(run_dir)
     outputs: list[Path] = []
-    if (run / "frequency_offset_outputs.npz").exists():
-        from .frequency_offset import plot_frequency_offset_products
-
-        outputs.extend(plot_frequency_offset_products(run))
-    # Offset-only chime-scan runs are valid intermediate products, but they do not
-    # contain detector products. Generate the frequency-offset figures above and
-    # stop instead of failing while trying to load chime_detector_outputs.npz.
+    # Without detector products there is nothing to plot; return instead of
+    # failing while trying to load chime_detector_outputs.npz.
     if not (run / CHIME_DETECTOR_OUTPUTS_FILENAME).exists():
         return outputs
     outputs.extend(plot_snr_shelf_histogram(run))

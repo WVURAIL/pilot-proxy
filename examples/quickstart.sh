@@ -10,7 +10,7 @@ set -euo pipefail
 #   CUDA_LD_LIBRARY_PATH  path to the CUDA/driver libs (WSL: /usr/lib/wsl/lib)
 # This assumes a CUDA-capable environment; it is NOT a CPU-only smoke test.
 SM="${SM:-89}"
-CUDA_PYTHON="${CUDA_PYTHON:-$HOME/miniconda3/envs/fstat/bin/python}"
+CUDA_PYTHON="${CUDA_PYTHON:-$HOME/miniconda3/envs/pilot-proxy/bin/python}"
 GNURADIO_PYTHON="${GNURADIO_PYTHON:-/usr/bin/python3}"
 CUDA_LD_LIBRARY_PATH="${CUDA_LD_LIBRARY_PATH:-/usr/lib/wsl/lib}"
 unset LD_LIBRARY_PATH

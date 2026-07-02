@@ -26,7 +26,6 @@ from pilot_proxy.detector_contract import (
 )
 from pilot_proxy.json_utils import write_json_strict
 
-from .frequency_offset import FREQUENCY_OFFSET_OUTPUTS_FILENAME
 from .products import (
     CHIME_DETECTOR_OUTPUTS_FILENAME,
     CHIME_SPECTROGRAM_CACHE_FILENAME,
@@ -465,174 +464,6 @@ def _rows_from_csv(
     return []
 
 
-def _validate_frequency_offset_products(
-    *,
-    run: Path,
-    detector: NpzLike,
-    shape: tuple[int, int],
-    errors: list[dict[str, str]],
-) -> NpzLike | None:
-    products = _load_npz(run / FREQUENCY_OFFSET_OUTPUTS_FILENAME, errors)
-    if products is None:
-        return None
-    required = [
-        "physical_channel",
-        "pilot_frequency_hz",
-        "chime_frequency_hz",
-        "coarse_channel_center_hz",
-        "expected_pilot_offset_hz",
-        "frame_index",
-        "relative_time_s",
-        "peak_offset_hz",
-        "frequency_offset_hz",
-        "peak_power_linear",
-        "local_floor_power_linear",
-        "peak_prominence_db",
-        "valid",
-        "fft_frequency_axis_hz",
-        "time_average_spectrum_power_linear",
-        "time_average_spectrum_count",
-        "fft_size",
-    ]
-    _require_arrays(
-        products,
-        filename=FREQUENCY_OFFSET_OUTPUTS_FILENAME,
-        names=required,
-        errors=errors,
-    )
-    if any(name not in products.files for name in required):
-        return products
-
-    num_frames, num_pilots = shape
-    fft_size = int(np.asarray(products["fft_size"]).item())
-    for name in [
-        "peak_offset_hz",
-        "frequency_offset_hz",
-        "peak_power_linear",
-        "local_floor_power_linear",
-        "peak_prominence_db",
-        "valid",
-    ]:
-        _check_shape(
-            actual=tuple(np.asarray(products[name]).shape),
-            expected=shape,
-            check=f"frequency_offset.{name}.shape",
-            errors=errors,
-        )
-    for name in [
-        "physical_channel",
-        "pilot_frequency_hz",
-        "chime_frequency_hz",
-        "coarse_channel_center_hz",
-        "expected_pilot_offset_hz",
-        "time_average_spectrum_count",
-    ]:
-        _check_shape(
-            actual=tuple(np.asarray(products[name]).shape),
-            expected=(num_pilots,),
-            check=f"frequency_offset.{name}.shape",
-            errors=errors,
-        )
-    for name in ["frame_index", "relative_time_s"]:
-        _check_shape(
-            actual=tuple(np.asarray(products[name]).shape),
-            expected=(num_frames,),
-            check=f"frequency_offset.{name}.shape",
-            errors=errors,
-        )
-    _check_shape(
-        actual=tuple(np.asarray(products["fft_frequency_axis_hz"]).shape),
-        expected=(fft_size,),
-        check="frequency_offset.fft_frequency_axis_hz.shape",
-        errors=errors,
-    )
-    _check_shape(
-        actual=tuple(
-            np.asarray(products["time_average_spectrum_power_linear"]).shape
-        ),
-        expected=(num_pilots, fft_size),
-        check="frequency_offset.time_average_spectrum_power_linear.shape",
-        errors=errors,
-    )
-    if not np.array_equal(
-        np.asarray(products["physical_channel"]),
-        np.asarray(detector["physical_channel"]),
-    ):
-        _add_error(
-            errors,
-            "frequency_offset.physical_channel",
-            "physical_channel does not match detector output",
-        )
-    if not np.array_equal(
-        np.asarray(products["frame_index"]),
-        np.asarray(detector["frame_index"]),
-    ):
-        _add_error(
-            errors,
-            "frequency_offset.frame_index",
-            "frame_index does not match detector output",
-        )
-    if not _is_binary_array(np.asarray(products["valid"])):
-        _add_error(
-            errors,
-            "frequency_offset.valid.binary",
-            "valid contains values outside 0/1",
-        )
-    rows = _rows_from_csv(
-        run / "tables" / "frequency_offset_summary_by_pilot.csv",
-        check="frequency_offset_summary.exists",
-        errors=errors,
-    )
-    if rows and len(rows) != num_pilots:
-        _add_error(
-            errors,
-            "frequency_offset_summary.row_count",
-            f"row count {len(rows)} does not match num_pilots {num_pilots}",
-        )
-    return products
-
-
-def _validate_k_candidate_table(
-    *,
-    run: Path,
-    errors: list[dict[str, str]],
-) -> None:
-    rows = _rows_from_csv(
-        run / "tables" / "k_candidate_summary.csv",
-        check="k_candidate_summary.exists",
-        errors=errors,
-    )
-    if not rows:
-        return
-    columns = set(rows[0])
-    required_columns = {
-        "K",
-        "reference_spacing_policy",
-        "recommended",
-        "reference_placement_status",
-        "placement_warnings",
-        "channels_with_adaptive_reference",
-        "channels_with_dc_shifted_reference",
-        "channels_with_edge_wrapped_reference",
-        "channels_with_forbidden_tone_in_skipped_guard",
-    }
-    missing = sorted(required_columns.difference(columns))
-    if missing:
-        _add_error(
-            errors,
-            "k_candidate_summary.columns",
-            "missing columns: " + ", ".join(missing),
-        )
-    k_values = {int(row["K"]) for row in rows if str(row.get("K", "")).strip()}
-    for required_k in (128, 256):
-        if required_k not in k_values:
-            _add_error(
-                errors,
-                "k_candidate_summary.required_k",
-                f"K={required_k} is missing from k_candidate_summary.csv",
-            )
-
-
 def _validate_spectrogram_cache(
     cache: NpzLike,
     detector: NpzLike,
@@ -762,42 +593,9 @@ def validate_products(
     *,
     run_dir: Path,
     output_json: Path | None = None,
-    offset_only: bool = False,
 ) -> dict[str, Any]:
     run = Path(run_dir)
     errors: list[dict[str, str]] = []
-
-    if offset_only:
-        # Minimal structural validation for an offset-only chime-scan directory.
-        products = _load_npz(run / FREQUENCY_OFFSET_OUTPUTS_FILENAME, errors)
-        if products is not None:
-            required = [
-                "physical_channel", "pilot_frequency_hz", "chime_frequency_hz",
-                "frame_index", "relative_time_s", "peak_offset_hz",
-                "frequency_offset_hz", "peak_prominence_db", "valid",
-                "fft_frequency_axis_hz", "time_average_spectrum_power_linear",
-                "time_average_spectrum_count", "fft_size",
-            ]
-            _require_arrays(
-                products,
-                filename=FREQUENCY_OFFSET_OUTPUTS_FILENAME,
-                names=required,
-                errors=errors,
-            )
-            close = getattr(products, "close", None)
-            if callable(close):
-                close()
-        report = {
-            "schema_version": "fstat_chime_product_validation_v1",
-            "run_dir": str(run),
-            "valid": len(errors) == 0,
-            "num_errors": int(len(errors)),
-            "errors": errors,
-        }
-        if output_json is not None:
-            Path(output_json).parent.mkdir(parents=True, exist_ok=True)
-            write_json_strict(Path(output_json), report, indent=2, sort_keys=True)
-        return report
 
     run_config = _load_json(run / "run_config.json", errors)
     input_manifest = _load_json(run / "input_manifest.json", errors)
@@ -827,7 +625,6 @@ def validate_products(
     detector = _load_npz(run / CHIME_DETECTOR_OUTPUTS_FILENAME, errors)
     cache = _load_npz(run / CHIME_SPECTROGRAM_CACHE_FILENAME, errors)
     reductions = _load_npz(run / CHIME_REDUCTIONS_10S_FILENAME, errors)
-    frequency_offset = None
 
     try:
         if detector is not None:
@@ -851,22 +648,8 @@ def validate_products(
                     shape=shape,
                     errors=errors,
                 )
-            diagnostic_requested = bool(
-                run_config.get(
-                    "frequency_offset_diagnostic",
-                    stats.get("frequency_offset_diagnostic", False),
-                )
-            )
-            if shape is not None and diagnostic_requested:
-                frequency_offset = _validate_frequency_offset_products(
-                    run=run,
-                    detector=detector,
-                    shape=shape,
-                    errors=errors,
-                )
-                _validate_k_candidate_table(run=run, errors=errors)
     finally:
-        for item in [detector, cache, reductions, frequency_offset]:
+        for item in [detector, cache, reductions]:
             if item is not None:
                 close = getattr(item, "close", None)
                 if callable(close):
@@ -892,11 +675,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--run-dir", type=Path, required=True)
     parser.add_argument("--output-json", type=Path, default=None)
-    parser.add_argument(
-        "--offset-only",
-        action="store_true",
-        help="Validate a frequency-offset-only run directory without requiring detector products.",
-    )
     return parser
 
 
@@ -905,7 +683,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     report = validate_products(
         run_dir=args.run_dir,
         output_json=args.output_json,
-        offset_only=args.offset_only,
     )
     print("valid, num_errors, run_dir", flush=True)
     print(

@@ -1,17 +1,16 @@
 # coding=utf-8
 """Combine per-pilot datatrawl analyzer products into PilotProxy's canonical products.
 
-The detector / offset analyzers fan out one ``<channel>.npz`` per coarse channel.
+The detector analyzer fans out one ``<channel>.npz`` per coarse channel.
 This step stacks those per-pilot products along the pilot axis and feeds the
 SAME writer functions ``run_chime_analysis`` uses, so the combined
 ``chime_detector_outputs`` / ``chime_spectrogram_cache`` / ``chime_reductions_10s``
-/ ``mask_summary`` (and ``frequency_offset_outputs`` / summary) are byte-identical
-to a single-process run -- which is what keeps the existing plots,
-``validate-products`` and ``choose-detector-k`` working unchanged on datatrawl
+/ ``mask_summary`` are byte-identical to a single-process run -- which is what
+keeps the existing plots and ``validate-products`` working unchanged on datatrawl
 output.
 
-A "per-pilot product" is exactly what ``PilotProxyDetectorAnalyzer.save`` /
-``PilotProxyOffsetAnalyzer.save`` write: the relevant fstat schema for one pilot, with
+A "per-pilot product" is exactly what ``PilotProxyDetectorAnalyzer.save`` writes:
+the relevant fstat schema for one pilot, with
 the per-frame 2-D arrays shaped ``(frames, 1)``.
 """
 from __future__ import annotations
@@ -29,11 +28,6 @@ from pilot_proxy.chime.products import (
     write_spectrogram_cache,
 )
 from pilot_proxy.chime.reductions import write_reductions_npz
-from pilot_proxy.chime.frequency_offset import (
-    _write_outputs as write_frequency_offset_outputs,
-    _write_summary_table as write_frequency_offset_summary,
-    FREQUENCY_OFFSET_OUTPUTS_FILENAME,
-)
 from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_VERSION,
     CHIME_STATS_SCHEMA_VERSION,
@@ -47,21 +41,6 @@ import json
 
 def _write_json(path: Path, obj: Any) -> None:
     Path(path).write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
-
-
-def _mark_frequency_offset_diagnostic(run_dir: Path, present: bool = True) -> None:
-    """Mark existing detector provenance if offset products are co-located."""
-    for name in ("run_config.json", "stats.json"):
-        path = Path(run_dir) / name
-        if not path.exists():
-            continue
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-        if isinstance(payload, dict):
-            payload["frequency_offset_diagnostic"] = bool(present)
-            _write_json(path, payload)
 
 
 def _detector_contract_from(products: Sequence[Mapping[str, Any]], nfft: int) -> dict:
@@ -493,7 +472,6 @@ def combine_detector_products(
         contract["reference_placement_summary"] = reference_placement
     mask_policy = positive_excess_mask_policy()
     k = int(contract["detector_window_samples"])
-    frequency_offset_present = (run_dir / FREQUENCY_OFFSET_OUTPUTS_FILENAME).exists()
     provenance_by_pilot = []
     for z in products:
         provenance_by_pilot.append({
@@ -517,7 +495,6 @@ def combine_detector_products(
         "frame_size_samples": int(nfft),
         "detector_window_samples": k,
         "num_input_streams": int(np.asarray(products[0].get("num_input_streams", 0))),
-        "frequency_offset_diagnostic": bool(frequency_offset_present),
         "mask_policy": mask_policy,
         "detector_contract": contract,
         "detector_provenance_by_pilot": provenance_by_pilot,
@@ -554,83 +531,4 @@ def combine_detector_products(
     return outputs
 
 
-def combine_offset_products(
-    product_paths: Sequence[str | Path],
-    run_dir: str | Path,
-) -> dict[str, Path]:
-    """Stack per-pilot frequency-offset products and write the canonical offset products."""
-    products = _load_sorted(product_paths)
-    _check_invariants(
-        products,
-        ("schema_version", "fft_size", "nfft", "sense", "sample_rate_hz", "window_name"),
-        "offset geometry",
-    )
-    frame_index = _check_frames(products)
-    nfft = int(np.asarray(products[0]["fft_size"]))
-    sample_rate_hz = float(np.asarray(products[0]["sample_rate_hz"]))
-
-    physical_channel = _scalars(products, "physical_channel", np.int32)
-    pilot_frequency_hz = _scalars(products, "pilot_frequency_hz", np.float64)
-    chime_frequency_hz = _scalars(products, "chime_frequency_hz", np.float64)
-    coarse_channel_center_hz = _scalars(products, "coarse_channel_center_hz", np.float64)
-    expected_pilot_offset_hz = _scalars(products, "expected_pilot_offset_hz", np.float64)
-    relative_time_s = np.asarray(products[0]["relative_time_s"], dtype=np.float64)
-    fft_axis = np.asarray(products[0]["fft_frequency_axis_hz"], dtype=np.float64)
-
-    peak_offset_hz = _stack_cols(products, "peak_offset_hz", np.float64)
-    frequency_offset_hz = _stack_cols(products, "frequency_offset_hz", np.float64)
-    peak_power_linear = _stack_cols(products, "peak_power_linear", np.float64)
-    local_floor_power_linear = _stack_cols(products, "local_floor_power_linear", np.float64)
-    peak_prominence_db = _stack_cols(products, "peak_prominence_db", np.float64)
-    valid = _stack_cols(products, "valid", np.uint8)
-    # time-average spectrum is (pilots, nfft): one row per pilot
-    spectrum = np.concatenate(
-        [np.asarray(z["time_average_spectrum_power_linear"], dtype=np.float64).reshape(1, -1)
-         for z in products],
-        axis=0,
-    )
-    spectrum_count = _scalars(products, "time_average_spectrum_count", np.uint64)
-
-    run_dir = Path(run_dir)
-    ensure_run_dirs(run_dir)
-    outputs: dict[str, Path] = {}
-    outputs["frequency_offset_outputs"] = write_frequency_offset_outputs(
-        run_dir,
-        physical_channel=physical_channel,
-        pilot_frequency_hz=pilot_frequency_hz,
-        chime_frequency_hz=chime_frequency_hz,
-        coarse_channel_center_hz=coarse_channel_center_hz,
-        expected_pilot_offset_hz=expected_pilot_offset_hz,
-        frame_index=frame_index,
-        relative_time_s=relative_time_s,
-        peak_offset_hz=peak_offset_hz,
-        frequency_offset_hz=frequency_offset_hz,
-        peak_power_linear=peak_power_linear,
-        local_floor_power_linear=local_floor_power_linear,
-        peak_prominence_db=peak_prominence_db,
-        valid=valid,
-        fft_size=nfft,
-        fft_bin_width_hz=sample_rate_hz / float(nfft),
-        sample_rate_hz=sample_rate_hz,
-        window_name=str(np.asarray(products[0]["window_name"])),
-        peak_search_half_width_hz=float(np.asarray(products[0]["peak_search_half_width_hz"])),
-        fft_frequency_axis_hz=fft_axis,
-        time_average_spectrum_power_linear=spectrum,
-        time_average_spectrum_count=spectrum_count,
-    )
-    outputs["frequency_offset_summary"] = write_frequency_offset_summary(
-        run_dir,
-        physical_channel=physical_channel,
-        pilot_frequency_hz=pilot_frequency_hz,
-        chime_frequency_hz=chime_frequency_hz,
-        coarse_channel_center_hz=coarse_channel_center_hz,
-        expected_pilot_offset_hz=expected_pilot_offset_hz,
-        frequency_offset_hz=frequency_offset_hz,
-        peak_prominence_db=peak_prominence_db,
-        valid=valid,
-    )
-    _mark_frequency_offset_diagnostic(run_dir, present=True)
-    return outputs
-
-
-__all__ = ["combine_detector_products", "combine_offset_products"]
+__all__ = ["combine_detector_products"]

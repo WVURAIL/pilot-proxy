@@ -89,5 +89,5 @@ Known baseline cases:
 
 `K=256` is not blocked by precision loss if implemented with int32 dot
 products, uint32 row powers, and uint64 frame sums, but it is a separate
-detector configuration. It is not promoted until CANFAR offset and cleaning
+detector configuration. It is not promoted until CANFAR cleaning
 evidence supports it.

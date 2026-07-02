@@ -20,7 +20,6 @@ from datatrawl.interfaces import RunContext
 
 from pilot_proxy.datatrawl_plugins import detector as detector_mod
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
-from pilot_proxy.datatrawl_plugins.offset import PilotProxyOffsetAnalyzer
 
 
 NFFT = 16_384
@@ -121,16 +120,3 @@ def test_detector_rejects_input_stream_count_change():
     with pytest.raises(ValueError, match="input-stream count"):
         analyzer.consume_file([wrong_feed_count], _first_meta())
 
-
-def test_offset_rejects_packed_reader_chunks_with_actionable_hint():
-    analyzer = PilotProxyOffsetAnalyzer()
-    ctx = RunContext(
-        instrument=_instrument(),
-        selection=[CH14_FREQ_ID],
-        options={},
-    )
-    analyzer.begin(ctx, _first_meta())
-
-    wrong_reader_chunk = np.zeros((NFFT, N_FEEDS), dtype=np.uint8)
-    with pytest.raises(ValueError, match="chime-baseband"):
-        analyzer.consume_file([wrong_reader_chunk], _first_meta())

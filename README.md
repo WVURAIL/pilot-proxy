@@ -27,7 +27,6 @@ goal before diving into the specialized sections below.
 | Goal | Use this path | Needs GPU? | Needs datatrawl? |
 | --- | --- | :---: | :---: |
 | Check the package installs and the CLI loads | Minimal CPU-only smoke test (below) | No | No |
-| Run CHIME offset diagnostics | `pilot-proxy chime-scan --analyzer pilot-proxy-offset` | No | Yes |
 | Run the CHIME detector | `pilot-proxy chime-scan --analyzer pilot-proxy-detector` | Yes | Yes |
 | Generate / audit synthetic ATSC | Standalone testbench | Partly | No |
 | Run the CUDA detector / SNR evaluation | Standalone CUDA path | Yes | No |
@@ -110,41 +109,18 @@ GPU detector.
 
 ## Setup for the CHIME / CANFAR workflow
 
-The integrated workflow needs both repositories checked out. The setup script
-creates a clean virtual environment, installs both repos editable with the
-CADC/survey and CHIME extras, resolves CuPy through datatrawl's `accel` module,
-builds the CUDA kernel when `nvcc` is available, and verifies that the fstat
-datatrawl plugins are discoverable:
+The integrated workflow needs both repositories checked out. `scripts/setup_env.sh`
+creates a clean virtual environment, installs both repos editable (CADC/survey and
+CHIME extras), resolves CuPy through datatrawl's `accel` module, builds the CUDA
+kernel when `nvcc` is available, and verifies that the PilotProxy datatrawl plugins
+are discoverable. It **removes and recreates** the target venv, so do not point
+`VENV_DIR` at one you need to keep.
 
-```bash
-git clone https://github.com/WVURAIL/datatrawl.git ~/datatrawl
-git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
-cd ~/pilot-proxy
-
-VENV_DIR=~/pilot-proxy-datatrawl DATATRAWL_DIR=~/datatrawl PILOT_PROXY_DIR=~/pilot-proxy bash scripts/setup_env.sh
-
-source ~/pilot-proxy-datatrawl/bin/activate
-```
-
-The script **removes and recreates** the target venv (`python -m venv --clear`),
-so do not point `VENV_DIR` at a venv you need to keep. On hosts without
-`nvidia-smi` it skips the kernel build; those hosts can run the CPU-only
-`pilot-proxy-offset` analyzer but not the GPU `pilot-proxy-detector`.
-
-Manual fallback, when you do not want the script to recreate the venv:
-
-```bash
-python3.12 -m venv ~/pilot-proxy-datatrawl
-source ~/pilot-proxy-datatrawl/bin/activate
-python -m pip install -U pip setuptools wheel
-python -m pip install -e "$HOME/datatrawl[cadc,survey]"
-python -m pip install -e "$HOME/pilot-proxy[cuda,datatrawl,chime,test]"   # drop the cuda extra on CPU-only hosts
-```
-
-The complete CANFAR procedure --- GPU-session launch, Harbor registry
-credentials, required inputs, and the bounded run sequences --- is in
-[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md). Integration-specific setup
-notes are in [INTEGRATION.md](INTEGRATION.md#setup).
+The full setup procedure --- the exact `setup_env.sh` invocation, the manual
+(no-recreate) fallback, GPU-session launch, Harbor registry credentials, required
+inputs, and the bounded run sequences --- is in
+[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup).
+Integration-specific setup notes are in [INTEGRATION.md](INTEGRATION.md#setup).
 
 ---
 
@@ -234,6 +210,10 @@ Convert compute capability to `SM` by removing the decimal point. Examples:
 | 8.9 | 89 |
 | 9.0 | 90 |
 
+`setup_env.sh` detects your GPU's `SM` and builds the kernel for it automatically.
+The manual `make` examples below use `SM=89` (Ada) only as a placeholder ---
+substitute your own value (A100 = `80`).
+
 ### CUDA toolchain (`nvcc`)
 
 Building the kernel needs the CUDA compiler, `nvcc`. Confirm it is on `PATH`:
@@ -299,27 +279,22 @@ make test-kernel SM=89
 
 ## CHIME / datatrawl archive workflow
 
-The archive-scale entry point is `pilot-proxy chime-scan`, which runs the fstat
-analyzers through `datatrawl` and combines the per-pilot products into fstat's
+The archive-scale entry point is `pilot-proxy chime-scan`, which runs the PilotProxy
+analyzers through `datatrawl` and combines the per-pilot products into PilotProxy's
 canonical CHIME outputs. Two things to know before running:
 
 - **Selection is in the CHIME `freq_id` coarse-channel namespace**, not ATSC
-  physical-channel numbers. The default ATSC 14-36 pilot set is
-  `506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844`;
-  `844` is the single-channel smoke-test default (the ATSC 14 pilot).
+  physical-channel numbers. The default ATSC 14-36 pilot set (23 `freq_id`s) is
+  listed in
+  [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention); `844` is
+  the single-channel smoke-test default (the ATSC 14 pilot).
 - **Use `chime-scan`, not raw `datatrawl scan`.** The PilotProxy analyzers are
   order-sensitive, and `chime-scan` forces the single-staged-file path that keeps
   frames time-aligned.
 
-A bounded local offset smoke test, for orientation:
-
-```bash
-pilot-proxy chime-scan   --input-dir "$LOCAL_H5"   --output-dir "$HOME/pilot_proxy_runs/offset_smoke_844"   --source local   --analyzer pilot-proxy-offset   --select 844   --max-files 1   --max-chunks-per-file 1
-```
-
 For the full reference --- selection details, the local and CADC/CANFAR run
 sequences, order-safety internals, and post-processing (`validate-products`,
-`chime-plot`, `choose-detector-k`) --- see:
+`chime-plot`) --- see:
 
 - **[INTEGRATION.md](INTEGRATION.md)** --- the datatrawl integration contract.
 - **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- the step-by-step CANFAR
@@ -384,9 +359,8 @@ make commit-check
 
 ## Compatibility note: datatrawl inventory metadata
 
-`pilot-proxy chime-scan` selects the correct reader per analyzer automatically
-(`chime-baseband` for `pilot-proxy-offset`, `chime-baseband-packed` for
-`pilot-proxy-detector`), so the inventory-metadata default needs no attention on the
+`pilot-proxy chime-scan` uses the `chime-baseband-packed` reader for
+`pilot-proxy-detector`, so the inventory-metadata default needs no attention on the
 recommended path. The full explanation --- including how to override the reader
 when driving raw `datatrawl scan` directly --- is in
 [INTEGRATION.md](INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata).

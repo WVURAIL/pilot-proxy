@@ -23,7 +23,7 @@ contract, shipped detector core profile, generated manifests, and test coverage.
 K=256 remains a plausible future candidate. It is not blocked by unavoidable
 precision loss if implemented with int32 dot products, uint32 row powers, and
 uint64 frame sums, but it is a separate detector configuration and is not
-promoted until CANFAR offset and cleaning evidence supports it.
+promoted until CANFAR cleaning evidence supports it.
 
 K=512 is not part of the current production candidate set.
 

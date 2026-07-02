@@ -20,8 +20,6 @@ def _write_products(
     corrupt_cache_mask: bool = False,
     positive_excess: bool = True,
     corrupt_positive_excess_mask: bool = False,
-    frequency_offset_diagnostic: bool = False,
-    omit_k_candidate_table: bool = False,
     corrupt_detector_window_metadata: bool = False,
 ) -> None:
     run_dir.mkdir()
@@ -115,7 +113,6 @@ def _write_products(
         "schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION,
         "detector_contract": detector_contract,
         "detector_window_samples": 256 if corrupt_detector_window_metadata else 128,
-        "frequency_offset_diagnostic": bool(frequency_offset_diagnostic),
     }
     if positive_excess:
         run_config["mask_policy"] = mask_policy
@@ -133,57 +130,11 @@ def _write_products(
                 "detector_window_samples": 128,
                 "rational_overflow_count_by_pilot": [0, 0],
                 "detector_contract": detector_contract,
-                "frequency_offset_diagnostic": bool(frequency_offset_diagnostic),
                 **({"mask_policy": mask_policy} if positive_excess else {}),
             }
         ),
         encoding="utf-8",
     )
-    if frequency_offset_diagnostic:
-        np.savez_compressed(
-            run_dir / "frequency_offset_outputs.npz",
-            physical_channel=physical_channel,
-            pilot_frequency_hz=pilot_frequency_hz,
-            chime_frequency_hz=chime_frequency_hz,
-            coarse_channel_center_hz=chime_frequency_hz,
-            expected_pilot_offset_hz=np.asarray([-3059.0, 0.0]),
-            frame_index=frame_index,
-            relative_time_s=np.asarray([0.0, 1.0, 2.0]),
-            peak_offset_hz=np.zeros((3, 2)),
-            frequency_offset_hz=np.zeros((3, 2)),
-            peak_power_linear=np.ones((3, 2)),
-            local_floor_power_linear=np.ones((3, 2)),
-            peak_prominence_db=np.full((3, 2), 30.0),
-            valid=valid,
-            fft_frequency_axis_hz=np.asarray([-1.0, 0.0, 1.0, 2.0]),
-            time_average_spectrum_power_linear=np.ones((2, 4)),
-            time_average_spectrum_count=np.asarray([3, 3], dtype=np.uint64),
-            fft_size=np.asarray(4, dtype=np.int64),
-        )
-        tables = run_dir / "tables"
-        tables.mkdir()
-        (tables / "frequency_offset_summary_by_pilot.csv").write_text(
-            (
-                "physical_channel,pilot_frequency_hz,chime_frequency_hz,"
-                "num_valid_frames\n14,470309441.0,470312500.0,3\n"
-                "15,476309441.0,476171875.0,2\n"
-            ),
-            encoding="utf-8",
-        )
-        if not omit_k_candidate_table:
-            (tables / "k_candidate_summary.csv").write_text(
-                (
-                    "K,reference_spacing_policy,recommended,"
-                    "reference_placement_status,placement_warnings,"
-                    "channels_with_adaptive_reference,"
-                    "channels_with_dc_shifted_reference,"
-                    "channels_with_edge_wrapped_reference,"
-                    "channels_with_forbidden_tone_in_skipped_guard\n"
-                    "128,fixed_skipped_guard,True,nominal,,,,14\n"
-                    "256,fixed_skipped_guard,False,nominal,,,,14\n"
-                ),
-                encoding="utf-8",
-            )
 
 
 def test_validate_products_accepts_consistent_run(tmp_path) -> None:
@@ -244,27 +195,3 @@ def test_validate_products_reports_detector_window_contract_mismatch(tmp_path) -
     assert report["valid"] is False
     checks = {error["check"] for error in report["errors"]}
     assert "run_config.detector_window_samples" in checks
-
-
-def test_validate_products_checks_frequency_offset_and_k_products(tmp_path) -> None:
-    run_dir = tmp_path / "with_offset"
-    _write_products(run_dir, frequency_offset_diagnostic=True)
-
-    report = validate_products(run_dir=run_dir)
-
-    assert report["valid"] is True
-
-
-def test_validate_products_requires_k_table_for_frequency_offset_run(tmp_path) -> None:
-    run_dir = tmp_path / "missing_k"
-    _write_products(
-        run_dir,
-        frequency_offset_diagnostic=True,
-        omit_k_candidate_table=True,
-    )
-
-    report = validate_products(run_dir=run_dir)
-
-    assert report["valid"] is False
-    checks = {error["check"] for error in report["errors"]}
-    assert "k_candidate_summary.exists" in checks

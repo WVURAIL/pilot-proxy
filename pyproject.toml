@@ -49,7 +49,6 @@ pilot-proxy = "pilot_proxy.cli:main"
 [project.entry-points."datatrawl.plugins"]
 # Discovered by datatrawl's `list`/`scan`/`doctor` once both packages are installed;
 # value is the module to import (its decorator registers the plugin).
-pilot-proxy-offset = "pilot_proxy.datatrawl_plugins.offset"
 pilot-proxy-detector = "pilot_proxy.datatrawl_plugins.detector"
 pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader"
 
