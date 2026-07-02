@@ -526,9 +526,88 @@ def _kernel_measurements(
     finally:
         kernel.destroy(handle)
 
-    p_target = int(powers[REFERENCE_TARGET_TERM_INDEX])
-    p_ref_lower = int(powers[REFERENCE_LOWER_TERM_INDEX])
-    p_ref_upper = int(powers[REFERENCE_UPPER_TERM_INDEX])
+    return _measurements_from_powers(
+        diagnostic_float=diagnostic_float,
+        p_target=int(powers[REFERENCE_TARGET_TERM_INDEX]),
+        p_ref_lower=int(powers[REFERENCE_LOWER_TERM_INDEX]),
+        p_ref_upper=int(powers[REFERENCE_UPPER_TERM_INDEX]),
+        weights=weights,
+        pilot_below_data_db=pilot_below_data_db,
+        bin_enbw_hz=bin_enbw_hz,
+        pilot_capture_efficiency=pilot_capture_efficiency,
+        dtv_bandwidth_hz=dtv_bandwidth_hz,
+        threshold=threshold,
+        mask=mask,
+        overflow=overflow,
+    )
+
+
+def _cpu_reference_measurements(
+    *,
+    packed: np.ndarray,
+    weights: np.ndarray,
+    bits: int,
+    pilot_below_data_db: float,
+    bin_enbw_hz: float,
+    pilot_capture_efficiency: float,
+    dtv_bandwidth_hz: float,
+    threshold: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """CPU exact-integer sibling of ``_kernel_measurements``.
+
+    Uses the validated CPU reference (``fstat_cpu_reference_packed``) for the
+    power sums and Python-integer arithmetic for the rational-half threshold
+    decision, so the fields are the kernel's semantics without a GPU. The
+    kernel <-> reference equivalence itself is CI-gated by the kernel parity
+    suite; a small same-seed GPU spot check ties a CPU-produced sweep to the
+    deployed kernel (see docs/PUBLICATION_VALIDATION.md, item 2).
+    """
+    fstat, sums = fstat_cpu_reference_packed(packed, weights, int(bits))
+    p_target = int(round(float(sums[0])))
+    p_ref_lower = int(round(float(sums[1])))
+    p_ref_upper = int(round(float(sums[2])))
+    diagnostic_float = float(np.float32(fstat))
+    mask = 0
+    overflow = 0
+    if threshold is not None:
+        p_ref_sum = p_ref_lower + p_ref_upper
+        mask = int(
+            p_ref_sum != 0
+            and p_target * int(threshold["threshold_half_den"])
+            > int(threshold["threshold_half_num"]) * p_ref_sum
+        )
+    return _measurements_from_powers(
+        diagnostic_float=diagnostic_float,
+        p_target=p_target,
+        p_ref_lower=p_ref_lower,
+        p_ref_upper=p_ref_upper,
+        weights=weights,
+        pilot_below_data_db=pilot_below_data_db,
+        bin_enbw_hz=bin_enbw_hz,
+        pilot_capture_efficiency=pilot_capture_efficiency,
+        dtv_bandwidth_hz=dtv_bandwidth_hz,
+        threshold=threshold,
+        mask=mask,
+        overflow=overflow,
+    )
+
+
+def _measurements_from_powers(
+    *,
+    diagnostic_float: float,
+    p_target: int,
+    p_ref_lower: int,
+    p_ref_upper: int,
+    weights: np.ndarray,
+    pilot_below_data_db: float,
+    bin_enbw_hz: float,
+    pilot_capture_efficiency: float,
+    dtv_bandwidth_hz: float,
+    threshold: dict[str, Any] | None,
+    mask: int,
+    overflow: int,
+) -> dict[str, Any]:
+    """Backend-agnostic measurement fields from the three integer powers."""
     p_ref_sum = int(p_ref_lower + p_ref_upper)
     fstat_raw = float(fstat_num_den_to_raw(p_target, p_ref_sum))
     fstat_level_db = float(fstat_num_den_to_fstat_level_db(p_target, p_ref_sum))
@@ -815,19 +894,32 @@ def _evaluate_one_trial(
         spectral_sense=str(args.spectral_sense),
     )
     cpu_packed_fstat, _ = fstat_cpu_reference_packed(packed, weights, int(args.bits))
-    gpu = _kernel_measurements(
-        cp=cp,
-        kernel=kernel,
-        packed=packed,
-        weights=weights,
-        pilot_below_data_db=float(args.pilot_below_data_db),
-        bin_enbw_hz=float(args.bin_enbw_hz),
-        pilot_capture_efficiency=float(args.pilot_capture_efficiency),
-        dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
-        threshold=threshold,
-    )
+    if str(getattr(args, "detector_backend", "cuda")) == "cpu-reference":
+        gpu = _cpu_reference_measurements(
+            packed=packed,
+            weights=weights,
+            bits=int(args.bits),
+            pilot_below_data_db=float(args.pilot_below_data_db),
+            bin_enbw_hz=float(args.bin_enbw_hz),
+            pilot_capture_efficiency=float(args.pilot_capture_efficiency),
+            dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
+            threshold=threshold,
+        )
+    else:
+        gpu = _kernel_measurements(
+            cp=cp,
+            kernel=kernel,
+            packed=packed,
+            weights=weights,
+            pilot_below_data_db=float(args.pilot_below_data_db),
+            bin_enbw_hz=float(args.bin_enbw_hz),
+            pilot_capture_efficiency=float(args.pilot_capture_efficiency),
+            dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
+            threshold=threshold,
+        )
     estimated_snr_shelf_db = float(gpu["estimated_snr_shelf_db"])
     row = {
+        "detector_backend": str(getattr(args, "detector_backend", "cuda")),
         "requested_snr_shelf_db": float(requested_snr_shelf_db),
         "requested_composite_atsc_snr_db": float(requested_composite_atsc_snr_db),
         "frequency_offset_hz": float(frequency_offset_hz),
@@ -1126,6 +1218,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Static phase rotation applied before noise injection.",
     )
     parser.add_argument(
+        "--detector-backend",
+        choices=("cuda", "cpu-reference"),
+        default="cuda",
+        help=(
+            "Which detector computes the primary fields. 'cuda' runs the "
+            "compiled kernel (requires a GPU). 'cpu-reference' uses the "
+            "validated exact-integer CPU reference, so full publication "
+            "sweeps run without a GPU; tie the result to the deployed "
+            "kernel with a small same-seed GPU spot check afterwards."
+        ),
+    )
+    parser.add_argument(
         "--noise-trials",
         type=int,
         default=DEFAULT_NOISE_TRIALS,
@@ -1292,8 +1396,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"Could not find GNU Radio Python executable: {gnuradio_python}"
             )
 
-    import cupy as cp
-    kernel = FStatKernel(args.lib_path)
+    if str(args.detector_backend) == "cpu-reference":
+        cp = None
+        kernel = None
+    else:
+        import cupy as cp
+        kernel = FStatKernel(args.lib_path)
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -1330,7 +1438,7 @@ def main(argv: list[str] | None = None) -> int:
 
     weights_bank = DetectorWeightBank(
         explicit_path=args.weights_path,
-        expected_kernel=kernel.specs,
+        expected_kernel=(kernel.specs if kernel is not None else None),
     )
     selected_weight_layout = weights_bank.layout_for_pilot_frequency(
         float(args.dtv_pilot_mhz)
@@ -1342,6 +1450,12 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             "No valid detector weights for DTV pilot "
             f"{float(args.dtv_pilot_mhz):.6f} MHz."
+        )
+    if kernel is None and int(weights.shape[1]) != int(args.detector_window_samples):
+        raise SystemExit(
+            "cpu-reference backend: weight bank K "
+            f"({int(weights.shape[1])}) does not match "
+            f"--detector-window-samples ({int(args.detector_window_samples)})."
         )
 
     rng = np.random.default_rng(int(args.seed))

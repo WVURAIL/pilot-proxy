@@ -309,3 +309,85 @@ def test_summary_rows_omit_detection_rates_for_legacy_trials() -> None:
     )
     assert "positive_excess_detection_rate" not in summary[0]
     assert "threshold_detection_rate" not in summary[0]
+
+
+def test_cpu_reference_measurements_match_exact_integers() -> None:
+    import numpy as np
+
+    from pilot_proxy.detector_contract import (
+        norm_corrected_positive_excess,
+        weight_term_norms_sq,
+    )
+    from pilot_proxy.detector_reference import fstat_cpu_reference_packed
+    from pilot_proxy.testbench.evaluate_snr import _cpu_reference_measurements
+
+    rng = np.random.default_rng(42)
+    packed = rng.integers(-128, 128, size=(64, 128), dtype=np.int16).astype(np.int8)
+    weights = rng.integers(-128, 128, size=(3, 128), dtype=np.int16).astype(np.int8)
+
+    calib = dict(pilot_below_data_db=11.3, bin_enbw_hz=3051.7578125,
+                 pilot_capture_efficiency=1.0, dtv_bandwidth_hz=6.0e6)
+    out = _cpu_reference_measurements(packed=packed, weights=weights, bits=4, **calib)
+
+    fstat, sums = fstat_cpu_reference_packed(packed, weights, 4)
+    assert out["p_target_u64"] == int(round(float(sums[0])))
+    assert out["p_ref_sum_u64"] == int(round(float(sums[1] + sums[2])))
+    assert out["fstat_raw"] == pytest.approx(
+        2.0 * out["p_target_u64"] / out["p_ref_sum_u64"]
+    )
+    assert out["diagnostic_raw_float32"] == pytest.approx(fstat, rel=1e-6)
+    nt, nl, nu = weight_term_norms_sq(weights)
+    assert out["positive_excess"] == norm_corrected_positive_excess(
+        out["p_target_u64"], out["p_ref_sum_u64"],
+        target_norm_sq=nt, ref_norm_sum_sq=nl + nu,
+    )
+    assert "mask" not in out  # no threshold requested
+
+
+def test_cpu_reference_threshold_mask_is_exact_at_the_boundary() -> None:
+    import numpy as np
+
+    from pilot_proxy.testbench.evaluate_snr import (
+        _cpu_reference_measurements,
+        _measurements_from_powers,
+    )
+
+    calib = dict(pilot_below_data_db=11.3, bin_enbw_hz=3051.7578125,
+                 pilot_capture_efficiency=1.0, dtv_bandwidth_hz=6.0e6)
+    weights = np.ones((3, 4), dtype=np.int8)
+
+    # Direct rational-half rule: mask iff p_t * den > num * p_ref, strictly.
+    def _mask(p_t, p_ref, num, den):
+        out = _measurements_from_powers(
+            diagnostic_float=1.0, p_target=p_t,
+            p_ref_lower=p_ref // 2, p_ref_upper=p_ref - p_ref // 2,
+            weights=weights, threshold={"threshold_half_num": num,
+                                        "threshold_half_den": den},
+            mask=int(p_ref != 0 and p_t * den > num * p_ref),
+            overflow=0, **calib)
+        return out["mask"]
+
+    assert _mask(50, 90, 5, 9) == 0   # 50*9 == 5*90: equality is no excess
+    assert _mask(51, 90, 5, 9) == 1
+    assert _mask(10, 0, 5, 9) == 0    # invalid reference floor
+
+    # End-to-end through the CPU backend with a crafted threshold.
+    rng = np.random.default_rng(7)
+    packed = rng.integers(-128, 128, size=(16, 4), dtype=np.int16).astype(np.int8)
+    out = _cpu_reference_measurements(
+        packed=packed, weights=weights, bits=4,
+        threshold={"threshold_half_num": 1, "threshold_half_den": 2}, **calib)
+    expected = int(out["p_ref_sum_u64"] != 0
+                   and 2 * out["p_target_u64"] > out["p_ref_sum_u64"])
+    assert out["mask"] == expected
+    assert out["rational_overflow_count"] == 0
+
+
+def test_detector_backend_flag_parses() -> None:
+    from pilot_proxy.testbench.evaluate_snr import build_parser
+
+    args = build_parser().parse_args(
+        ["--input-iq", "x.cfile", "--detector-backend", "cpu-reference"]
+    )
+    assert args.detector_backend == "cpu-reference"
+    assert build_parser().parse_args(["--input-iq", "x.cfile"]).detector_backend == "cuda"

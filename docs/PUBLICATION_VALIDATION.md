@@ -149,6 +149,16 @@ existing sweeps is the trial count.
    so 300 is a floor, not a ceiling — use 1000 for the final figure if the
    session allows.
 
+**No GPU available?** The full sweep also runs GPU-free:
+`--detector-backend cpu-reference` computes the primary fields with the
+validated exact-integer CPU reference (Python-integer rational-half mask, so
+decisions are exact); each row records its `detector_backend`. The kernel <->
+reference equivalence is CI-gated by the kernel parity suite, so a
+CPU-produced curve is the deployed detector's curve up to that gate; before
+the camera-ready figure, tie them together with a same-seed GPU spot check
+(one mid-transition SNR point, both backends, assert identical detection
+counts). Sweep cost on CPU is minutes at these geometries.
+
 3. Figures from the summary CSV/JSON:
 
    ```bash

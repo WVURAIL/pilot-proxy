@@ -2,6 +2,13 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `evaluate-snr --detector-backend cpu-reference`: publication detection
+  sweeps without a GPU. The primary fields come from the validated
+  exact-integer CPU reference (shared result-builder with the kernel path,
+  exact Python-integer rational-half mask); rows record their backend, and
+  the runbook documents the same-seed GPU spot check that ties CPU curves to
+  the deployed kernel.
+
 - `pilot-proxy chime-combine`: standalone access to the scan's combine step,
   so per-pilot checkpoint snapshots can be stacked into canonical products
   mid-survey (validate-products / chime-plot / analyze-cleaning-tradeoff on
