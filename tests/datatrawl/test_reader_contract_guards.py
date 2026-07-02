@@ -1,10 +1,10 @@
 # coding=utf-8
-"""Reader-contract guards for fstat's datatrawl analyzers.
+"""Reader-contract guards for the PilotProxy datatrawl analyzers.
 
-datatrawl survey now writes inventory metadata with the telescope's canonical
-reader. For CHIME that canonical reader is ``chime-baseband`` (complex64). That is
-correct for the offset analyzer, but the detector analyzer needs the fstat-specific
-``chime-baseband-packed`` reader so it can losslessly repack native uint8 samples.
+datatrawl survey writes inventory metadata with the telescope's canonical
+reader. For CHIME that canonical reader is ``chime-baseband`` (complex64), but
+the detector analyzer needs the PilotProxy-specific ``chime-baseband-packed``
+reader so it can losslessly repack native uint8 samples.
 These tests make wrong reader pairings fail loudly instead of silently producing
 nonsense.
 """

@@ -3,7 +3,7 @@
 
 The CUDA kernel is GPU-only, so this test does what PilotProxy's own runner test does:
 inject a CPU-reference ``detector_fn`` + a stub kernel + explicit weights. The
-*reference* is fstat's ``run_chime_analysis`` (the batch runner); the *candidate*
+*reference* is PilotProxy's ``run_chime_analysis`` (the batch runner); the *candidate*
 is the datatrawl analyzer streaming the same file through the same injected pieces.
 They must produce the same per-frame ``chime_detector_outputs`` arrays -- which
 validates the analyzer's packing / windowing / accumulation / schema. The actual

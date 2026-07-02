@@ -372,7 +372,7 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
                 "chime-scan needs datatrawl installed (it is not on PyPI): "
                 "pip install -e path/to/datatrawl, then pip install -e . here."
             )
-        raise  # a real import error inside fstat -- don't mask it as 'install datatrawl'
+        raise  # a real import error inside pilot-proxy -- don't mask it as 'install datatrawl'
     analyzer_options = _parse_chime_scan_set_options(args.set_option)
     for key, value in {
         "weights_path": args.weights_path,
@@ -570,7 +570,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    gen = subparsers.add_parser("generate-atsc")
+    def _add_command(name: str, summary: str) -> argparse.ArgumentParser:
+        # One string serves as both the one-liner in `pilot-proxy --help` and
+        # the description at the top of `pilot-proxy <command> --help`.
+        return subparsers.add_parser(name, help=summary, description=summary)
+
+    gen = _add_command(
+        "generate-atsc",
+        "Generate a clean ATSC 8-VSB IQ capture (and transport stream) "
+        "with GNU Radio.",
+    )
     gen.add_argument(
         "--output-iq",
         default=str(GENERATED_DIR / "atsc" / "atsc_8vsb_complex64.cfile"),
@@ -597,7 +606,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gen.set_defaults(func=_cmd_generate_atsc)
 
-    eval_parser = subparsers.add_parser("evaluate-snr")
+    eval_parser = _add_command(
+        "evaluate-snr",
+        "Sweep detection rate versus shelf SNR: inject AWGN into a clean IQ "
+        "capture and run the CUDA detector at each level.",
+    )
     eval_parser.add_argument(
         "--input-iq",
         default=str(GENERATED_DIR / "atsc" / "atsc_8vsb_complex64.cfile"),
@@ -678,7 +691,10 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--weights-path", default=str(DEFAULT_WEIGHTS_PATH))
     eval_parser.set_defaults(func=_cmd_evaluate_snr)
 
-    plot = subparsers.add_parser("plot-results")
+    plot = _add_command(
+        "plot-results",
+        "Plot detection-rate curves from an evaluate-snr summary CSV.",
+    )
     plot.add_argument(
         "--input-csv",
         default=str(GENERATED_DIR / "dtv_snr_eval" / "dtv_snr_summary.csv"),
@@ -692,7 +708,10 @@ def build_parser() -> argparse.ArgumentParser:
     plot.add_argument("--show", action="store_true")
     plot.set_defaults(func=_cmd_plot_results)
 
-    summarize = subparsers.add_parser("summarize-results")
+    summarize = _add_command(
+        "summarize-results",
+        "Write text and histogram summaries from an evaluate-snr JSON report.",
+    )
     summarize.add_argument(
         "--input",
         default=str(GENERATED_DIR / "dtv_snr_eval" / "dtv_snr_eval.json"),
@@ -709,7 +728,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     summarize.set_defaults(func=_cmd_summarize_results)
 
-    audit = subparsers.add_parser("audit-atsc")
+    audit = _add_command(
+        "audit-atsc",
+        "Verify a generated IQ capture: pilot frequency and level, occupied "
+        "bandwidth, shelf flatness, edge rolloff.",
+    )
     audit.add_argument(
         "--input-iq",
         default=str(GENERATED_DIR / "atsc" / "atsc_8vsb_complex64.cfile"),
@@ -720,7 +743,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     audit.set_defaults(func=_cmd_audit_atsc)
 
-    quantize = subparsers.add_parser("quantize")
+    quantize = _add_command(
+        "quantize",
+        "Channelize and pack a clean IQ capture into the int4 "
+        "detector-input matrix.",
+    )
     quantize.add_argument(
         "--input-iq",
         default=str(GENERATED_DIR / "atsc" / "atsc_8vsb_complex64.cfile"),
@@ -754,10 +781,15 @@ def build_parser() -> argparse.ArgumentParser:
     quantize.add_argument("--save-channelized", action="store_true")
     quantize.set_defaults(func=_cmd_atsc_detector_input)
 
-    detect = subparsers.add_parser("detect")
+    detect = _add_command(
+        "detect",
+        "Run the CUDA detector once over a packed detector matrix and write "
+        "a detections JSON.",
+    )
     detect.add_argument(
         "--input-detector-matrix",
         default=str(GENERATED_DIR / "detector_input" / "detector_matrix_i4.npy"),
+        help="Packed int4 detector matrix written by `quantize`.",
     )
     detect.add_argument(
         "--output-json",
@@ -807,12 +839,20 @@ def build_parser() -> argparse.ArgumentParser:
     detect.add_argument("--weights-path", default=str(DEFAULT_WEIGHTS_PATH))
     detect.set_defaults(func=_cmd_detect)
 
-    channels = subparsers.add_parser("list-channels")
+    channels = _add_command(
+        "list-channels",
+        "List the ATSC channels present in a weight bank (CSV on stdout).",
+    )
     channels.add_argument("--weights-path", default=str(DEFAULT_WEIGHTS_PATH))
     channels.set_defaults(func=_cmd_list_channels)
 
-    check_profile = subparsers.add_parser("check-profile")
-    check_profile.add_argument("--receiver-profile", required=True)
+    check_profile = _add_command(
+        "check-profile",
+        "Validate a receiver-profile JSON (and optional stream map) against "
+        "the detector-core contract.",
+    )
+    check_profile.add_argument("--receiver-profile", required=True,
+                               help="Receiver-profile JSON to validate.")
     check_profile.add_argument(
         "--detector-core-profile",
         default=str(DEFAULT_DETECTOR_CORE_PROFILE),
@@ -821,7 +861,11 @@ def build_parser() -> argparse.ArgumentParser:
     check_profile.add_argument("--output-json", default=None)
     check_profile.set_defaults(func=_cmd_check_profile)
 
-    check_layout = subparsers.add_parser("check-layout")
+    check_layout = _add_command(
+        "check-layout",
+        "Report the detector row layout and the uint64 accumulator-bound "
+        "check for a frame geometry.",
+    )
     check_layout.add_argument("--receiver-profile", default=None)
     check_layout.add_argument("--stream-map", default=None)
     check_layout.add_argument(
@@ -849,8 +893,13 @@ def build_parser() -> argparse.ArgumentParser:
     check_layout.add_argument("--output-json", default=None)
     check_layout.set_defaults(func=_cmd_check_layout)
 
-    make_weights = subparsers.add_parser("make-weights")
-    make_weights.add_argument("--receiver-profile", required=True)
+    make_weights = _add_command(
+        "make-weights",
+        "Generate a packed int4 detector weight bank from a receiver profile.",
+    )
+    make_weights.add_argument("--receiver-profile", required=True,
+                              help="Receiver-profile JSON describing the "
+                                   "channelizer geometry.")
     make_weights.add_argument(
         "--detector-core-profile",
         default=str(DEFAULT_DETECTOR_CORE_PROFILE),
@@ -881,11 +930,20 @@ def build_parser() -> argparse.ArgumentParser:
             "for native receiver-coordinate weights."
         ),
     )
-    make_weights.add_argument("--output", required=True)
+    make_weights.add_argument("--output", required=True,
+                              help="Output path for the packed weight bank "
+                                   "(.bin); a .manifest.json is written "
+                                   "beside it.")
     make_weights.set_defaults(func=_cmd_make_weights)
 
-    export_bundle = subparsers.add_parser("export-runtime-weight-bundle")
-    export_bundle.add_argument("--receiver-profile", required=True)
+    export_bundle = _add_command(
+        "export-runtime-weight-bundle",
+        "Export the compact runtime bundle (weights plus manifests) for "
+        "deployment handoff.",
+    )
+    export_bundle.add_argument("--receiver-profile", required=True,
+                               help="Receiver-profile JSON describing the "
+                                    "channelizer geometry.")
     export_bundle.add_argument(
         "--detector-core-profile",
         default=str(DEFAULT_DETECTOR_CORE_PROFILE),
@@ -910,24 +968,42 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Inclusive range like 14:36, comma list, or single channel.",
     )
-    export_bundle.add_argument("--output-dir", required=True)
+    export_bundle.add_argument("--output-dir", required=True,
+                               help="Directory to write the runtime bundle "
+                                    "into.")
     export_bundle.set_defaults(func=_cmd_export_runtime_weight_bundle)
 
-    validate_bundle = subparsers.add_parser("validate-runtime-weight-bundle")
-    validate_bundle.add_argument("--bundle-dir", type=Path, required=True)
+    validate_bundle = _add_command(
+        "validate-runtime-weight-bundle",
+        "Re-validate a bundle directory written by "
+        "export-runtime-weight-bundle.",
+    )
+    validate_bundle.add_argument("--bundle-dir", type=Path, required=True,
+                                 help="Bundle directory to validate.")
     validate_bundle.add_argument("--output-json", type=Path, default=None)
     validate_bundle.set_defaults(func=_cmd_validate_runtime_weight_bundle)
 
-    chime_inspect = subparsers.add_parser("chime-inspect")
-    chime_inspect.add_argument("--input-dir", type=Path, required=True)
+    chime_inspect = _add_command(
+        "chime-inspect",
+        "Summarize CHIME baseband HDF5 files in a directory (shapes, dtypes, "
+        "frequency metadata).",
+    )
+    chime_inspect.add_argument("--input-dir", type=Path, required=True,
+                               help="Directory of CHIME baseband .h5 files.")
     chime_inspect.add_argument("--max-files", type=int, default=20)
     chime_inspect.add_argument("--dataset-path", default=None)
     chime_inspect.add_argument("--filename-pattern", default=None)
     chime_inspect.set_defaults(func=_cmd_chime_inspect)
 
-    chime_run = subparsers.add_parser("chime-run")
-    chime_run.add_argument("--input-dir", type=Path, required=True)
-    chime_run.add_argument("--output-dir", type=Path, required=True)
+    chime_run = _add_command(
+        "chime-run",
+        "Run the detector over a directory of already-staged CHIME baseband "
+        "HDF5 files (batch runner; for archive-scale runs use chime-scan).",
+    )
+    chime_run.add_argument("--input-dir", type=Path, required=True,
+                           help="Directory of CHIME baseband .h5 files.")
+    chime_run.add_argument("--output-dir", type=Path, required=True,
+                           help="Run directory for products and figures.")
     chime_run.add_argument(
         "--receiver-profile",
         type=Path,
@@ -977,8 +1053,14 @@ def build_parser() -> argparse.ArgumentParser:
     chime_run.add_argument("--plot", action="store_true")
     chime_run.set_defaults(func=_cmd_chime_run)
 
-    chime_plot = subparsers.add_parser("chime-plot")
-    chime_plot.add_argument("--run-dir", type=Path, required=True)
+    chime_plot = _add_command(
+        "chime-plot",
+        "Regenerate the diagnostic figures for a completed CHIME run "
+        "directory.",
+    )
+    chime_plot.add_argument("--run-dir", type=Path, required=True,
+                            help="Run directory written by chime-run or "
+                                 "chime-scan.")
     chime_plot.add_argument(
         "--clean-figures",
         action="store_true",
@@ -986,16 +1068,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chime_plot.set_defaults(func=_cmd_chime_plot)
 
-    validate_products = subparsers.add_parser("validate-products")
-    validate_products.add_argument("--run-dir", type=Path, required=True)
-    validate_products.add_argument("--output-json", type=Path, default=None)
+    validate_products = _add_command(
+        "validate-products",
+        "Validate a CHIME run directory's products against the v2 product "
+        "schema.",
+    )
+    validate_products.add_argument("--run-dir", type=Path, required=True,
+                                   help="Run directory written by chime-run "
+                                        "or chime-scan.")
+    validate_products.add_argument("--output-json", type=Path, default=None,
+                                   help="Also write the validation report as "
+                                        "JSON.")
     validate_products.set_defaults(func=_cmd_validate_products)
 
-    chime_scan = subparsers.add_parser(
+    chime_scan = _add_command(
         "chime-scan",
-        help="Run an analyzer over CHIME data through the datatrawl streaming engine "
-             "(per-pilot fan-out), then combine into the canonical products. "
-             "The classic 'chime-run' path is unchanged; this is opt-in.",
+        "Stream CHIME data through the datatrawl engine (one resumable "
+        "product per pilot), then combine into the canonical products. The "
+        "recommended archive-scale entry point; chime-run remains for "
+        "pre-staged local directories.",
     )
     chime_scan.add_argument("--input-dir", type=Path, default=None,
                             help="Directory of CHIME baseband .h5 files (required for "

@@ -1,7 +1,7 @@
 # coding=utf-8
-"""The combine step reproduces fstat's multi-pilot detector products exactly.
+"""The combine step reproduces PilotProxy's multi-pilot detector products exactly.
 
-Two synthetic channels are processed two ways: (1) fstat's ``run_chime_analysis``
+Two synthetic channels are processed two ways: (1) PilotProxy's ``run_chime_analysis``
 over both pilots at once (the reference), and (2) the datatrawl detector analyzer
 per pilot followed by ``combine_detector_products`` (the candidate). The combined
 ``chime_detector_outputs`` / ``chime_spectrogram_cache`` / ``chime_reductions_10s``

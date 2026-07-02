@@ -5,8 +5,9 @@ This is the implementation behind ``pilot-proxy chime-scan``. It reuses datatraw
 engine and plugin registry exactly as datatrawl's own ``scan`` command does
 (``registry.get`` -> ``plan_runs`` fan-out -> per-channel ``pipeline.run``), so a
 multi-channel pull is storage-safe and resumable, then stacks the per-pilot
-products with the combine step into PilotProxy's canonical products. The existing
-``run_chime_analysis`` path is untouched; this is a separate, opt-in entry point.
+products with the combine step into PilotProxy's canonical products. This is the
+recommended archive-scale entry point; ``pilot-proxy chime-run`` (the
+``run_chime_analysis`` batch path) remains for pre-staged local directories.
 
 * ``--source local``          : files already on disk (a 10 s chunk, /arc, ...).
 * ``--source cadc-datatrail``  : storage-safe streaming from the CADC archive.
@@ -30,8 +31,9 @@ def _named_inventory_path(name: str, source_root: str | Path | None = None) -> P
     """Return ``<root>/data/<name>/inventory.jsonl`` for a named datatrawl inventory.
 
     ``source_root`` is the directory passed to ``datatrawl survey --root``. When it
-    is omitted, datatrawl and fstat both interpret the current working directory as
-    the root. This keeps ``datatrawl survey --freq-ids <pilots> --name chime-pilots`` followed by
+    is omitted, datatrawl and pilot-proxy both interpret the current working
+    directory as the root. This keeps
+    ``datatrawl survey --freq-ids <pilots> --name chime-pilots`` followed by
     ``pilot-proxy chime-scan --inventory-name chime-pilots`` deterministic as long as
     both commands are run from the same directory.
     """
@@ -89,7 +91,7 @@ def run_chime_scan(
 
     from .combine import combine_detector_products
 
-    registry.load_plugins()  # bundled datatrawl plugins + fstat's entry-point plugins
+    registry.load_plugins()  # bundled datatrawl plugins + pilot-proxy's entry-point plugins
     if analyzer != _DETECTOR_ANALYZER:
         raise SystemExit(
             f"chime-scan: unknown analyzer {analyzer!r} "

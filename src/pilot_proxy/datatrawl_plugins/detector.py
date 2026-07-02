@@ -2,7 +2,7 @@
 """datatrawl Analyzer: CHIME DTV F-statistic detector.
 
 The detector functionality of ``pilot_proxy.chime.runner.run_chime_analysis`` as a
-datatrawl Analyzer. As with the offset analyzer, it reimplements no DSP: it wraps
+datatrawl Analyzer. It reimplements no DSP: it wraps
 PilotProxy's own ``pack_chime_block_for_detector`` -> ``detector_fn`` (the CUDA kernel
 via ``detect_packed_for_positive_excess`` by default) -> ``_append_detection_rows``
 maths, so the per-frame product matches the runner by construction.
@@ -143,7 +143,7 @@ _DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ = 10.0
 
 @_register_analyzer
 class PilotProxyDetectorAnalyzer(Analyzer):
-    """Per-pilot CHIME F-statistic detector, parity with fstat's runner."""
+    """Per-pilot CHIME F-statistic detector, parity with PilotProxy's batch runner."""
 
     requires_in_order = True
 
@@ -828,9 +828,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             if not self._pilot_in_band:
                 # No in-band pilot in this coarse channel: emit an explicitly
                 # invalid frame (reject_mask=0, valid=0, zero powers) and skip the
-                # kernel, so the product cannot be read as a real detection (mirrors
-                # the offset analyzer's out-of-band behaviour). valid=0 keeps the
-                # frame out of both integrated spectra.
+                # kernel, so the product cannot be read as a real detection.
+                # valid=0 keeps the frame out of both integrated spectra.
                 self._p_target.append(0)
                 self._p_ref_sum.append(0)
                 self._fstat_raw.append(float("nan"))

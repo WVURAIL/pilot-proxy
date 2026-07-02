@@ -135,7 +135,7 @@ elif shutil.which("nvidia-smi"):
     except Exception as exc:
         print(f"    CuPy not installed: {exc}")
 else:
-    print("    no GPU here -- skipping (the offset analyzer is CPU-only)")
+    print("    no GPU here -- skipping (CuPy is only needed on the GPU detector node)")
 PYEOF
 
 # --- CuPy CUDA headers (so the runtime JIT can build kernels) -----------------
@@ -201,7 +201,7 @@ if command -v nvidia-smi >/dev/null 2>&1; then
     make -C "${PILOT_PROXY_DIR}" build-kernel SM="${SM}"
 else
     echo "==> no GPU detected (nvidia-smi absent) -- skipping kernel build"
-    echo "    the offset analyzer is CPU-only; the detector needs a GPU node"
+    echo "    the detector needs a GPU node; a CPU-only host can still run the Python tests"
 fi
 
 # --- sanity checks -----------------------------------------------------------
