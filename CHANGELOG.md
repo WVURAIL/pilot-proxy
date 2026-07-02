@@ -2,6 +2,13 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `pilot-proxy analyze-injection-recovery`: post-hoc analysis of an injection
+  ladder's run products -- weighted recovery-linearity fit (floor + gain, with
+  a signal-dominated log-log slope check) and the F-statistic vs radiometer
+  detection comparison at matched false-alarm rates (empirical control
+  quantiles, Wilson 95% intervals). `docs/PUBLICATION_VALIDATION.md` now
+  ships the full publication runbook in-repo.
+
 - Publication-analysis commands: `pilot-proxy inject-pilot-tone` (integer-
   domain pilot-tone injection into real baseband copies; zero-amplitude pass
   is byte-identical, saturation counted, siblings preserved) and `pilot-proxy

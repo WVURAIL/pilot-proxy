@@ -372,6 +372,18 @@ def _cmd_inject_pilot_tone(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_analyze_injection_recovery(args: argparse.Namespace) -> None:
+    from pilot_proxy.chime.injection_recovery import main as recovery_main
+
+    argv: list[str] = []
+    for point in args.points:
+        argv += ["--point", str(point)]
+    for pfa in args.false_alarm_rates or []:
+        argv += ["--false-alarm-rate", str(pfa)]
+    argv += ["--output-dir", str(args.output_dir)]
+    raise SystemExit(recovery_main(argv))
+
+
 def _cmd_analyze_cleaning_tradeoff(args: argparse.Namespace) -> None:
     from pilot_proxy.chime.cleaning_tradeoff import main as tradeoff_main
 
@@ -1119,6 +1131,19 @@ def build_parser() -> argparse.ArgumentParser:
     inject_frequency.add_argument("--physical-channel", type=int, default=None)
     inject.add_argument("--phase-seed", type=int, default=20260701)
     inject.set_defaults(func=_cmd_inject_pilot_tone)
+
+    recovery = _add_command(
+        "analyze-injection-recovery",
+        "Analyze injection-ladder run products: recovery linearity plus the "
+        "F-statistic vs radiometer comparison at matched false-alarm rates.",
+    )
+    recovery.add_argument("--point", type=Path, action="append", required=True,
+                          dest="points",
+                          help="Ladder-point run dir (repeat; one must be a=0).")
+    recovery.add_argument("--false-alarm-rate", type=float, action="append",
+                          dest="false_alarm_rates", default=None)
+    recovery.add_argument("--output-dir", type=Path, required=True)
+    recovery.set_defaults(func=_cmd_analyze_injection_recovery)
 
     tradeoff = _add_command(
         "analyze-cleaning-tradeoff",

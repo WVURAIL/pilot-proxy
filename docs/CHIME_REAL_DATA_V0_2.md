@@ -281,11 +281,12 @@ positive_excess_fraction
 ## Injection-recovery and cleaning tradeoff
 
 Two publication-analysis commands operate on this workflow's files and
-products (see the validation runbook for the full procedures):
+products (procedures: `docs/PUBLICATION_VALIDATION.md`):
 
 ```text
 pilot-proxy inject-pilot-tone        # copy real baseband with a known tone
 pilot-proxy analyze-cleaning-tradeoff  # post-hoc mask-threshold sweep
+pilot-proxy analyze-injection-recovery # ladder linearity + radiometer baseline
 ```
 
 `inject-pilot-tone` works in the file's own integer domain (offset-binary

@@ -99,7 +99,7 @@
 \fancyhead[L]{\small PilotProxy-DS001}
 \fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.1.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small PilotProxy-DS001 v1.3}
+\fancyfoot[L]{\small PilotProxy-DS001 v1.4}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -109,14 +109,14 @@
 
 \title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.1.0\\Product Specification}
 \author{West Virginia University}
-\date{PilotProxy-DS001 v1.3 \\ May 29, 2026}
+\date{PilotProxy-DS001 v1.4 \\ July 2, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{FStatRed}PilotProxy}\par
-  {\small PilotProxy-DS001 v1.3, May 29, 2026}
+  {\small PilotProxy-DS001 v1.4, July 2, 2026}
 \end{minipage}
 \hfill
 \begin{minipage}[t]{0.58\textwidth}
@@ -489,6 +489,7 @@ The release-candidate source tree supplied for this document passed the Python r
 \begin{tabularx}{\linewidth}{|L{0.18\linewidth}|L{0.14\linewidth}|Y|}
 \hline
 \textbf{Date} & \textbf{Version} & \textbf{Revision}\\ \hline
+July 2, 2026 & 1.4 & Norm-corrected positive-excess mask: the mask compares against the exact H0 zero-point $\mu_0 = 2\,n_t/(n_l+n_u)$ set by the int4 weight norms (rule and product fields updated accordingly); runtime bundles carry the per-channel rational half-threshold $n_t:(n_l+n_u)$.\\ \hline
 May 29, 2026 & 1.3 & Added receiver-profile integration contract, full stream-map example, and profile-driven weight generation.\\ \hline
 May 29, 2026 & 1.2 & Regenerated for standalone \code{pilot-proxy} v0.1.0.  Added strict PNR/SNR terminology, physical channel support, calibration fields, strict JSON behavior, channel-21 edge-wrap handling, and source-tree release notes.\\ \hline
 May 29, 2026 & 1.1 & Standalone DTV scope; instrument-specific material removed.\\ \hline
