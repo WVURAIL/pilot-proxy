@@ -278,7 +278,10 @@ num_positive_excess_frames    # finite SNR shelf, equivalent to F > mu0
 positive_excess_fraction
 ```
 
-Core figures include a finite \(\mathrm{SNR}_{\mathrm{shelf}}\) histogram,
+Figures use LaTeX styling (Computer Modern mathtext by default;
+`PILOT_PROXY_USE_TEX=1` for full TeX rendering) and are written as 300 dpi
+PNG, with `PILOT_PROXY_FIGURE_FORMATS=png,pdf` adding vector PDFs for the
+manuscript. Core figures include a finite \(\mathrm{SNR}_{\mathrm{shelf}}\) histogram,
 F-statistic survival curves, F-statistic level spectrograms, baseband
 before/after spectra, baseband spectrograms, and mask spectrograms. The
 histogram x-axis is only \(\mathrm{SNR}_{\mathrm{shelf}}\): the top panel spans

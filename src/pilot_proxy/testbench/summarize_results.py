@@ -20,7 +20,7 @@ from pilot_proxy.json_utils import write_json_strict
 DEFAULT_INPUT_JSON = Path("generated/dtv_snr_eval/dtv_snr_eval.json")
 DEFAULT_OUTPUT_DIR = Path("generated/summary")
 DEFAULT_HISTOGRAM_BINS = 40
-DEFAULT_PLOT_DPI = 160
+DEFAULT_PLOT_DPI = 300  # publication-grade raster; match chime FIGURE_DPI
 FIGURE_WIDTH_IN = 7.0
 FIGURE_HEIGHT_IN = 4.5
 HISTOGRAM_MODE_AUTO = "auto"

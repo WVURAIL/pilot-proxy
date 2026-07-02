@@ -162,3 +162,33 @@ def test_clean_known_figures_removes_current_figure_names_only(tmp_path) -> None
 
     assert not current.exists()
     assert unknown.exists()
+
+
+def test_figure_formats_env_writes_vector_variants(tmp_path, monkeypatch) -> None:
+    from pilot_proxy.chime import plots as chime_plots
+
+    monkeypatch.setenv(chime_plots.FIGURE_FORMATS_ENV, "png,pdf")
+    assert chime_plots._figure_formats() == ("png", "pdf")
+    plt = chime_plots._setup_matplotlib()
+    fig, ax = plt.subplots()
+    ax.plot([0, 1], [0, 1], label=r"$F/\mu_0 - 1$")
+    ax.legend()
+    target = tmp_path / "figures" / "fstat_survival_by_pilot.png"
+    target.parent.mkdir(parents=True)
+    chime_plots._save_figure(fig, target)
+    plt.close(fig)
+    assert target.exists()
+    assert target.with_suffix(".pdf").exists()
+
+    # clean_known_figures removes every format variant of known names
+    run_dir = tmp_path
+    chime_plots.clean_known_figures(run_dir)
+    assert not target.exists()
+    assert not target.with_suffix(".pdf").exists()
+
+
+def test_figure_formats_default_is_png_only(monkeypatch) -> None:
+    from pilot_proxy.chime import plots as chime_plots
+
+    monkeypatch.delenv(chime_plots.FIGURE_FORMATS_ENV, raising=False)
+    assert chime_plots._figure_formats() == ("png",)

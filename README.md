@@ -348,6 +348,15 @@ PYTHONPATH=src python   -m pilot_proxy.testbench.evaluate_snr   --input-iq gener
 
 ---
 
+## Figures
+
+All figures use LaTeX styling and fonts. The default renderer is Matplotlib's
+Computer Modern mathtext, which needs no TeX installation; setting
+`PILOT_PROXY_USE_TEX=1` switches to full TeX text rendering when `latex`,
+`dvipng`, and the `cm-super` fonts are installed (CI runs with it off). Figures
+are written as 300 dpi PNG; set `PILOT_PROXY_FIGURE_FORMATS=png,pdf` to also
+write vector PDFs with the same stems for manuscript use.
+
 ## Build documentation
 
 Generated PDFs are ignored by git. Build locally when needed:

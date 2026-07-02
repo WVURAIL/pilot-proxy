@@ -24,7 +24,7 @@ from pilot_proxy.plot_style import setup_matplotlib
 
 DEFAULT_INPUT_CSV = Path("generated/dtv_snr_eval/dtv_snr_summary.csv")
 DEFAULT_OUTPUT_PNG = Path("generated/dtv_snr_eval/dtv_snr_sweep.png")
-DEFAULT_PLOT_DPI = 160
+DEFAULT_PLOT_DPI = 300  # publication-grade raster; match chime FIGURE_DPI
 FIGURE_WIDTH_IN = 8.0
 FIGURE_HEIGHT_IN = 5.5
 MARKER_SIZE = 4.0

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from pathlib import Path
 from typing import Sequence
 
@@ -30,6 +31,29 @@ from .products import (
 )
 
 FIGURE_DPI = 300
+
+# Camera-ready export: comma-separated list of Matplotlib formats, e.g.
+# PILOT_PROXY_FIGURE_FORMATS=png,pdf. PNG (300 dpi) stays the default and the
+# canonical product name; extra formats are written alongside with the same
+# stem, so pdf gives vector line art for the manuscript without changing the
+# figure-name contract.
+FIGURE_FORMATS_ENV = "PILOT_PROXY_FIGURE_FORMATS"
+DEFAULT_FIGURE_FORMATS = ("png",)
+
+
+def _figure_formats() -> tuple[str, ...]:
+    raw = os.environ.get(FIGURE_FORMATS_ENV, "")
+    formats = tuple(
+        part.strip().lower() for part in raw.split(",") if part.strip()
+    )
+    return formats or DEFAULT_FIGURE_FORMATS
+
+
+def _save_figure(fig, path) -> None:
+    """Save one figure under every requested format, sharing the PNG stem."""
+    base = Path(path)
+    for fmt in _figure_formats():
+        fig.savefig(base.with_suffix("." + fmt), dpi=FIGURE_DPI)
 OUTLIER_PHYSICAL_CHANNEL = 30
 FSTAT_TOP_TICKS_DB = np.asarray(
     [1.0e-5, 1.0e-4, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 20.0]
@@ -502,7 +526,7 @@ def plot_snr_shelf_histogram(run_dir: Path) -> list[Path]:
         figures / "snr_shelf_histogram_by_pilot.png",
     ]
     for path in outputs:
-        fig.savefig(path, dpi=FIGURE_DPI)
+        _save_figure(fig, path)
     plt.close(fig)
 
     _write_fstat_summary(
@@ -631,7 +655,7 @@ def plot_fstat_survival(run_dir: Path) -> list[Path]:
         figures / "fstat_survival_by_pilot.png",
     ]
     for path in outputs:
-        fig.savefig(path, dpi=FIGURE_DPI)
+        _save_figure(fig, path)
     plt.close(fig)
     return outputs
 
@@ -710,7 +734,7 @@ def plot_baseband_spectrum(run_dir: Path) -> list[Path]:
         figures / "baseband_spectrum_before_after_mask.png",
     ]
     for path in outputs:
-        fig.savefig(path, dpi=FIGURE_DPI)
+        _save_figure(fig, path)
     plt.close(fig)
     write_spectrum_table(
         Path(run_dir),
@@ -821,7 +845,7 @@ def _plot_spectrogram(
     figures.mkdir(parents=True, exist_ok=True)
     outputs = [figures / f"{basename}.png"]
     for path in outputs:
-        fig.savefig(path, dpi=FIGURE_DPI)
+        _save_figure(fig, path)
     plt.close(fig)
     return outputs
 
@@ -888,9 +912,9 @@ def clean_known_figures(run_dir: Path) -> None:
     """Delete all known CHIME figure files from the figures directory."""
     figures = Path(run_dir) / "figures"
     for name in KNOWN_CHIME_FIGURES:
-        p = figures / name
-        if p.exists():
-            p.unlink()
+        for candidate in figures.glob(Path(name).stem + ".*"):
+            if candidate.is_file():
+                candidate.unlink()
 
 
 def generate_chime_plots(run_dir: Path) -> list[Path]:
