@@ -2,6 +2,13 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Publication-analysis commands: `pilot-proxy inject-pilot-tone` (integer-
+  domain pilot-tone injection into real baseband copies; zero-amplitude pass
+  is byte-identical, saturation counted, siblings preserved) and `pilot-proxy
+  analyze-cleaning-tradeoff` (post-hoc mask-threshold sweep over stored
+  num/den with an exact x=0 anchor against the shipped mask; operating-curve
+  and recovered-bandwidth outputs).
+
 - Norm-corrected positive-excess mask: the mask now compares against the
   detector's exact H0 zero-point `mu0 = 2*target_norm_sq/ref_norm_sum_sq`
   (integer cross-multiplication) instead of `F > 1`. int4 weight quantization

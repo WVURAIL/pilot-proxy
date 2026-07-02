@@ -347,6 +347,47 @@ def _cmd_chime_run(args: argparse.Namespace) -> None:
     _run_module("pilot_proxy.chime.runner", argv)
 
 
+def _cmd_inject_pilot_tone(args: argparse.Namespace) -> None:
+    from pilot_proxy.chime.injection import inject_directory
+
+    if args.input.is_dir():
+        paths = sorted(args.input.glob(args.glob))
+        if not paths:
+            raise SystemExit(f"no files matching {args.glob!r} under {args.input}")
+    else:
+        paths = [args.input]
+    entries = inject_directory(
+        paths,
+        args.output_dir,
+        amplitude_lsb=args.amplitude_lsb,
+        phase_seed=args.phase_seed,
+        baseband_frequency_hz=args.baseband_frequency_hz,
+        pilot_frequency_hz=args.pilot_frequency_hz,
+        physical_channel=args.physical_channel,
+    )
+    total_clip = sum(entry["clip_count"] for entry in entries)
+    print(
+        f"Injected {len(entries)} file(s) -> {args.output_dir} "
+        f"(amplitude {args.amplitude_lsb} LSB, total clipped samples {total_clip})"
+    )
+
+
+def _cmd_analyze_cleaning_tradeoff(args: argparse.Namespace) -> None:
+    from pilot_proxy.chime.cleaning_tradeoff import main as tradeoff_main
+
+    argv: list[str] = ["--run-dir", str(args.run_dir),
+                       "--excess-db-start", str(args.excess_db_start),
+                       "--excess-db-stop", str(args.excess_db_stop),
+                       "--excess-db-step", str(args.excess_db_step)]
+    if args.control_run_dir is not None:
+        argv += ["--control-run-dir", str(args.control_run_dir)]
+    if args.survey_hours is not None:
+        argv += ["--survey-hours", str(args.survey_hours)]
+    if args.output_dir is not None:
+        argv += ["--output-dir", str(args.output_dir)]
+    raise SystemExit(tradeoff_main(argv))
+
+
 def _cmd_chime_plot(args: argparse.Namespace) -> None:
     argv = ["--run-dir", str(args.run_dir)]
     if args.clean_figures:
@@ -1059,6 +1100,39 @@ def build_parser() -> argparse.ArgumentParser:
     chime_run.add_argument("--calibration-seconds", type=float, default=2.0)
     chime_run.add_argument("--plot", action="store_true")
     chime_run.set_defaults(func=_cmd_chime_run)
+
+    inject = _add_command(
+        "inject-pilot-tone",
+        "Copy real baseband files with a known pilot tone injected "
+        "(integer-domain; amplitude 0 is a byte-identical control).",
+    )
+    inject.add_argument("--input", type=Path, required=True,
+                        help="A baseband .h5 file or a directory of them.")
+    inject.add_argument("--glob", default="*.h5",
+                        help="Filename glob when --input is a directory.")
+    inject.add_argument("--output-dir", type=Path, required=True)
+    inject.add_argument("--amplitude-lsb", type=float, required=True,
+                        help="Tone amplitude in raw 4-bit LSB units; 0 = identity control.")
+    inject_frequency = inject.add_mutually_exclusive_group(required=True)
+    inject_frequency.add_argument("--baseband-frequency-hz", type=float, default=None)
+    inject_frequency.add_argument("--pilot-frequency-hz", type=float, default=None)
+    inject_frequency.add_argument("--physical-channel", type=int, default=None)
+    inject.add_argument("--phase-seed", type=int, default=20260701)
+    inject.set_defaults(func=_cmd_inject_pilot_tone)
+
+    tradeoff = _add_command(
+        "analyze-cleaning-tradeoff",
+        "Post-hoc mask-threshold sweep over stored products: operating "
+        "curve and recovered-bandwidth headline (exact x=0 anchor).",
+    )
+    tradeoff.add_argument("--run-dir", type=Path, required=True)
+    tradeoff.add_argument("--control-run-dir", type=Path, default=None)
+    tradeoff.add_argument("--excess-db-start", type=float, default=0.0)
+    tradeoff.add_argument("--excess-db-stop", type=float, default=12.0)
+    tradeoff.add_argument("--excess-db-step", type=float, default=0.5)
+    tradeoff.add_argument("--survey-hours", type=float, default=None)
+    tradeoff.add_argument("--output-dir", type=Path, default=None)
+    tradeoff.set_defaults(func=_cmd_analyze_cleaning_tradeoff)
 
     chime_plot = _add_command(
         "chime-plot",

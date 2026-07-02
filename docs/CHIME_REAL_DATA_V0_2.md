@@ -278,6 +278,26 @@ num_positive_excess_frames    # finite SNR shelf, equivalent to F > mu0
 positive_excess_fraction
 ```
 
+## Injection-recovery and cleaning tradeoff
+
+Two publication-analysis commands operate on this workflow's files and
+products (see the validation runbook for the full procedures):
+
+```text
+pilot-proxy inject-pilot-tone        # copy real baseband with a known tone
+pilot-proxy analyze-cleaning-tradeoff  # post-hoc mask-threshold sweep
+```
+
+`inject-pilot-tone` works in the file's own integer domain (offset-binary
+4+4-bit, components [-8, 7]): a zero-amplitude pass is byte-identical to the
+source, injected deltas are exact apart from counted saturation, and sibling
+datasets/attributes and filenames are preserved, so the output directory runs
+through `chime-scan --source local` unchanged. `analyze-cleaning-tradeoff`
+sweeps `tau = mu0 * 10^(x/10)` over the stored `p_target_u64`/`p_ref_sum_u64`
+and norms; the `x = 0` point must reproduce the stored mask exactly before any
+other threshold is reported, and the outputs are the masked-fraction/residual
+operating curve plus the recovered-bandwidth headline.
+
 Figures use LaTeX styling (Computer Modern mathtext by default;
 `PILOT_PROXY_USE_TEX=1` for full TeX rendering) and are written as 300 dpi
 PNG, with `PILOT_PROXY_FIGURE_FORMATS=png,pdf` adding vector PDFs for the
