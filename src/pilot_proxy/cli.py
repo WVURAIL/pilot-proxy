@@ -115,59 +115,15 @@ def _cmd_generate_atsc(args: argparse.Namespace) -> None:
 
 
 def _cmd_evaluate_snr(args: argparse.Namespace) -> None:
-    argv = [
-        "--input-iq",
-        args.input_iq,
-        "--output-dir",
-        args.output_dir,
-        "--noise-trials",
-        str(args.noise_trials),
-        "--seed",
-        str(args.seed),
-        "--noise-source",
-        args.noise_source,
-        "--gnuradio-python",
-        args.gnuradio_python,
-        "--lib-path",
-        args.lib_path,
-        "--weights-path",
-        args.weights_path,
-        "--dtv-bandwidth-hz",
-        str(args.dtv_bandwidth_hz),
-        "--frame-size-samples",
-        str(args.samples_per_block),
-        "--num-input-streams",
-        str(args.num_input_streams),
-        "--pilot-below-data-db",
-        str(args.pilot_below_data_db),
-        "--bin-enbw-hz",
-        str(args.bin_enbw_hz),
-        "--pilot-capture-efficiency",
-        str(args.pilot_capture_efficiency),
-        "--max-denominator",
-        str(args.max_denominator),
-    ]
-    if args.physical_channel is not None:
-        argv.extend(["--physical-channel", str(args.physical_channel)])
-    if args.threshold_snr_shelf_db is not None:
-        argv.extend(["--threshold-snr-shelf-db", str(args.threshold_snr_shelf_db)])
-    for value in args.requested_snr_shelf_db or []:
-        argv.extend(["--requested-snr-shelf-db", str(value)])
-    if args.snr_start_db is not None:
-        argv.extend(["--snr-start-db", str(args.snr_start_db)])
-    if args.snr_stop_db is not None:
-        argv.extend(["--snr-stop-db", str(args.snr_stop_db)])
-    if args.snr_step_db is not None:
-        argv.extend(["--snr-step-db", str(args.snr_step_db)])
-    for value in args.frequency_offset_hz or []:
-        argv.extend(["--frequency-offset-hz", str(value)])
-    if args.standard_frequency_offset_sweep:
-        argv.append("--standard-frequency-offset-sweep")
-    argv.extend(["--channel-gain-db", str(args.channel_gain_db)])
-    argv.extend(["--channel-phase-deg", str(args.channel_phase_deg)])
-    if args.save_noisy_iq:
-        argv.append("--save-noisy-iq")
-    _run_module("pilot_proxy.testbench.evaluate_snr", argv)
+    from pilot_proxy.testbench.evaluate_snr import run as evaluate_snr_run
+
+    # The subparser inherits the testbench parser via parents=, so the parsed
+    # namespace is exactly what the testbench expects: call it directly
+    # instead of hand-rebuilding argv (the old pattern silently dropped any
+    # option added to the testbench but not mirrored here).
+    code = evaluate_snr_run(args)
+    if code:
+        raise SystemExit(code)
 
 
 def _cmd_audit_atsc(args: argparse.Namespace) -> None:
@@ -693,89 +649,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     gen.set_defaults(func=_cmd_generate_atsc)
 
-    eval_parser = _add_command(
+    from pilot_proxy.testbench.evaluate_snr import (
+        build_parser as _evaluate_snr_parser,
+    )
+
+    eval_parser = subparsers.add_parser(
         "evaluate-snr",
-        "Sweep detection rate versus shelf SNR: inject AWGN into a clean IQ "
-        "capture and run the CUDA detector at each level.",
+        help=(
+            "Sweep detection rate versus shelf SNR: inject AWGN into a clean "
+            "IQ capture and run the detector at each level."
+        ),
+        description=(
+            "Sweep detection rate versus shelf SNR: inject AWGN into a clean "
+            "IQ capture and run the detector at each level. Options are the "
+            "testbench evaluator's, inherited directly (single source of "
+            "truth)."
+        ),
+        parents=[_evaluate_snr_parser(add_help=False)],
     )
-    eval_parser.add_argument(
-        "--input-iq",
-        default=str(GENERATED_DIR / "atsc" / "atsc_8vsb_complex64.cfile"),
-    )
-    eval_parser.add_argument(
-        "--output-dir",
-        default=str(GENERATED_DIR / "dtv_snr_eval"),
-    )
-    eval_parser.add_argument(
-        "--requested-snr-shelf-db",
-        type=float,
-        action="append",
-        default=None,
-        help="Requested ATSC data-shelf SNR relative to non-DTV noise.",
-    )
-    eval_parser.add_argument("--snr-start-db", type=float, default=None)
-    eval_parser.add_argument("--snr-stop-db", type=float, default=None)
-    eval_parser.add_argument("--snr-step-db", type=float, default=None)
-    eval_parser.add_argument(
-        "--frequency-offset-hz",
-        type=float,
-        action="append",
-        default=None,
-        help="Apply a baseband frequency offset before AWGN. Repeat to sweep.",
-    )
-    eval_parser.add_argument(
-        "--standard-frequency-offset-sweep",
-        action="store_true",
-        help="Evaluate the built-in -1 kHz, 0 Hz, +1 kHz offset sweep.",
-    )
-    eval_parser.add_argument("--channel-gain-db", type=float, default=0.0)
-    eval_parser.add_argument("--channel-phase-deg", type=float, default=0.0)
-    eval_parser.add_argument("--noise-trials", type=int, default=DEFAULT_NOISE_TRIALS)
-    eval_parser.add_argument(
-        "--noise-source",
-        choices=["gnuradio", "python"],
-        default="gnuradio",
-    )
-    eval_parser.add_argument("--gnuradio-python", default=DEFAULT_GNURADIO_PYTHON)
-    eval_parser.add_argument("--save-noisy-iq", action="store_true")
-    eval_parser.add_argument("--seed", type=int, default=DEFAULT_EVALUATOR_SEED)
-    eval_parser.add_argument("--dtv-bandwidth-hz", type=float, default=DTV_BANDWIDTH_HZ)
-    eval_parser.add_argument(
-        "--frame-size-samples",
-        dest="samples_per_block",
-        type=int,
-        default=DEFAULT_FRAME_SIZE_SAMPLES,
-        help="Frame size, in channelized samples, to evaluate per trial.",
-    )
-    eval_parser.add_argument("--physical-channel", type=int, default=None)
-    eval_parser.add_argument("--threshold-snr-shelf-db", type=float, default=None)
-    eval_parser.add_argument(
-        "--num-input-streams",
-        dest="num_input_streams",
-        type=int,
-        default=DEFAULT_NUM_INPUT_STREAMS,
-        help="Number of independent input streams/feeds to combine.",
-    )
-    eval_parser.add_argument(
-        "--max-denominator",
-        type=int,
-        default=DEFAULT_THRESHOLD_MAX_DENOMINATOR,
-    )
-    eval_parser.add_argument(
-        "--pilot-below-data-db",
-        dest="pilot_below_data_db",
-        type=float,
-        default=PILOT_BELOW_DATA_DB,
-        help="Positive dB offset: ATSC pilot power below average data-shelf power.",
-    )
-    eval_parser.add_argument("--bin-enbw-hz", type=float, default=EFFECTIVE_BIN_BW_HZ)
-    eval_parser.add_argument(
-        "--pilot-capture-efficiency",
-        type=float,
-        default=PILOT_CAPTURE_EFFICIENCY,
-    )
-    eval_parser.add_argument("--lib-path", default=str(DEFAULT_LIB_PATH))
-    eval_parser.add_argument("--weights-path", default=str(DEFAULT_WEIGHTS_PATH))
     eval_parser.set_defaults(func=_cmd_evaluate_snr)
 
     plot = _add_command(

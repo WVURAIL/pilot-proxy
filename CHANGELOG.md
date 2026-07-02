@@ -2,6 +2,15 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `pilot-proxy evaluate-snr` now inherits the testbench evaluator's parser
+  directly (`parents=`) and calls it in-process instead of hand-mirroring
+  arguments into a subprocess. This fixes `--detector-backend` (and 15 other
+  testbench options that had silently never been exposed on the CLI:
+  channelizer geometry/rate overrides, `--scale`, `--clip-sigma`,
+  `--spectral-sense`, `--waveform-audit-json`, archive-phase toggles, and
+  the experimental knobs) and adds a parity test so the CLI can never drift
+  from the testbench surface again.
+
 - `evaluate-snr --detector-backend cpu-reference`: publication detection
   sweeps without a GPU. The primary fields come from the validated
   exact-integer CPU reference (shared result-builder with the kernel path,

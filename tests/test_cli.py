@@ -152,60 +152,96 @@ def test_detect_wrapper_has_default_detector_input(monkeypatch) -> None:
     )
 
 
-def test_evaluate_wrapper_forwards_num_input_streams(monkeypatch, tmp_path) -> None:
-    calls = []
+def test_evaluate_snr_cli_forwards_parsed_namespace(monkeypatch, tmp_path) -> None:
+    captured = {}
 
-    # noinspection PyShadowingNames
+    def fake_run(args):
+        captured["args"] = args
+        return 0
 
-    def fake_run(cmd, *, cwd, env):
-        calls.append((cmd, cwd, env))
-        return SimpleNamespace(returncode=0)
-
-    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        "pilot_proxy.testbench.evaluate_snr.run", fake_run
+    )
 
     result = cli.main(
         [
             "evaluate-snr",
-            "--input-iq",
-            str(tmp_path / "clean.cfile"),
-            "--output-dir",
-            str(tmp_path / "eval"),
-            "--requested-snr-shelf-db",
-            THRESHOLD_SNR_SHELF_DB,
-            "--snr-start-db",
-            SNR_START_DB_TEXT,
-            "--snr-stop-db",
-            SNR_STOP_DB_TEXT,
-            "--snr-step-db",
-            SNR_STEP_DB_TEXT,
-            "--frequency-offset-hz",
-            FREQUENCY_OFFSET_HZ_TEXT,
+            "--input-iq", str(tmp_path / "clean.cfile"),
+            "--output-dir", str(tmp_path / "eval"),
+            "--snr-start-db", SNR_START_DB_TEXT,
+            "--snr-stop-db", SNR_STOP_DB_TEXT,
+            "--snr-step-db", SNR_STEP_DB_TEXT,
+            "--frequency-offset-hz", FREQUENCY_OFFSET_HZ_TEXT,
             "--standard-frequency-offset-sweep",
-            "--channel-gain-db",
-            CHANNEL_GAIN_DB_TEXT,
-            "--channel-phase-deg",
-            CHANNEL_PHASE_DEG_TEXT,
-            "--num-input-streams",
-            NUM_INPUT_STREAMS_TEXT,
+            "--channel-gain-db", CHANNEL_GAIN_DB_TEXT,
+            "--channel-phase-deg", CHANNEL_PHASE_DEG_TEXT,
+            "--num-input-streams", NUM_INPUT_STREAMS_TEXT,
         ]
     )
 
     assert result == 0
-    cmd = calls[0][0]
-    assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.testbench.evaluate_snr"]
-    assert cmd[cmd.index("--num-input-streams") + 1] == NUM_INPUT_STREAMS_TEXT
-    assert cmd[cmd.index("--snr-start-db") + 1] == NORMALIZED_SNR_START_DB_TEXT
-    assert cmd[cmd.index("--snr-stop-db") + 1] == NORMALIZED_SNR_STOP_DB_TEXT
-    assert cmd[cmd.index("--snr-step-db") + 1] == NORMALIZED_SNR_STEP_DB_TEXT
-    assert cmd[cmd.index("--frequency-offset-hz") + 1] == (
-        NORMALIZED_FREQUENCY_OFFSET_HZ_TEXT
-    )
-    assert "--standard-frequency-offset-sweep" in cmd
-    assert cmd[cmd.index("--channel-gain-db") + 1] == CHANNEL_GAIN_DB_TEXT
-    assert cmd[cmd.index("--channel-phase-deg") + 1] == (
-        NORMALIZED_CHANNEL_PHASE_DEG_TEXT
-    )
+    args = captured["args"]
+    # The subparser inherits the testbench parser (parents=), so values arrive
+    # typed and normalized by the single authoritative parser.
+    assert args.num_input_streams == int(NUM_INPUT_STREAMS_TEXT)
+    assert args.snr_start_db == float(SNR_START_DB_TEXT)
+    assert args.snr_stop_db == float(SNR_STOP_DB_TEXT)
+    assert args.snr_step_db == float(SNR_STEP_DB_TEXT)
+    assert args.frequency_offset_hz == [float(FREQUENCY_OFFSET_HZ_TEXT)]
+    assert args.standard_frequency_offset_sweep is True
+    assert args.channel_gain_db == float(CHANNEL_GAIN_DB_TEXT)
+    assert args.channel_phase_deg == float(CHANNEL_PHASE_DEG_TEXT)
+    assert args.detector_backend == "cuda"
 
+
+def test_evaluate_snr_cli_accepts_detector_backend(monkeypatch, tmp_path) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        "pilot_proxy.testbench.evaluate_snr.run",
+        lambda args: captured.setdefault("args", args) and 0 or 0,
+    )
+    # The exact publication-sweep command shape from the validation runbook.
+    result = cli.main(
+        [
+            "evaluate-snr",
+            "--input-iq", str(tmp_path / "clean.cfile"),
+            "--physical-channel", "14",
+            "--frame-size-samples", "16384",
+            "--num-input-streams", "4",
+            "--snr-start-db", "-38", "--snr-stop-db", "-24", "--snr-step-db", "1",
+            "--standard-frequency-offset-sweep",
+            "--threshold-snr-shelf-db", "-32",
+            "--noise-trials", "300",
+            "--output-dir", str(tmp_path / "pd_curves"),
+            "--detector-backend", "cpu-reference",
+        ]
+    )
+    assert result == 0
+    assert captured["args"].detector_backend == "cpu-reference"
+    assert captured["args"].noise_trials == 300
+
+
+def test_evaluate_snr_cli_inherits_every_testbench_option() -> None:
+    import argparse
+
+    from pilot_proxy.testbench.evaluate_snr import build_parser as tb_build
+
+    def option_strings(parser):
+        out = set()
+        for action in parser._actions:
+            out.update(o for o in action.option_strings if o.startswith("--"))
+        out.discard("--help")
+        return out
+
+    top = cli.build_parser()
+    sub = None
+    for action in top._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            sub = action.choices["evaluate-snr"]
+    missing = option_strings(tb_build()) - option_strings(sub)
+    assert not missing, (
+        f"CLI evaluate-snr is missing testbench options: {sorted(missing)}"
+    )
 
 def test_plot_results_wrapper(monkeypatch, tmp_path) -> None:
     calls = []

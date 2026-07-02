@@ -1162,8 +1162,9 @@ def _summarize_rows(
     return summary_rows
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
+        add_help=add_help,
         description=(
             "Inject AWGN into a clean GNU Radio ATSC IQ waveform, run the "
             "reference-channelizer/4+4-bit pipeline and CUDA kernel, and "
@@ -1367,8 +1368,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    return run(parser.parse_args(argv))
 
+
+def run(args: argparse.Namespace) -> int:
+    """Run the evaluator from a parsed namespace (shared with the CLI)."""
     if args.bits != LOCKED_BITS_PER_COMPONENT:
         raise SystemExit("This evaluator is intended for locked 4+4 bit input.")
     if args.detector_window_samples != LOCKED_DETECTOR_WINDOW_SAMPLES:
