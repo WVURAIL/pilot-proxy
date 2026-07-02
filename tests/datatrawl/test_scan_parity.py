@@ -31,6 +31,10 @@ from datatrawl.plugins.readers import _baseband_format as fmt
 
 from pilot_proxy.chime.runner import run_chime_analysis
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED
+from pilot_proxy.detector_contract import (
+    norm_corrected_positive_excess,
+    weight_term_norms_sq,
+)
 from pilot_proxy.detector_reference import (
     INT4_COMPONENT_BITS, fstat_cpu_reference, unpack_packed_complex,
 )
@@ -52,13 +56,17 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
     if pk.ndim == 2:
         pk = pk[None, ...]
     w = unpack_packed_complex(np.asarray(weights, dtype=np.int8), INT4_COMPONENT_BITS)
+    _nt, _nl, _nu = weight_term_norms_sq(np.asarray(weights, dtype=np.int8))
+    _nrs = int(_nl + _nu)
     results = []
     for b in range(int(pk.shape[0])):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
         _f, sums = fstat_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
         den = int(round(float(sums[1] + sums[2])))
-        results.append({"block_index": b, "mask": int(den != 0 and 2 * num > den),
+        results.append({"block_index": b, "mask": norm_corrected_positive_excess(
+                num, den, target_norm_sq=_nt, ref_norm_sum_sq=_nrs
+            ),
                         "p_target_u64": num, "p_ref_sum_u64": den})
     return {"batch": int(pk.shape[0]), "detector_rows_per_block": int(pk.shape[1]),
             "rational_overflow_count": 0, "results": results}

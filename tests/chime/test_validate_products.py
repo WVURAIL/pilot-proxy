@@ -10,6 +10,7 @@ from pilot_proxy.detector_contract import (
     CHIME_STATS_SCHEMA_VERSION,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_chime_detector_contract,
+    positive_excess_mask_policy,
 )
 from pilot_proxy.chime.validate_products import validate_products
 
@@ -21,6 +22,8 @@ def _write_products(
     positive_excess: bool = True,
     corrupt_positive_excess_mask: bool = False,
     corrupt_detector_window_metadata: bool = False,
+    norm_corrected: bool = False,
+    omit_norms: bool = False,
 ) -> None:
     run_dir.mkdir()
     physical_channel = np.asarray([14, 15], dtype=np.int32)
@@ -32,10 +35,25 @@ def _write_products(
     p_ref = valid.astype(np.uint64) * np.uint64(20)
     p_target = np.asarray([[21, 20], [40, 0], [22, 50]], dtype=np.uint64)
     fstat_raw = np.asarray([[1.05, 1.0], [2.0, np.nan], [1.1, 2.5]])
+    target_norm_sq = None
+    ref_norm_sum_sq = None
     if positive_excess:
         p_target = np.asarray([[10, 11], [40, 0], [9, 50]], dtype=np.uint64)
         fstat_raw = np.asarray([[1.0, 1.1], [4.0, np.nan], [0.9, 5.0]])
         mask = np.asarray([[0, 1], [1, 0], [0, 1]], dtype=np.uint8)
+        if norm_corrected:
+            # Deliberately unequal norms so the corrected rule and the legacy
+            # F>1 rule disagree on chosen cells: channel 0 uses nt=5, nrs=9
+            # (threshold F > 10/9) and channel 1 uses nt=5, nrs=11
+            # (threshold F > 10/11).
+            target_norm_sq = np.asarray([5, 5], dtype=np.int64)
+            ref_norm_sum_sq = np.asarray([9, 11], dtype=np.int64)
+            # [0, 0]: p_t=11, p_ref=20 -> legacy 1 (2*11>20) but corrected 0
+            # (11*9=99 <= 5*20=100). [0, 1]: p_t=10, p_ref=20 -> legacy 0
+            # (20>20 false) but corrected 1 (10*11=110 > 100).
+            p_target = np.asarray([[11, 10], [40, 0], [9, 50]], dtype=np.uint64)
+            fstat_raw = np.asarray([[1.1, 1.0], [4.0, np.nan], [0.9, 5.0]])
+            mask = np.asarray([[0, 1], [1, 0], [0, 1]], dtype=np.uint8)
         if corrupt_positive_excess_mask:
             mask = np.array(mask, copy=True)
             mask[0, 0] = 1
@@ -54,6 +72,13 @@ def _write_products(
         "mask": mask,
         "valid": valid,
     }
+    if norm_corrected and not omit_norms:
+        assert target_norm_sq is not None and ref_norm_sum_sq is not None
+        detector_payload["target_norm_sq"] = target_norm_sq
+        detector_payload["ref_norm_sum_sq"] = ref_norm_sum_sq
+        detector_payload["mu0"] = (
+            2.0 * target_norm_sq.astype(float) / ref_norm_sum_sq.astype(float)
+        )
     np.savez_compressed(run_dir / "chime_detector_outputs.npz", **detector_payload)
     cache_mask = np.array(mask, copy=True)
     if corrupt_cache_mask:
@@ -101,6 +126,8 @@ def _write_products(
         "mask_rule": "valid && (p_target > (p_ref_sum >> 1))",
         "equivalent_rule": "2*p_target > p_ref_sum",
     }
+    if norm_corrected:
+        mask_policy = dict(positive_excess_mask_policy())
     detector_contract = build_chime_detector_contract(
         detector_window_samples=128,
         skipped_guard_bins=1,
@@ -195,3 +222,38 @@ def test_validate_products_reports_detector_window_contract_mismatch(tmp_path) -
     assert report["valid"] is False
     checks = {error["check"] for error in report["errors"]}
     assert "run_config.detector_window_samples" in checks
+
+
+def test_validate_products_accepts_norm_corrected_rule(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_products(run_dir, norm_corrected=True)
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is True, report["errors"]
+
+
+def test_validate_products_checks_norm_corrected_mask_rule(tmp_path) -> None:
+    # The corrupted cell [0, 0] (mask forced to 1) is legal under the legacy
+    # F>1 rule (2*11 > 20) but illegal under the declared corrected rule
+    # (11*9 <= 5*20), so this only fails if the validator dispatches to the
+    # corrected rule.
+    run_dir = tmp_path / "run"
+    _write_products(run_dir, norm_corrected=True, corrupt_positive_excess_mask=True)
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "detector.mask.positive_excess_rule" in checks
+
+
+def test_validate_products_norm_corrected_rule_requires_norms(tmp_path) -> None:
+    run_dir = tmp_path / "run"
+    _write_products(run_dir, norm_corrected=True, omit_norms=True)
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "detector.mask.norms_missing" in checks

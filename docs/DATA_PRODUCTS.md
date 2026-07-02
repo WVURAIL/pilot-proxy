@@ -76,6 +76,16 @@ Key fields:
 | `snr_shelf_db`         |   `(num_frames, num_pilots)` | `float64`   | dB         | Estimated ATSC data-shelf SNR      |
 | `valid`                |   `(num_frames, num_pilots)` | `uint8`     | 0/1        | `p_ref_sum != 0`                   |
 | `mask`                 |   `(num_frames, num_pilots)` | `uint8`     | 0/1        | Positive-excess mask               |
+| `target_norm_sq`       |              `(num_pilots,)` | `int64`     | unitless   | Exact `||w_target||^2` (int4 weights) |
+| `ref_norm_sum_sq`      |              `(num_pilots,)` | `int64`     | unitless   | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
+| `mu0`                  |              `(num_pilots,)` | `float64`   | unitless   | `2*target_norm_sq/ref_norm_sum_sq`; flat-floor `E[F]` |
+| `pilot_excess_corrected` | `(num_frames, num_pilots)` | `float64`   | unitless   | `F/mu0 - 1` (NaN where invalid)    |
+
+The mask is norm-corrected positive excess: `valid && (p_target *
+ref_norm_sum_sq > target_norm_sq * p_ref_sum)`, the exact integer form of
+`F > mu0` (see `docs/METHOD_SPEC.md`). Products written before the correction
+declare the legacy `F > 1` rule in their recorded `mask_rule` and omit the
+four norm fields.
 
 ## Spectrogram Cache NPZ
 

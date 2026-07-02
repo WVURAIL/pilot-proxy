@@ -53,18 +53,40 @@ rho = F - 1
 
 ## Positive-Excess Mask
 
-The CHIME real-data workflow is thresholdless:
+The CHIME real-data workflow uses a fixed, parameter-free mask threshold at the
+detector's own H0 zero-point. int4 quantization of the steering vectors leaves
+the three weight-term squared norms unequal, so under a locally flat noise
+floor
+
+```text
+E[P_term] = sigma^2 * ||w_term||^2
+E[F]      = mu0 = 2 * target_norm_sq / ref_norm_sum_sq
+```
+
+with `target_norm_sq = ||w_target||^2` and `ref_norm_sum_sq = ||w_ref_lower||^2
++ ||w_ref_upper||^2` (exact integers, computed from the packed weights). Across
+the shipped ATSC 14-36 bank, `mu0` spans about 0.985 to 1.011, so a mask at
+`F > 1` would pin the H0 mask fraction toward 0 or 1 per channel. The mask
+therefore compares against `mu0` exactly, in integers:
 
 ```text
 valid = p_ref_sum != 0
-mask = valid && (p_target > (p_ref_sum >> 1))
+mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
 This is the exact integer-power form of:
 
 ```text
-F > 1
+F > mu0
 ```
+
+With `target_norm_sq : ref_norm_sum_sq = 1 : 2` it reduces to the legacy
+`F > 1` rule (`p_target > p_ref_sum >> 1`), which products written before the
+correction declare via their recorded `mask_rule`. The corrected pilot excess
+is `rho_corrected = F/mu0 - 1` (recorded per frame as
+`pilot_excess_corrected`). For the deployed kernel path, the same correction
+is the existing rational half-threshold with
+`half_num : half_den = target_norm_sq : ref_norm_sum_sq`.
 
 Masked frames are excluded from before/after averages; they are not zero-filled.
 

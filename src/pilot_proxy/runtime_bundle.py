@@ -16,7 +16,9 @@ from pilot_proxy.detector_contract import (
     build_chime_detector_contract,
     detector_contract_sha256,
     input_coordinate_system_for_weight_coordinate,
+    norm_corrected_mu0,
     normalize_weight_coordinate_system,
+    weight_term_norms_sq,
 )
 from pilot_proxy.detector_geometry import spectral_sense_requires_time_reversal
 from pilot_proxy.integration import (
@@ -230,6 +232,40 @@ def _validate_runtime_profile_offsets(
                 "pilot_profiles.reference_placement_status",
                 f"profile row {index} is missing reference_placement_status",
             )
+        # Norm-corrected threshold fields: optional (absent in legacy bundles),
+        # but when declared they must match the exact integer norms recomputed
+        # from the bundled weight bytes, and the half-threshold rational must
+        # be nt:(nl+nu).
+        if "target_norm_sq" in row or "ref_norm_sum_sq" in row:
+            if 0 <= offset and offset + nbytes <= weights_size and nbytes > 0:
+                raw = weights_path.read_bytes()[offset : offset + nbytes]
+                packed = np.frombuffer(raw, dtype=np.int8).reshape(3, -1)
+                got_nt, got_nl, got_nu = weight_term_norms_sq(packed)
+                got_nrs = int(got_nl + got_nu)
+                declared = {
+                    "target_norm_sq": got_nt,
+                    "ref_norm_sum_sq": got_nrs,
+                    "positive_excess_half_threshold_num": got_nt,
+                    "positive_excess_half_threshold_den": got_nrs,
+                }
+                for key, expected_value in declared.items():
+                    if key in row and int(row[key]) != int(expected_value):
+                        _add_error(
+                            errors,
+                            f"pilot_profiles.{key}",
+                            f"profile row {index} declares {key}="
+                            f"{row[key]!r} but the bundled weights give "
+                            f"{expected_value}",
+                        )
+                if "mu0" in row and got_nrs > 0:
+                    expected_mu0 = norm_corrected_mu0(got_nt, got_nrs)
+                    if abs(float(row["mu0"]) - expected_mu0) > 1e-12:
+                        _add_error(
+                            errors,
+                            "pilot_profiles.mu0",
+                            f"profile row {index} declares mu0={row['mu0']!r} "
+                            f"but the bundled weights give {expected_mu0!r}",
+                        )
         ranges.append((offset, offset + nbytes, index))
     for previous, current in zip(sorted(ranges), sorted(ranges)[1:]):
         if previous[1] > current[0]:
@@ -569,6 +605,8 @@ def export_runtime_weight_bundle(
                 f"{len(payload)} != {profile_nbytes}"
             )
         weight_chunks.append(payload)
+        row_nt, row_nl, row_nu = weight_term_norms_sq(weights)
+        row_nrs = int(row_nl + row_nu)
         profile_rows.append(
             {
                 "physical_channel": int(channel),
@@ -579,6 +617,15 @@ def export_runtime_weight_bundle(
                 "weight_bank_index": int(index),
                 "weight_bank_offset_bytes": int(offset),
                 "weight_bank_nbytes": int(profile_nbytes),
+                # Exact integer weight-norm zero-point for this channel. The
+                # kernel's rational half-threshold half_num:half_den = nt:(nl+nu)
+                # sets the mask threshold at F = mu0 (the norm-corrected
+                # positive-excess rule) with zero kernel changes.
+                "target_norm_sq": int(row_nt),
+                "ref_norm_sum_sq": row_nrs,
+                "mu0": float(norm_corrected_mu0(row_nt, row_nrs)),
+                "positive_excess_half_threshold_num": int(row_nt),
+                "positive_excess_half_threshold_den": row_nrs,
                 "reference_placement_status": str(
                     layout["reference_placement_status"]
                 ),

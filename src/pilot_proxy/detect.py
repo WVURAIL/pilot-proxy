@@ -11,6 +11,12 @@ from typing import Any, Protocol, cast
 import numpy as np
 
 from .atsc_channels import physical_channel_to_pilot_hz
+from .detector_contract import (
+    POSITIVE_EXCESS_MASK_RULE,
+    norm_corrected_mu0,
+    norm_corrected_positive_excess,
+    weight_term_norms_sq,
+)
 from .detector_reference import (
     REFERENCE_LOWER_TERM_INDEX,
     REFERENCE_TARGET_TERM_INDEX,
@@ -166,13 +172,30 @@ def detect_packed_detector_input(
     weights: np.ndarray,
     kernel: FStatKernel,
 ) -> dict[str, Any]:
-    """Run thresholdless fixed-point detection and return exact power ratios."""
+    """Run fixed-point detection and return exact power ratios.
+
+    The positive-excess mask is norm-corrected: it compares against the H0
+    zero-point ``mu0 = 2*target_norm_sq/ref_norm_sum_sq`` implied by the
+    supplied int4 weights (exactly, in integers), not against ``F > 1``.
+    """
     _validate_kernel_inputs(packed=packed, weights=weights, kernel=kernel)
     if not getattr(kernel, "_has_powers_u64", False):
         raise RuntimeError(
             "Kernel library does not expose FStat_Compute_Powers_U64; "
             "rebuild libfstatistic.so with the current CUDA sources."
         )
+
+    target_norm_sq, ref_lower_norm_sq, ref_upper_norm_sq = weight_term_norms_sq(
+        weights
+    )
+    ref_norm_sum_sq = int(ref_lower_norm_sq + ref_upper_norm_sq)
+    if target_norm_sq <= 0 or ref_norm_sum_sq <= 0:
+        raise ValueError(
+            "weights have a zero-power term (target_norm_sq="
+            f"{target_norm_sq}, ref_norm_sum_sq={ref_norm_sum_sq}); "
+            "an all-zero steering vector cannot form a detector."
+        )
+    mu0 = norm_corrected_mu0(target_norm_sq, ref_norm_sum_sq)
 
     import cupy as cp
 
@@ -210,7 +233,15 @@ def detect_packed_detector_input(
         fstat_level_db = float(fstat_num_den_to_fstat_level_db(p_target, p_ref_sum))
         pilot_excess = float(fstat_num_den_to_pilot_excess_linear(p_target, p_ref_sum))
         pnr_bin_db = float(fstat_num_den_to_pnr_bin_db(p_target, p_ref_sum))
-        positive_excess = int(p_ref_sum != 0 and (2 * p_target) > p_ref_sum)
+        positive_excess = norm_corrected_positive_excess(
+            p_target,
+            p_ref_sum,
+            target_norm_sq=target_norm_sq,
+            ref_norm_sum_sq=ref_norm_sum_sq,
+        )
+        pilot_excess_corrected = (
+            (fstat_raw / mu0) - 1.0 if p_ref_sum != 0 else 0.0
+        )
         rows_out.append(
             {
                 "block_index": int(idx),
@@ -223,6 +254,7 @@ def detect_packed_detector_input(
                 "fstat_raw": fstat_raw,
                 "fstat_level_db": fstat_level_db,
                 "pilot_excess_linear": pilot_excess,
+                "pilot_excess_corrected": float(pilot_excess_corrected),
                 "pnr_bin_db": pnr_bin_db,
             }
         )
@@ -231,6 +263,10 @@ def detect_packed_detector_input(
         "batch": int(batch),
         "detector_rows_per_block": int(rows),
         "mask_source": "positive_excess",
+        "mask_rule": POSITIVE_EXCESS_MASK_RULE,
+        "target_norm_sq": int(target_norm_sq),
+        "ref_norm_sum_sq": int(ref_norm_sum_sq),
+        "mu0": float(mu0),
         "results": rows_out,
     }
 

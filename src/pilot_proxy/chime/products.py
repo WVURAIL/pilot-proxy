@@ -9,6 +9,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from pilot_proxy.detector_contract import POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.json_utils import write_json_strict
 from .hdf5_input import ChimePilotDataset, dataset_manifest
 
@@ -130,11 +131,14 @@ def write_detector_outputs(
     snr_shelf_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
+    target_norm_sq: np.ndarray | None = None,
+    ref_norm_sum_sq: np.ndarray | None = None,
+    mu0: np.ndarray | None = None,
+    pilot_excess_corrected: np.ndarray | None = None,
 ) -> Path:
     path = Path(run_dir) / CHIME_DETECTOR_OUTPUTS_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez_compressed(
-        path,
+    arrays: dict[str, np.ndarray] = dict(
         physical_channel=np.asarray(physical_channel, dtype=np.int32),
         pilot_frequency_hz=np.asarray(pilot_frequency_hz, dtype=np.float64),
         chime_frequency_hz=np.asarray(
@@ -151,6 +155,19 @@ def write_detector_outputs(
         mask=np.asarray(mask, dtype=np.uint8),
         valid=np.asarray(valid, dtype=np.uint8),
     )
+    # Weight-norm zero-point fields (norm-corrected mask rule). Optional so a
+    # combine of legacy per-pilot products can still write a legacy-shaped file.
+    if target_norm_sq is not None:
+        arrays["target_norm_sq"] = np.asarray(target_norm_sq, dtype=np.int64)
+    if ref_norm_sum_sq is not None:
+        arrays["ref_norm_sum_sq"] = np.asarray(ref_norm_sum_sq, dtype=np.int64)
+    if mu0 is not None:
+        arrays["mu0"] = np.asarray(mu0, dtype=np.float64)
+    if pilot_excess_corrected is not None:
+        arrays["pilot_excess_corrected"] = np.asarray(
+            pilot_excess_corrected, dtype=np.float64
+        )
+    np.savez_compressed(path, **arrays)
     return path
 
 
@@ -317,7 +334,7 @@ def write_mask_summary(
     mask: np.ndarray,
     valid: np.ndarray | None = None,
     mask_source: str = "positive_excess",
-    mask_rule: str = "valid && (p_target > (p_ref_sum >> 1))",
+    mask_rule: str = POSITIVE_EXCESS_MASK_RULE,
     valid_rule: str = "p_ref_sum != 0",
 ) -> Path:
     counts = valid_mask_counts(mask, valid)

@@ -18,7 +18,9 @@ from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
 from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     input_coordinate_system_for_weight_coordinate,
+    norm_corrected_mu0,
     normalize_weight_coordinate_system,
+    weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import quantize_complex_numpy
 from pilot_proxy.detector_geometry import (
@@ -501,6 +503,20 @@ def generate_weight_table_from_receiver_profile(
             detector_window_samples=int(core.detector_window_samples),
             bits_per_component=int(core.sample_bits_per_component),
         )
+        # Exact integer squared norms of the packed (post-quantization) weight
+        # terms, recorded for provenance. mu0 = 2*nt/(nl+nu) is the flat-floor
+        # H0 zero-point of F; the norm-corrected positive-excess mask and the
+        # kernel rational half-threshold nt:(nl+nu) divide it out.
+        norm_nt, norm_nl, norm_nu = weight_term_norms_sq(
+            table[coarse_index],
+            bits_per_component=int(core.sample_bits_per_component),
+        )
+        layout = dict(layout)
+        layout["target_norm_sq"] = int(norm_nt)
+        layout["lower_reference_norm_sq"] = int(norm_nl)
+        layout["upper_reference_norm_sq"] = int(norm_nu)
+        layout["ref_norm_sum_sq"] = int(norm_nl + norm_nu)
+        layout["mu0"] = float(norm_corrected_mu0(norm_nt, norm_nl + norm_nu))
         layouts.append(layout)
     return np.ascontiguousarray(table), layouts
 

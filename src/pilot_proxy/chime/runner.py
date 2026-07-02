@@ -20,8 +20,10 @@ from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_chime_detector_contract,
     input_coordinate_system_for_weight_coordinate,
+    norm_corrected_mu0,
     normalize_weight_coordinate_system,
     positive_excess_mask_policy,
+    weight_term_norms_sq,
 )
 from pilot_proxy.dtv_units import (
     DETECTOR_WINDOW_SAMPLES,
@@ -775,6 +777,9 @@ def run_chime_analysis(
     quantization_by_pilot: list[dict[str, Any]] = []
     selected_channel_by_pilot: list[int] = []
     overflow_count_by_pilot = np.zeros(len(selected), dtype=np.uint64)
+    target_norm_sq_by_pilot = np.zeros(len(selected), dtype=np.int64)
+    ref_norm_sum_sq_by_pilot = np.zeros(len(selected), dtype=np.int64)
+    mu0_by_pilot = np.full(len(selected), np.nan, dtype=np.float64)
 
     for pilot_index, dataset in enumerate(selected):
         channel = int(dataset.physical_channel)
@@ -783,6 +788,15 @@ def run_chime_analysis(
             weight_bank=weight_bank,
             weights_by_channel=weights_by_channel,
         )
+        # Exact integer squared norms of the three weight terms; these set the
+        # H0 zero-point mu0 = 2*nt/(nl+nu) that the norm-corrected mask (and the
+        # corrected pilot excess) divide out. Computed from the weights actually
+        # used, so caller-supplied test weights are handled identically.
+        _nt, _nl, _nu = weight_term_norms_sq(weights)
+        target_norm_sq_by_pilot[pilot_index] = int(_nt)
+        ref_norm_sum_sq_by_pilot[pilot_index] = int(_nl + _nu)
+        if (_nl + _nu) > 0:
+            mu0_by_pilot[pilot_index] = norm_corrected_mu0(_nt, _nl + _nu)
         selection = receiver_frequency_to_channel(
             float(dataset.pilot_frequency_hz),
             receiver_profile,
@@ -861,10 +875,18 @@ def run_chime_analysis(
         quantization_by_pilot.append(first_quantization or {})
 
     valid = ((valid != 0) & (p_ref_sum_u64 != 0)).astype(np.uint8)
-    mask = (
-        (valid != 0)
-        & (p_target_u64 > (p_ref_sum_u64 >> 1))
-    ).astype(np.uint8)
+    # The mask rule has a single implementation: detect.py's norm-corrected
+    # positive excess, carried here per row via _append_detection_rows. Only
+    # AND with the final valid (which additionally folds weights_valid); do not
+    # recompute the rule, or an injected detector_fn and this path could
+    # silently disagree.
+    mask = ((valid != 0) & (mask != 0)).astype(np.uint8)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        pilot_excess_corrected = np.where(
+            valid != 0,
+            fstat_raw / mu0_by_pilot[np.newaxis, :] - 1.0,
+            np.nan,
+        )
 
     input_manifest_path = write_input_manifest(
         run_dir,
@@ -966,6 +988,9 @@ def run_chime_analysis(
         "rational_overflow_count_by_pilot": [
             int(value) for value in overflow_count_by_pilot
         ],
+        "target_norm_sq_by_pilot": [int(v) for v in target_norm_sq_by_pilot],
+        "ref_norm_sum_sq_by_pilot": [int(v) for v in ref_norm_sum_sq_by_pilot],
+        "mu0_by_pilot": [float(v) for v in mu0_by_pilot],
         "kernel_version": _kernel_version_string(kernel_obj),
         "kernel_specs": kernel_specs_dict,
         "mask_policy": _positive_excess_mask_policy(),
@@ -990,6 +1015,10 @@ def run_chime_analysis(
         snr_shelf_db=snr_shelf_db,
         mask=mask,
         valid=valid,
+        target_norm_sq=target_norm_sq_by_pilot,
+        ref_norm_sum_sq=ref_norm_sum_sq_by_pilot,
+        mu0=mu0_by_pilot,
+        pilot_excess_corrected=pilot_excess_corrected,
     )
     spectrogram_cache_path = write_spectrogram_cache(
         run_dir,

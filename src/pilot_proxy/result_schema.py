@@ -25,6 +25,10 @@ ALL_ROWS_FSTAT_DEFINITION = (
     "(sum_r(P_ref_lower,r) + sum_r(P_ref_upper,r))"
 )
 PILOT_EXCESS_DEFINITION = "rho = F - 1"
+CORRECTED_PILOT_EXCESS_DEFINITION = (
+    "rho_corrected = F/mu0 - 1; mu0 = 2*target_norm_sq/ref_norm_sum_sq "
+    "(exact integer squared norms of the packed weight terms)"
+)
 SNR_SHELF_DEFINITION = "DTV data-shelf PSD relative to non-DTV noise floor"
 MASKED_AVERAGE_DEFINITION = (
     "masked samples are excluded from averages; they are not zero-filled "
@@ -50,6 +54,7 @@ def statistic_contract() -> dict[str, str]:
         "all_rows_fstat_definition": ALL_ROWS_FSTAT_DEFINITION,
         "power_sum_rule": "sum powers first, then form F; do not average F-statistics",
         "pilot_excess_definition": PILOT_EXCESS_DEFINITION,
+        "corrected_pilot_excess_definition": CORRECTED_PILOT_EXCESS_DEFINITION,
         "snr_shelf_definition": SNR_SHELF_DEFINITION,
     }
 

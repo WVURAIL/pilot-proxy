@@ -14,12 +14,16 @@ uint64 power accumulation
 
 The standalone synthetic/testbench path still supports explicit shelf-SNR
 thresholds. The CHIME real-data workflow does not use a shelf-SNR threshold or
-threshold table; it applies the positive-excess rule:
+threshold table; it applies the norm-corrected positive-excess rule:
 
 ```text
 valid = p_ref_sum != 0
-mask = valid && (p_target > (p_ref_sum >> 1))
+mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
+
+the exact integer form of `F > mu0`, where `mu0 = 2*target_norm_sq/
+ref_norm_sum_sq` is the flat-floor H0 zero-point set by the int4 weight norms
+(see `docs/METHOD_SPEC.md`).
 
 `reference_offset_bins` is the primary internal/kernel term. It is the
 target-to-reference spacing in detector fine bins. `skipped_guard_bins` is the
@@ -103,11 +107,11 @@ chime-run
 
 `K=128`, `reference_offset_bins=2`, `skipped_guard_bins=1`, and the shipped
 detector-coordinate weights remain the baseline. The CHIME cleaning rule is
-positive excess:
+norm-corrected positive excess:
 
 ```text
 valid = p_ref_sum != 0
-mask  = valid && (p_target > (p_ref_sum >> 1))
+mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
 Set the input directory explicitly for local or CANFAR mounts:
@@ -270,7 +274,7 @@ The SNR-shelf histogram summary distinguishes:
 
 ```text
 num_detector_valid_frames     # reference denominator > 0
-num_positive_excess_frames    # finite SNR shelf, equivalent to F > 1
+num_positive_excess_frames    # finite SNR shelf, equivalent to F > mu0
 positive_excess_fraction
 ```
 

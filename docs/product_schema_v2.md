@@ -62,6 +62,10 @@ spectra stay zero** (no valid frame enters them).
 | `snr_shelf_db`   | `(N, 1)` | `float64` | Estimated ATSC data-shelf SNR            |
 | `valid`          | `(N, 1)` | `uint8`   | `p_ref_sum != 0`                         |
 | `reject_mask`    | `(N, 1)` | `uint8`   | `1 = discard` (positive excess)          |
+| `pilot_excess_corrected` | `(N, 1)` | `float64` | `F/mu0 - 1` (NaN where invalid)  |
+| `target_norm_sq` | `(1,)`   | `int64`   | Exact `||w_target||^2` of the int4 weights |
+| `ref_norm_sum_sq`| `(1,)`   | `int64`   | Exact `||w_ref_lo||^2 + ||w_ref_up||^2`  |
+| `mu0`            | `(1,)`   | `float64` | `2*target_norm_sq/ref_norm_sum_sq`       |
 | `baseband_power_linear` | `(N, 1)` | `float64` | Per-frame non-coherent baseband power |
 
 `p_target_u64` / `p_ref_sum_u64` are the **raw num/den** kept verbatim: any
@@ -70,13 +74,20 @@ never a re-run.
 
 ### Mask convention
 
-`reject_mask` is parameter-free positive excess — discard a frame when the pilot
-bin exceeds the reference mean:
+`reject_mask` is parameter-free, **norm-corrected** positive excess — discard a
+frame when the pilot bin exceeds the detector's own flat-floor H0 zero-point
+`mu0 = 2*target_norm_sq/ref_norm_sum_sq` (int4 quantization leaves the three
+weight-term norms unequal, so `E[F] = mu0`, not 1):
 
 ```text
-reject_mask = valid && (2 * p_target_u64 > p_ref_sum_u64)
-            = valid && (p_target_u64 > (p_ref_sum_u64 >> 1))     # mask_rule
+reject_mask = valid && (p_target_u64 * ref_norm_sum_sq
+                        > target_norm_sq * p_ref_sum_u64)   # mask_rule
+            = valid && (F > mu0)                            # exact integer form
 ```
+
+Products written before the correction declare
+`valid && (p_target_u64 > (p_ref_sum_u64 >> 1))` (that is, `F > 1`) in
+`mask_rule` and omit the norm fields; resume refuses to mix the two rules.
 
 The multiply-ready **`keep_mask = 1 - reject_mask`** is derived in reporting
 (e.g. a spectrogram is `power ⊙ keep_mask`); it is not stored.

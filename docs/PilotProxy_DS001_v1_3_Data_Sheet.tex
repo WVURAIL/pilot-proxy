@@ -190,7 +190,7 @@ Execution policy & Device-affine, default stream \\ \hline
 \end{minipage}
 
 \vfill
-{\small\color{FStatGray}This product specification defines the standalone v0.1.0 detector contract.  The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses thresholdless positive-excess masking.  Performance is GPU-, compiler-, and integration-dependent and should be measured on the target system.}
+{\small\color{FStatGray}This product specification defines the standalone v0.1.0 detector contract.  The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses parameter-free, norm-corrected positive-excess masking (mask at the detector's exact H0 zero-point, $F>\mu_0$).  Performance is GPU-, compiler-, and integration-dependent and should be measured on the target system.}
 
 \newpage
 \tableofcontents

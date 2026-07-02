@@ -63,7 +63,9 @@ from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     WEIGHT_COORDINATE_RAW_INPUT,
     build_chime_detector_contract,
+    norm_corrected_mu0,
     normalize_weight_coordinate_system,
+    weight_term_norms_sq,
 )
 from pilot_proxy.provenance import (
     file_sha256,
@@ -189,6 +191,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._weight_manifest_sha256 = ""
         self._reference_placement: dict[str, Any] = {}
         self._detector_version = ""
+        # exact integer weight-norm zero-point (set with the weights in begin())
+        self._target_norm_sq = 0
+        self._ref_norm_sum_sq = 0
+        self._mu0 = float("nan")
         self._resumed_provenance: dict[str, Any] | None = None
         # accumulators
         self._p_target: list[int] = []
@@ -197,6 +203,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fstat_level_db: list[float] = []
         self._pnr_bin_db: list[float] = []
         self._snr_shelf_db: list[float] = []
+        self._pilot_excess_corrected: list[float] = []  # F/mu0 - 1 (NaN if invalid)
         self._reject_mask: list[int] = []  # 1 = discard frame (positive excess)
         self._valid: list[int] = []
         self._baseband_power: list[float] = []
@@ -371,6 +378,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "weights_hash": _text("weights_hash"),
             "detector_version": _text("detector_version"),
             "mask_rule": _text("mask_rule"),
+            "target_norm_sq": int(np.asarray(data["target_norm_sq"]).reshape(-1)[0])
+            if "target_norm_sq" in data else None,
+            "ref_norm_sum_sq": int(np.asarray(data["ref_norm_sum_sq"]).reshape(-1)[0])
+            if "ref_norm_sum_sq" in data else None,
             "detector_contract": saved_contract,
             "weight_bank_sha256": _text("weight_bank_sha256"),
             "weight_manifest_sha256": _text("weight_manifest_sha256"),
@@ -386,6 +397,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fstat_level_db = [float(x) for x in _col("fstat_level_db")]
         self._pnr_bin_db = [float(x) for x in _col("pnr_bin_db")]
         self._snr_shelf_db = [float(x) for x in _col("snr_shelf_db")]
+        self._pilot_excess_corrected = (
+            [float(x) for x in _col("pilot_excess_corrected")]
+            if "pilot_excess_corrected" in data
+            else [float("nan")] * len(self._snr_shelf_db)
+        )
         self._reject_mask = [int(x) for x in _col("reject_mask")]
         self._valid = [int(x) for x in _col("valid")]
         self._baseband_power = [float(x) for x in _col("baseband_power_linear")]
@@ -567,6 +583,18 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     f"{self._physical_channel}"
                 )
         self._weights = np.ascontiguousarray(weights)
+        # Exact integer squared norms of the three weight terms. mu0 =
+        # 2*nt/(nl+nu) is the flat-floor H0 zero-point of F that int4 weight
+        # quantization shifts away from 1; the mask rule and the corrected
+        # pilot excess divide it out (see detector_contract).
+        _nt, _nl, _nu = weight_term_norms_sq(self._weights)
+        self._target_norm_sq = int(_nt)
+        self._ref_norm_sum_sq = int(_nl + _nu)
+        self._mu0 = (
+            norm_corrected_mu0(self._target_norm_sq, self._ref_norm_sum_sq)
+            if self._ref_norm_sum_sq > 0
+            else float("nan")
+        )
 
         time_reverse = self._spectral_sense == SPECTRAL_SENSE_INVERTED
         default_wc = (
@@ -731,6 +759,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "weights_hash": self._weights_hash,
             "detector_version": self._detector_version,
             "mask_rule": POSITIVE_EXCESS_MASK_RULE,
+            "target_norm_sq": int(self._target_norm_sq),
+            "ref_norm_sum_sq": int(self._ref_norm_sum_sq),
             "detector_contract": self._detector_contract,
             "weight_bank_sha256": self._weight_bank_sha256,
             "weight_manifest_sha256": self._weight_manifest_sha256,
@@ -836,6 +866,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fstat_level_db.append(float("nan"))
                 self._pnr_bin_db.append(float("nan"))
                 self._snr_shelf_db.append(float("nan"))
+                self._pilot_excess_corrected.append(float("nan"))
                 self._reject_mask.append(0)
                 self._valid.append(0)
                 self._baseband_power.append(float("nan"))
@@ -894,6 +925,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                         dtv_bandwidth_hz=self._dtv_bandwidth_hz,
                         pilot_capture_efficiency=self._pilot_capture_efficiency,
                     ))
+                )
+                self._pilot_excess_corrected.append(
+                    self._fstat_raw[-1] / self._mu0 - 1.0
+                    if den > 0
+                    else float("nan")
                 )
                 self._reject_mask.append(int(row.get("mask", 0)))
                 self._valid.append(1 if den > 0 else 0)
@@ -959,6 +995,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             fstat_level_db=col_f(self._fstat_level_db),
             pnr_bin_db=col_f(self._pnr_bin_db),
             snr_shelf_db=col_f(self._snr_shelf_db),
+            pilot_excess_corrected=col_f(self._pilot_excess_corrected),
             reject_mask=col_u(self._reject_mask, np.uint8),
             valid=col_u(self._valid, np.uint8),
             # --- per-frame power + integrated spectra (rectangular window) ---
@@ -1015,6 +1052,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._pilot_capture_efficiency, dtype=np.float64
             ),
             # --- run provenance: which weights + build + mask rule produced this --
+            target_norm_sq=np.asarray([self._target_norm_sq], dtype=np.int64),
+            ref_norm_sum_sq=np.asarray([self._ref_norm_sum_sq], dtype=np.int64),
+            mu0=np.asarray([self._mu0], dtype=np.float64),
             weights_hash=np.asarray(self._weights_hash),
             weight_bank_sha256=np.asarray(self._weight_bank_sha256),
             weight_manifest_sha256=np.asarray(self._weight_manifest_sha256),

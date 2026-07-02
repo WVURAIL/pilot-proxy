@@ -5,15 +5,23 @@ products and should not be rediscovered during review or article writing.
 
 ## Positive-Excess Masking Is The CHIME Default
 
-The CHIME real-data path uses thresholdless positive-excess masking:
+The CHIME real-data path uses parameter-free, norm-corrected positive-excess
+masking:
 
 ```text
 valid = p_ref_sum != 0
-mask = valid && (p_target > (p_ref_sum >> 1))
+mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the exact integer-power form of `F > 1`. It avoids empirical threshold
-fitting before the bounded CANFAR pilot and keeps the detector policy auditable.
+This is the exact integer-power form of `F > mu0`, where `mu0 =
+2*target_norm_sq/ref_norm_sum_sq` is the detector's own flat-floor H0
+zero-point (int4 weight quantization leaves the three weight-term norms
+unequal, so `E[F] = mu0`, not 1; the shipped ATSC 14-36 bank spans
+`mu0 ~ 0.985..1.011`). Comparing against `mu0` instead of 1 keeps the H0 mask
+fraction channel-independent, avoids empirical threshold fitting before the
+bounded CANFAR pilot, and keeps the detector policy auditable. Products
+written under the earlier `F > 1` rule declare it in their recorded
+`mask_rule`.
 
 ## K=128 Is The CANFAR Baseline
 

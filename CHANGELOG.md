@@ -2,6 +2,16 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Norm-corrected positive-excess mask: the mask now compares against the
+  detector's exact H0 zero-point `mu0 = 2*target_norm_sq/ref_norm_sum_sq`
+  (integer cross-multiplication) instead of `F > 1`. int4 weight quantization
+  leaves the three weight-term norms unequal (`mu0` spans ~0.985..1.011 across
+  the shipped ATSC 14-36 bank), which pinned the H0 mask fraction toward 0 or
+  1 per channel under the old rule. Detector products gain per-pilot
+  `target_norm_sq`, `ref_norm_sum_sq`, `mu0`, and per-frame
+  `pilot_excess_corrected` (`F/mu0 - 1`); runtime bundles declare the
+  per-channel kernel rational half-threshold `nt : (nl+nu)`; `validate-products`
+  checks whichever rule a product declares, and resume refuses to mix rules.
 - `datatrawl` integration: `chime-scan` streams the detector analyzer over the
   CADC archive, one resumable per-pilot product per CHIME coarse channel.
 - Resume compatibility now binds detector products to the exact selected weights,

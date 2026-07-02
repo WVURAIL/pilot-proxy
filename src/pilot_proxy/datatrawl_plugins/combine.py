@@ -377,6 +377,24 @@ def combine_detector_products(
     mask = _stack_cols(products, "reject_mask", np.uint8)
     valid = _stack_cols(products, "valid", np.uint8)
     baseband_power_linear = _stack_cols(products, "baseband_power_linear", np.float64)
+    # Weight-norm zero-point fields (norm-corrected mask). Present in every
+    # product at or after the corrected rule; guarded like freq_id so a combine
+    # of legacy products still writes a legacy-shaped file.
+    has_norms = all(
+        "target_norm_sq" in z and "ref_norm_sum_sq" in z and "mu0" in z
+        and "pilot_excess_corrected" in z
+        for z in products
+    )
+    target_norm_sq = _scalars(products, "target_norm_sq", np.int64) if has_norms else None
+    ref_norm_sum_sq = (
+        _scalars(products, "ref_norm_sum_sq", np.int64) if has_norms else None
+    )
+    mu0 = _scalars(products, "mu0", np.float64) if has_norms else None
+    pilot_excess_corrected = (
+        _stack_cols(products, "pilot_excess_corrected", np.float64)
+        if has_norms
+        else None
+    )
 
     # integrated spectra are per-channel 1-D [nfft] (not per-frame): stack along the
     # pilot axis -> [n_pilots, nfft]. masked fraction = valid-and-rejected / valid
@@ -416,6 +434,10 @@ def combine_detector_products(
         snr_shelf_db=snr_shelf_db,
         mask=mask,
         valid=valid,
+        target_norm_sq=target_norm_sq,
+        ref_norm_sum_sq=ref_norm_sum_sq,
+        mu0=mu0,
+        pilot_excess_corrected=pilot_excess_corrected,
     )
     outputs["spectrogram_cache"] = write_spectrogram_cache(
         run_dir,
