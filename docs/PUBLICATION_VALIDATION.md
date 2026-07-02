@@ -278,6 +278,9 @@ behind it.
 
 ## Suggested paper-figure inventory from these items
 
+The full editorial mapping (venue, section outline, figure/table numbers,
+statements-to-artifacts) lives in `docs/PAPER_PLAN.md`.
+
 1. Measured `mean F` vs `mu0` per channel + H0 mask-fraction before/after
    (item 1).
 2. `P_d`(shelf SNR) with Wilson bars, per offset, synthetic (item 2).

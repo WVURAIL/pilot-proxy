@@ -2,6 +2,9 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `docs/PAPER_PLAN.md`: editorial plan for the publication (venue, section
+  outline, figure/table inventory mapped to producing commands and status).
+
 - `pilot-proxy analyze-injection-recovery`: post-hoc analysis of an injection
   ladder's run products -- weighted recovery-linearity fit (floor + gain, with
   a signal-dominated log-log slope check) and the F-statistic vs radiometer
