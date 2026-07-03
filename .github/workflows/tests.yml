@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: WVURAIL/datatrawl
-          ref: dae24392426469c84a3772f566c53becf2c986b2
+          ref: f6d8e7f41bf9e2fe12842d0e119977efeb955da6
           path: datatrawl
       - uses: actions/setup-python@v5
         with:

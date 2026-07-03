@@ -32,6 +32,8 @@ kernel contract and the weight bank.
 
 ---
 
+No GPU session available? Item 2's synthetic publication sweeps run CPU-only via `pilot-proxy evaluate-snr --detector-backend cpu-reference --noise-source python`; see `docs/PUBLICATION_VALIDATION.md`.
+
 ## Launch a GPU session
 
 The detector path (`pilot-proxy-detector`) needs a CUDA GPU node.

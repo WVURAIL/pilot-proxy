@@ -63,7 +63,7 @@ number is what argues for the higher-tier venue).
 |---|--------|-------------------|-----------------|--------|
 | 1 | Pilot/census context: transmitter map or pilot-frequency vs CHIME channel layout | manuscript-side from the census CSV | UHF station catalog | data done; figure at writing time |
 | 2 | Detector geometry / weight response `|W(f)|^2` schematic | small script over `DetectorWeightBank` (writing time) | shipped weight bank | pending (trivial) |
-| 3 | Synthetic detection curves: `P_d`(shelf SNR) per offset, Wilson bars, -32 dB threshold | `pilot-proxy evaluate-snr` (>=300 trials) + `plot-results` | evaluate-snr summary CSV/JSON | **pending GPU run** (item 2) |
+| 3 | Synthetic detection curves: `P_d`(shelf SNR) per offset, Wilson bars, -32 dB threshold | `pilot-proxy evaluate-snr` (>=300 trials) + `plot-results` | evaluate-snr summary CSV/JSON | runnable now on CPU (`--detector-backend cpu-reference`); same-seed GPU spot check ties it to the kernel (item 2) |
 | 4 | On-sky H0 zero-point: mean F vs `mu0` per channel + mask-fraction before/after | `chime-scan` runs + small notebook over `stats.json` / detector NPZ | item-1 run products | **pending on-sky** (item 1) |
 | 5 | Injection--recovery linearity (`injection_recovery_linearity`) | `pilot-proxy analyze-injection-recovery` | item-3 ladder products | tooling shipped; **pending runs** |
 | 6 | F-statistic vs radiometer `P_d` at matched `P_fa` (`detector_vs_radiometer_pd`) | same command as Fig. 5 | same | tooling shipped; **pending runs** |

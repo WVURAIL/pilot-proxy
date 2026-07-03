@@ -97,9 +97,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small PilotProxy-UG001}
-\fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.1.0}
+\fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.2.0}
 \fancyhead[R]{\small User Guide}
-\fancyfoot[L]{\small PilotProxy-UG001 v1.4}
+\fancyfoot[L]{\small PilotProxy-UG001 v1.5}
 \fancyfoot[C]{\small Standalone ATSC 1.0 pilot-tone detector}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -107,9 +107,9 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{FStatRed}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.1.0\\User Guide}
+\title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.2.0\\User Guide}
 \author{West Virginia University}
-\date{PilotProxy-UG001 v1.4 \\ July 2, 2026}
+\date{PilotProxy-UG001 v1.5 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{empty}
@@ -120,17 +120,17 @@
 \vspace*{0.25in}
 {\fontsize{30}{32}\selectfont\bfseries\color{FStatRed}PilotProxy}\par
 \vspace{0.12in}
-{\fontsize{23}{26}\selectfont\bfseries CUDA F-Statistic DTV Pilot Detector v0.1.0}\par
+{\fontsize{23}{26}\selectfont\bfseries CUDA F-Statistic DTV Pilot Detector v0.2.0}\par
 \vspace{0.08in}
 {\Large User Guide}\par
 \vspace{0.35in}
-{\large PilotProxy-UG001 v1.4}\par
-{\large July 2, 2026}\par
+{\large PilotProxy-UG001 v1.5}\par
+{\large July 3, 2026}\par
 \vfill
 \begin{tabularx}{\linewidth}{|>{\bfseries}L{0.25\linewidth}|Y|}
 \hline
-Document scope & Source-tree use, CUDA build, ATSC waveform generation, validation, detection, and interpretation of fixed-point kernel outputs.\\ \hline
-Package version & \code{pilot-proxy} v0.1.0.\\ \hline
+Document scope & Installed-package use, source-tree CUDA build, ATSC waveform generation, validation, detection, and interpretation of fixed-point kernel outputs.\\ \hline
+Package version & \code{pilot-proxy} v0.2.0.\\ \hline
 Primary runtime controls & Target channel or pilot frequency selects weights; the detector runtime controls are frame size and DTV data-shelf SNR threshold.\\ \hline
 CHIME/CANFAR mode & The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses parameter-free, norm-corrected positive-excess masking ($F>\mu_0$).\\ \hline
 Project affiliation & West Virginia University.\\ \hline
@@ -141,6 +141,7 @@ Project affiliation & West Virginia University.\\ \hline
 \begin{tabularx}{\linewidth}{|L{0.18\linewidth}|L{0.14\linewidth}|Y|}
 \hline
 \textbf{Date} & \textbf{Version} & \textbf{Revision}\\ \hline
+July 3, 2026 & 1.5 & Updated for \code{pilot-proxy} v0.2.0.  Installed-package \code{pilot-proxy} command forms throughout; \code{evaluate-snr --detector-backend cpu-reference} for GPU-free publication sweeps; installation model and limitations refreshed (packaged weight/config resources; CUDA kernel builds from the source tree).\\ \hline
 July 2, 2026 & 1.4 & Norm-corrected positive-excess mask ($F>\mu_0$, exact integer form); LaTeX-styled figures with vector-PDF export; publication-analysis commands (\code{inject-pilot-tone}, \code{analyze-injection-recovery}, \code{analyze-cleaning-tradeoff}).\\ \hline
 May 29, 2026 & 1.3 & Added receiver-profile integration workflow, full stream-map example, and profile-driven weight generation.\\ \hline
 May 29, 2026 & 1.2 & Regenerated for standalone \code{pilot-proxy} v0.1.0.  Added release-candidate CLI names, physical-channel support, strict JSON reporting, calibration field names, and channel-21 edge-wrap handling.\\ \hline
@@ -241,15 +242,12 @@ so:
 
 \section{Installation Model}
 
-This v0.1.0 release is intended to run from a cloned source tree.  Use:
-\begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pilot_proxy.cli --help
-\end{lstlisting}
-Editable installs are supported:
+Install the package into the working environment, editable from a clone or as a built wheel/sdist:
 \begin{lstlisting}[style=shell]
 python -m pip install -e .
+pilot-proxy --help
 \end{lstlisting}
-A wheel-style install with packaged CUDA and weight resources is not the primary supported mode for v0.1.0.
+Installed packages carry the reference weight bank and the \code{configs/} tree, so every CPU-side command in this guide runs from the \code{pilot-proxy} console script alone.  The CUDA kernel is the one component that is not packaged: build it from the cloned source tree with \code{make build-kernel} (see Build and Test) before running GPU-backed commands.
 
 \subsection{Python Environments}
 
@@ -259,18 +257,13 @@ Use two Python interpreters when GNU Radio is installed as a system package:
   \item CUDA Python: used for CuPy, the CUDA shared library, and detector evaluation, typically a conda environment with \code{numpy}, \code{pytest}, and \code{cupy-cuda12x}.
 \end{itemize}
 
-On WSL, keep the two environments separate:
-\begin{lstlisting}[style=shell]
-GNURADIO_PYTHON=/usr/bin/python3
-CUDA_PYTHON=$HOME/miniconda3/envs/fstat/bin/python
-CUDA_LD_LIBRARY_PATH=/usr/lib/wsl/lib
-\end{lstlisting}
+Install \code{pilot-proxy} into the CUDA environment and keep that environment active; every listing in this guide is then a plain \code{pilot-proxy} invocation.  GNU Radio never needs to be on the command line directly: \code{generate-atsc} and the GNU Radio noise source run it through \code{--gnuradio-python} (typically \code{/usr/bin/python3}).  On WSL the CUDA driver path is \code{/usr/lib/wsl/lib}.
 
 On WSL, do not add the conda environment \code{lib/} directory to
 \code{LD_LIBRARY_PATH}.  It can make \code{/usr/bin/bash} load conda's
 \code{libtinfo.so.6} and print a \code{no version information available}
 warning.  The CUDA detector examples only require the WSL CUDA driver path.
-Use \code{PYTHONNOUSERSITE=1} when invoking GNU Radio Python so that user-site packages do not shadow the NumPy build used by GNU Radio.
+Pass \code{--no-python-user-site} if user-site packages shadow the NumPy build used by GNU Radio.
 
 \section{Build and Test}
 
@@ -293,7 +286,7 @@ make clean-cache
 
 Run Python tests:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pytest tests -q
+python -m pytest tests -q
 \end{lstlisting}
 Run CUDA/kernel tests on a CUDA-capable host:
 \begin{lstlisting}[style=shell]
@@ -322,10 +315,10 @@ blocks, masks_set, threshold_snr_shelf_db, threshold_pnr_bin_db, threshold_fstat
 
 \subsection{Generate a Clean ATSC Signal}
 
-Run ATSC generation with GNU Radio Python:
+Run ATSC generation; GNU Radio executes under the interpreter given by \code{--gnuradio-python}:
 \begin{lstlisting}[style=shell]
-PYTHONNOUSERSITE=1 PYTHONPATH=src /usr/bin/python3 \
-  -m pilot_proxy.testbench.generate_atsc_signal \
+pilot-proxy generate-atsc \
+  --gnuradio-python /usr/bin/python3 \
   --output-iq generated/atsc/atsc_8vsb_complex64.cfile \
   --num-iq-samples 600000
 \end{lstlisting}
@@ -334,8 +327,7 @@ PYTHONNOUSERSITE=1 PYTHONPATH=src /usr/bin/python3 \
 
 Run the audit before detector evaluation:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.testbench.audit_atsc_signal \
+pilot-proxy audit-atsc \
   --input-iq generated/atsc/atsc_8vsb_complex64.cfile
 \end{lstlisting}
 The audit records pilot frequency, pilot/data power, occupied bandwidth, shelf flatness, and edge rolloff metrics.  The field \field{measured_pilot_to_data_power_db} is signed \(10\log_{10}(P_{\mathrm{pilot}}/P_{\mathrm{data}})\).  The field \field{measured_pilot_below_data_db} is the positive magnitude.
@@ -364,7 +356,7 @@ The fine detector-bin width is used in the default PNR-to-shelf-SNR conversion.
 
 List physical channels supported by the shipped weight bank:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pilot_proxy.cli list-channels
+pilot-proxy list-channels
 \end{lstlisting}
 The included weights cover physical channels 14 through 36.  ATSC helper routines can compute UHF channel frequencies outside that range, but detection requires a matching manifest-backed weight row.
 
@@ -378,8 +370,7 @@ Physical channel 21 is a reference-boundary case.  Its selected weight layout pr
 
 Create a packed detector matrix:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.testbench.quantize \
+pilot-proxy quantize \
   --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
   --physical-channel 14 \
   --frame-size-samples 16384
@@ -388,11 +379,10 @@ The output matrix is row-major and has shape \code{(rows, 128)} or \code{(batch,
 
 \section{Evaluate Shelf-SNR Recovery}
 
-Run the end-to-end validation evaluator with CUDA/CuPy Python:
+Run the end-to-end validation evaluator (CUDA backend; WSL driver path shown):
 \begin{lstlisting}[style=shell]
 LD_LIBRARY_PATH=/usr/lib/wsl/lib \
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.testbench.evaluate_snr \
+pilot-proxy evaluate-snr \
   --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
   --physical-channel 14 \
   --frame-size-samples 16384 \
@@ -419,8 +409,7 @@ GNU Radio noise source is the most end-to-end-faithful mode; the Python noise
 source is more practical for sweep plots:
 \begin{lstlisting}[style=shell]
 LD_LIBRARY_PATH=/usr/lib/wsl/lib \
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.testbench.evaluate_snr \
+pilot-proxy evaluate-snr \
   --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
   --physical-channel 14 \
   --frame-size-samples 16384 \
@@ -436,10 +425,22 @@ a much longer run.  Add \code{--standard-frequency-offset-sweep} only when the
 \(-1\mathrm{kHz}\), \(0\mathrm{Hz}\), and \(+1\mathrm{kHz}\) offset curves are
 needed; that multiplies runtime by three.
 
+Publication sweeps do not require a GPU.  With \code{--detector-backend cpu-reference} the primary fields come from the validated exact-integer CPU reference (shared result builder with the kernel path, exact rational-half mask); each output row records its backend.  Tie a CPU-produced curve to the deployed kernel afterwards with a small same-seed GPU spot check (\code{docs/PUBLICATION_VALIDATION.md}, item 2):
+\begin{lstlisting}[style=shell]
+pilot-proxy evaluate-snr \
+  --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
+  --physical-channel 14 \
+  --frame-size-samples 16384 \
+  --num-input-streams 1 \
+  --threshold-snr-shelf-db -26 \
+  --noise-trials 300 \
+  --noise-source python \
+  --detector-backend cpu-reference
+\end{lstlisting}
+
 Render the sweep without plot smoothing:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.cli plot-results
+pilot-proxy plot-results
 \end{lstlisting}
 The CSV, JSON, and PNG all reflect the same grouped means.
 
@@ -495,8 +496,7 @@ Important report fields include:
 Run detection on a prebuilt packed detector matrix:
 \begin{lstlisting}[style=shell]
 LD_LIBRARY_PATH=/usr/lib/wsl/lib \
-PYTHONPATH=src "$HOME/miniconda3/envs/fstat/bin/python" \
-  -m pilot_proxy.detect \
+pilot-proxy detect \
   --input-detector-matrix generated/detector_input/detector_matrix_i4.npy \
   --physical-channel 14 \
   --threshold-snr-shelf-db -26
@@ -533,17 +533,17 @@ integrations provide JSON metadata and arrays:
 
 Useful metadata checks:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pilot_proxy.cli check-profile \
+pilot-proxy check-profile \
   --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
 
-PYTHONPATH=src python -m pilot_proxy.cli check-layout \
+pilot-proxy check-layout \
   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
   --stream-map configs/stream_maps/chime_feed_pol_example.json
 \end{lstlisting}
 
 Generate receiver-profile-backed weights with:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pilot_proxy.cli make-weights \
+pilot-proxy make-weights \
   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
   --detector-core-profile configs/detector_core/pilotproxy_cuda_fstat_v1.json \
   --physical-channel-range 14:36 \
@@ -660,7 +660,7 @@ Here \(M_b=1\) means masked/excluded.
 
 Use the generic summary helper for compact CSV/JSON statistics:
 \begin{lstlisting}[style=shell]
-PYTHONPATH=src python -m pilot_proxy.cli summarize-results \
+pilot-proxy summarize-results \
   --input generated/dtv_snr_eval/dtv_snr_eval.json \
   --output-dir generated/summary
 \end{lstlisting}
@@ -673,12 +673,12 @@ diagnostic work.
 \section{Known Limitations}
 
 \begin{itemize}
-  \item v0.1.0 is standalone GNU Radio ATSC validation only.
-  \item No CHIME/baseband file reader is included.
+  \item Synthetic validation is GNU Radio ATSC 1.0 only; no other broadcast standards are modeled.
+  \item The CHIME real-data workflow (\code{chime-run}, \code{chime-scan}, the HDF5 baseband reader) ships in \code{pilot_proxy.chime} and is documented by \code{docs/CANFAR_RUNBOOK.md} and \code{docs/PUBLICATION_VALIDATION.md}, not by this guide.
   \item No telescope-specific stream map is validated beyond example JSON metadata.
-  \item No operational threshold is derived from real telescope null statistics.
+  \item Thresholded operation applies to the standalone synthetic detector; the CHIME workflow uses the parameter-free norm-corrected mask ($F>\mu_0$) rather than a threshold derived from telescope null statistics.
   \item Receiver profiles are an integration contract, not a validated telescope pipeline.
-  \item Wheel-style installation with packaged CUDA and weight resources is not the primary supported mode.
+  \item Installed packages carry the weight bank and \code{configs/} resources; the CUDA kernel itself is not packaged and builds from the cloned source tree (\code{make build-kernel}).
 \end{itemize}
 
 \section{Troubleshooting}
@@ -690,7 +690,7 @@ Use the system GNU Radio Python, typically \code{/usr/bin/python3}, and set \cod
 Run \code{make build-kernel SM=<target>} and ensure \code{LD_LIBRARY_PATH} includes the CUDA driver path.  On WSL, use \code{/usr/lib/wsl/lib} and prefer the staged cache copy under \code{~/.cache/pilot_proxy/}.
 
 \subsection{Wrong detector matrix shape}
-The packed detector matrix must have dtype \code{int8} and last dimension 128.  Use \code{pilot_proxy.testbench.quantize} to build the expected format.
+The packed detector matrix must have dtype \code{int8} and last dimension 128.  Use \code{pilot-proxy quantize} to build the expected format.
 
 \subsection{No weights for channel}
 The shipped bank covers physical channels 14-36.  Use \code{pilot-proxy list-channels} to list available targets.

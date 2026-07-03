@@ -36,6 +36,7 @@ goal before diving into the specialized sections below.
 | Run the CHIME detector | `pilot-proxy chime-scan --analyzer pilot-proxy-detector` | Yes | Yes |
 | Generate / audit synthetic ATSC | Standalone testbench | Partly | No |
 | Run the CUDA detector / SNR evaluation | Standalone CUDA path | Yes | No |
+| Publication SNR sweeps without a GPU | `pilot-proxy evaluate-snr --detector-backend cpu-reference` | No | No |
 
 ---
 
@@ -97,8 +98,8 @@ pilot-proxy check-layout \
 - `docs/CANFAR_RUNBOOK.md` - bounded CANFAR operating procedure.
 - `docs/KOTEKAN_INTERFACE_PREP.md` - runtime-bundle and Kotekan handoff notes.
 - `docs/DESIGN_DECISIONS.md` - recorded detector and integration decisions.
-- `docs/PilotProxy_DS001_v1_4_Data_Sheet.tex` - formal data sheet (build to PDF).
-- `docs/PilotProxy_UG001_v1_4_User_Guide.tex` - formal user guide (build to PDF).
+- `docs/PilotProxy_DS001_v1_5_Data_Sheet.tex` - formal data sheet (build to PDF).
+- `docs/PilotProxy_UG001_v1_5_User_Guide.tex` - formal user guide (build to PDF).
 - `examples/quickstart.sh` - standalone release sanity-check workflow (CUDA +
   GNU Radio; environment-specific defaults --- override `SM`, `CUDA_PYTHON`,
   `GNURADIO_PYTHON`).
@@ -363,8 +364,8 @@ Generated PDFs are ignored by git. Build locally when needed:
 
 ```bash
 mkdir -p docs/out
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_DS001_v1_4_Data_Sheet.tex)
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_UG001_v1_4_User_Guide.tex)
+(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_DS001_v1_5_Data_Sheet.tex)
+(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_UG001_v1_5_User_Guide.tex)
 ```
 
 ---

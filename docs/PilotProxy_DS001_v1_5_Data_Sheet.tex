@@ -97,9 +97,9 @@
 \pagestyle{fancy}
 \fancyhf{}
 \fancyhead[L]{\small PilotProxy-DS001}
-\fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.1.0}
+\fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.2.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small PilotProxy-DS001 v1.4}
+\fancyfoot[L]{\small PilotProxy-DS001 v1.5}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -107,21 +107,21 @@
 \renewcommand{\footrulewidth}{0.8pt}
 \renewcommand{\footrule}{\hbox to\headwidth{\color{FStatRed}\leaders\hrule height \footrulewidth\hfill}}
 
-\title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.1.0\\Product Specification}
+\title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.2.0\\Product Specification}
 \author{West Virginia University}
-\date{PilotProxy-DS001 v1.4 \\ July 2, 2026}
+\date{PilotProxy-DS001 v1.5 \\ July 3, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{FStatRed}PilotProxy}\par
-  {\small PilotProxy-DS001 v1.4, July 2, 2026}
+  {\small PilotProxy-DS001 v1.5, July 3, 2026}
 \end{minipage}
 \hfill
 \begin{minipage}[t]{0.58\textwidth}
   \raggedleft
-  {\fontsize{18}{20}\selectfont\bfseries CUDA F-Statistic DTV Pilot Detector v0.1.0}\par
+  {\fontsize{18}{20}\selectfont\bfseries CUDA F-Statistic DTV Pilot Detector v0.2.0}\par
   {\small Product Specification}
 \end{minipage}
 }
@@ -156,7 +156,7 @@ ATSC A/53 Part 2 defines the RF/transmission subsystem for ATSC digital televisi
 \begin{tabularx}{\linewidth}{|>{\bfseries}L{0.43\linewidth}|Y|}
 \hline
 \multicolumn{2}{|c|}{\bfseries Core Specifics}\\ \hline
-Package version & 0.1.0 \\ \hline
+Package version & 0.2.0 \\ \hline
 Kernel version & 1.0.0 \\ \hline
 Primary function & Estimate and detect sub-noise-floor ATSC 1.0 DTV signals using pilot excess \\ \hline
 Input data & Packed complex int4, one complex sample per \code{int8_t} \\ \hline
@@ -190,7 +190,7 @@ Execution policy & Device-affine, default stream \\ \hline
 \end{minipage}
 
 \vfill
-{\small\color{FStatGray}This product specification defines the standalone v0.1.0 detector contract.  The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses parameter-free, norm-corrected positive-excess masking (mask at the detector's exact H0 zero-point, $F>\mu_0$).  Performance is GPU-, compiler-, and integration-dependent and should be measured on the target system.}
+{\small\color{FStatGray}This product specification defines the standalone v0.2.0 detector contract.  The standalone synthetic detector supports thresholded operation; the CHIME real-data workflow uses parameter-free, norm-corrected positive-excess masking (mask at the detector's exact H0 zero-point, $F>\mu_0$).  Performance is GPU-, compiler-, and integration-dependent and should be measured on the target system.}
 
 \newpage
 \tableofcontents
@@ -469,12 +469,12 @@ The release-candidate source tree supplied for this document passed the Python r
 \section{Limitations}
 
 \begin{itemize}
-  \item v0.1.0 is source-tree/editable-install oriented.  Wheel packaging of CUDA and weight resources is not the primary supported mode.
+  \item Installed wheels and sdists carry the weight bank and \code{configs/} resources; the CUDA kernel is not packaged and builds from the cloned source tree.
   \item The CUDA API is default-stream only.
   \item The shipped weight bank covers physical channels 14-36 only.
-  \item Standalone validation is GNU Radio ATSC synthetic validation only; there is no CHIME/baseband file reader in v0.1.0.
+  \item Standalone validation is GNU Radio ATSC synthetic validation only.  The CHIME/baseband real-data workflow ships separately in the \code{pilot_proxy.chime} subsystem and is specified by its runbooks, not by this data sheet.
   \item Receiver profiles are an integration contract, not a validated telescope pipeline.
-  \item No operational threshold is derived from real telescope null statistics in v0.1.0.
+  \item No operational threshold is derived from real telescope null statistics; the CHIME workflow instead uses the parameter-free norm-corrected mask ($F>\mu_0$).
   \item The kernel detects pilot excess.  It does not decode ATSC transport streams.
   \item Calibration constants are explicit.  Standard mode uses the ATSC 11.3 dB relationship; calibrated mode should record any override values.
 \end{itemize}
@@ -489,6 +489,7 @@ The release-candidate source tree supplied for this document passed the Python r
 \begin{tabularx}{\linewidth}{|L{0.18\linewidth}|L{0.14\linewidth}|Y|}
 \hline
 \textbf{Date} & \textbf{Version} & \textbf{Revision}\\ \hline
+July 3, 2026 & 1.5 & Updated for \code{pilot-proxy} v0.2.0.  Packaged weight/config resources with console-script CLI; CUDA kernel remains a source-tree build; limitations refreshed (CHIME real-data subsystem ships separately; parameter-free norm-corrected mask in place of telescope-null thresholds).\\ \hline
 July 2, 2026 & 1.4 & Norm-corrected positive-excess mask: the mask compares against the exact H0 zero-point $\mu_0 = 2\,n_t/(n_l+n_u)$ set by the int4 weight norms (rule and product fields updated accordingly); runtime bundles carry the per-channel rational half-threshold $n_t:(n_l+n_u)$.\\ \hline
 May 29, 2026 & 1.3 & Added receiver-profile integration contract, full stream-map example, and profile-driven weight generation.\\ \hline
 May 29, 2026 & 1.2 & Regenerated for standalone \code{pilot-proxy} v0.1.0.  Added strict PNR/SNR terminology, physical channel support, calibration fields, strict JSON behavior, channel-21 edge-wrap handling, and source-tree release notes.\\ \hline
