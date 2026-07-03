@@ -10,7 +10,6 @@ import pytest
 
 h5py = pytest.importorskip("h5py")
 
-from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
 from pilot_proxy.provenance import file_sha256
 from pilot_proxy.integration.receiver_profile import default_reference_receiver_profile
 # noinspection PyProtectedMember

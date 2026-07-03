@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pytest
 
+pytest.importorskip("h5py")
+
 from pilot_proxy.chime.injection import INJECTION_MANIFEST_FILENAME
 from pilot_proxy.chime.injection_recovery import (
     BASELINE_FIGURE,

@@ -19,7 +19,7 @@ hooks ``run_chime_analysis`` exposes), which is how the GPU-free parity tests ru
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Mapping
 
 _DETECTOR_ANALYZER = "pilot-proxy-detector"
 _READER_FOR_ANALYZER = {

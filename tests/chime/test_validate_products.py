@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 
 import numpy as np
+import pytest
+
+pytest.importorskip("h5py")
 
 from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_VERSION,

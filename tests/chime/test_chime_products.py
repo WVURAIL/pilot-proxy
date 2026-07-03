@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytest.importorskip("h5py")
 
 from pilot_proxy.chime.products import spectrum_before_after
 

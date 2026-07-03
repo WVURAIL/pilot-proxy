@@ -7,6 +7,8 @@ import json
 import numpy as np
 import pytest
 
+pytest.importorskip("h5py")
+
 from pilot_proxy.chime.cleaning_tradeoff import (
     CHIME_COARSE_CHANNEL_BANDWIDTH_MHZ,
     OPERATING_CURVE_FIGURE,

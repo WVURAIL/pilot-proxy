@@ -2,6 +2,9 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
+
+pytest.importorskip("h5py")
 
 from pilot_proxy.chime.frame_adapter import (
     pack_chime_block_for_detector,

@@ -8,6 +8,7 @@ import pytest
 
 from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
 from pilot_proxy import cli
+from pilot_proxy.paths import CONFIGS_DIR
 
 CUSTOM_GNURADIO_PYTHON = "/custom/gnuradio-python"
 SMOKE_IQ_SAMPLES = "128"
@@ -35,7 +36,7 @@ CHANNEL_GAIN_DB_TEXT = "1.5"
 CHANNEL_PHASE_DEG_TEXT = "12"
 NORMALIZED_CHANNEL_PHASE_DEG_TEXT = "12.0"
 HISTOGRAM_BINS_TEXT = "12"
-REFERENCE_PROFILE = "configs/receiver_profiles/reference_800mhz_pfb.json"
+REFERENCE_PROFILE = str(CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json")
 
 
 def test_generate_atsc_uses_gnuradio_python_and_disables_user_site(

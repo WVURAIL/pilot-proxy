@@ -23,7 +23,7 @@ jobs:
       - run: python -m pip install -e ".[test]"
       - run: pilot-proxy --help
       - run: pilot-proxy --version
-      - run: python -m pytest tests/test_cli.py -q
+      - run: python -m pytest tests -q
       - run: pilot-proxy check-profile --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
       - run: pilot-proxy check-layout --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
 

@@ -17,7 +17,6 @@ from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_RAW_INPUT,
 )
 from pilot_proxy.dtv_units import (
-    DEFAULT_THRESHOLD_MAX_DENOMINATOR,
     DETECTOR_WINDOW_SAMPLES,
     DTV_BANDWIDTH_HZ,
     EFFECTIVE_BIN_BW_HZ,
@@ -28,7 +27,6 @@ from pilot_proxy.integration import (
     DEFAULT_CHIME_DTV_RECEIVER_PROFILE,
     DEFAULT_CHIME_STREAM_MAP,
     DEFAULT_DETECTOR_CORE_PROFILE,
-    DEFAULT_REFERENCE_RECEIVER_PROFILE,
     default_reference_receiver_profile,
     layout_uint64_bound_check,
     load_detector_core_profile,
