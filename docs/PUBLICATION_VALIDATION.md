@@ -64,7 +64,10 @@ section.
 
    ```bash
    pilot-proxy export-runtime-weight-bundle \
-     --physical-channels 14-36 --output-dir bundles/norm_corrected
+     --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
+     --weight-coordinate-system post_spectral_sense_normalization \
+     --physical-channel-range 14:36 \
+     --output-dir bundles/norm_corrected
    pilot-proxy validate-runtime-weight-bundle --bundle-dir bundles/norm_corrected
    ```
 
@@ -163,7 +166,9 @@ counts). Sweep cost on CPU is minutes at these geometries.
 
    ```bash
    PILOT_PROXY_USE_TEX=1 PILOT_PROXY_FIGURE_FORMATS=png,pdf \
-     pilot-proxy plot-results --summary-csv results/pd_curves/<...>.csv ...
+     pilot-proxy plot-results \
+       --input-csv results/pd_curves/dtv_snr_summary.csv \
+       --output-png results/pd_curves/dtv_snr_sweep.png
    ```
 
    The paper figure is `positive_excess_detection_rate` (and the −32 dB
