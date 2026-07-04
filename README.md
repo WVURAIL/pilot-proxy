@@ -40,11 +40,37 @@ goal before diving into the specialized sections below.
 
 ---
 
+## Environment
+
+All workflows run inside one Python virtual environment. Create and activate
+it before anything installs:
+
+```bash
+python -m venv --system-site-packages ~/pilot-proxy-datatrawl
+source ~/pilot-proxy-datatrawl/bin/activate
+```
+
+The venv is not optional on shared or image-managed Pythons (CANFAR session
+images, PEP 668 "externally managed" distros): a bare `pip install` there
+fails with `Permission denied` writing the console script.
+`--system-site-packages` keeps a session image's CuPy/CUDA stack importable
+for the GPU workflows. Re-activate on every **new** session; the venv
+persists (on CANFAR, under `/arc`).
+
+For the integrated CHIME / CANFAR workflow,
+[`scripts/setup_env.sh`](#setup-for-the-chime--canfar-workflow) builds this
+same venv --- CuPy headers, both repos editable, the CUDA kernel --- and
+**recreates** it at this default path, so running it after the manual
+creation above is expected and safe.
+
+---
+
 ## Fresh clone and minimal CPU-only smoke test
 
 This verifies the Python package, the CLI entry point, and the reference detector
 metadata **without** GNU Radio, datatrawl, CADC credentials, CUDA, or CHIME HDF5
-data --- a good first step before any of the specialized workflows.
+data --- a good first step before any of the specialized workflows. Run it
+inside the [environment](#environment) above.
 
 ```bash
 git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
@@ -253,7 +279,7 @@ make build-kernel NVCC=/usr/local/cuda/bin/nvcc
 
 If `nvcc` is absent entirely, use a CANFAR image that ships the CUDA *toolkit*
 (e.g. `skaha/astroml-cuda`), or install one matching the runtime CUDA version
-(`conda install -c nvidia cuda-nvcc`, or your distro's `cuda-toolkit` package). A
+(your distro's `cuda-toolkit` package). A
 runtime-only image with CuPy but no compiler cannot build the kernel, and `make
 test` / `make test-kernel` fail at the `nvcc` step. On a CPU-only host, run `make
 test-python` (the Python suite) or `make release-check` (adds the CPU C/C++

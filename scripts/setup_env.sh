@@ -143,7 +143,7 @@ PYEOF
 # above) provides CUDA *libraries* but not the toolkit *headers* CuPy's nvrtc needs
 # to compile its elementwise/reduction kernels on first use. cuda-pathfinder finds
 # those in the 'nvidia-cuda-*' header wheels that the '[ctk]' extra pulls in. (The
-# image's conda nvcc builds our kernel fine but keeps no usable headers under its
+# image's bundled nvcc builds our kernel fine but keeps no usable headers under its
 # include/, so CuPy cannot borrow them.) Probe a real JIT compile and add the header
 # wheels only when it fails -- an image that already ships headers then pays nothing.
 if command -v nvidia-smi >/dev/null 2>&1; then

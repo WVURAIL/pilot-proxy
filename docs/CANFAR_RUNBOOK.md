@@ -71,10 +71,17 @@ source ~/pilot-proxy-datatrawl/bin/activate
 The script recreates the target venv. Do not point VENV_DIR at a venv you need to
 preserve.
 
+The venv lives on `/arc` and persists across sessions: on every **new**
+session, re-activate it (`source ~/pilot-proxy-datatrawl/bin/activate`) before
+any `pip install -e` or `pilot-proxy` command --- the session image's own
+Python is read-only, and a bare install fails with `Permission denied`
+writing the console script. Rerun `setup_env.sh` only when you want the venv
+rebuilt from scratch.
+
 Manual fallback, if you do not want the script to recreate the venv:
 
 ```bash
-python3.12 -m venv ~/pilot-proxy-datatrawl
+python3.12 -m venv --system-site-packages ~/pilot-proxy-datatrawl   # keeps the image's CuPy importable
 source ~/pilot-proxy-datatrawl/bin/activate
 python -m pip install -U pip setuptools wheel
 python -m pip install -e "$HOME/datatrawl[cadc,survey]"
