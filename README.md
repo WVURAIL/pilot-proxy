@@ -65,8 +65,9 @@ pilot-proxy check-layout \
 > host run the Python tests directly (`make test-python`, or
 > `pytest tests/test_cli.py -q` for just the CLI). `make release-check` adds the
 > CPU C/C++ reference checks plus profile/layout and runtime-bundle validation
-> (needs a C++ compiler, not a GPU). Use `make test-kernel SM=<arch>` only on a
-> CUDA build host (`SM` is your GPU's compute capability, e.g. `89`).
+> (needs a C++ compiler, not a GPU). Use `make test-kernel` only on a CUDA
+> build host (the GPU arch is auto-detected from `nvidia-smi`; pass
+> `SM=<arch>` to override).
 
 ---
 
@@ -223,9 +224,11 @@ standalone workflow, install the build matching your CUDA runtime directly, e.g.
 `pip install "pilot-proxy[cuda]"` (CUDA 12.x) or the appropriate
 `cupy-cudaXXx` wheel for your driver.
 
-`setup_env.sh` detects your GPU's `SM` and builds the kernel for it automatically.
-The manual `make` examples below use `SM=89` (Ada) only as a placeholder ---
-substitute your own value (A100 = `80`).
+Both `setup_env.sh` and the `make` targets themselves detect your GPU's `SM`
+automatically (first visible device via `nvidia-smi`). Pass `SM=<arch>` only to
+cross-compile for a different GPU or when detection fails; the table above gives
+the values. The build keys on the arch and kernel-config flags, so switching
+GPUs (or flags) between sessions forces the recompile automatically.
 
 ### CUDA toolchain (`nvcc`)
 
@@ -245,7 +248,7 @@ export PATH=/usr/local/cuda/bin:$PATH
 or point the build at it directly --- `cuda/Makefile` honours `NVCC=`:
 
 ```bash
-make build-kernel SM=89 NVCC=/usr/local/cuda/bin/nvcc
+make build-kernel NVCC=/usr/local/cuda/bin/nvcc
 ```
 
 If `nvcc` is absent entirely, use a CANFAR image that ships the CUDA *toolkit*
@@ -259,7 +262,7 @@ reference) instead --- neither needs a GPU.
 Build and stage the kernel:
 
 ```bash
-make build-kernel SM=89
+make build-kernel
 ```
 
 This builds `cuda/libfstatistic.so` and stages a copy to:
@@ -285,7 +288,7 @@ Do not execute the shared library directly.
 Run compiled CUDA/C++ regression tests with:
 
 ```bash
-make test-kernel SM=89
+make test-kernel
 ```
 
 ---

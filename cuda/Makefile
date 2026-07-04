@@ -9,8 +9,8 @@
 #   make info      - Print configuration
 #
 # Configuration:
-#   Override GPU architecture: make SM=86
-#   Override compiler:         make NVCC=/usr/local/cuda/bin/nvcc
+#   GPU architecture: auto-detected via nvidia-smi; override with make SM=86
+#   Override compiler:            make NVCC=/usr/local/cuda/bin/nvcc
 #
 # ==============================================================================
 
@@ -20,7 +20,10 @@
 NVCC                  ?= nvcc
 CC                    ?= gcc
 CXX                   ?= g++
-SM                    ?= 89
+# Auto-detect the arch of the first visible GPU (drivers >= 460 report
+# compute_cap). Empty on GPU-less hosts; guarded below so only goals that
+# compile device code require it. Override for cross-compiles: make SM=90
+SM                    ?= $(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d '. \r')
 DP4A                  ?= 1
 BLOCK_THREADS         ?= 64
 GRID_MAX_BLOCKS       ?= 4096
@@ -71,13 +74,35 @@ CUDA_TEST_SOURCES := tests/test_fstat_cuda.cpp f_statistic_reference.cpp
 CUDA_TEST_HEADERS := f_statistic.h f_statistic_reference.h config.h
 
 # ------------------------------------------------------------------------------
+# Build-configuration tracking
+# ------------------------------------------------------------------------------
+# Goals that compile device code need a concrete SM; everything else (clean,
+# test_ref, test_c_header, help, ...) must keep working on GPU-less hosts.
+SM_REQUIRED_GOALS := all debug test test_cuda test_cuda_grid_stride $(TARGET) $(CUDA_TEST)
+ifeq ($(strip $(SM)),)
+ifneq ($(filter $(SM_REQUIRED_GOALS),$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)),)
+$(error no GPU detected (nvidia-smi absent or predates the compute_cap query); pass SM=<arch> explicitly, e.g. make SM=80 for A100)
+endif
+endif
+
+# The arch and CONFIG_DEFS live only in recipe flags, invisible to make's
+# timestamp check, so changing them used to reuse stale objects silently.
+# Encode them in a stamp filename: switching any knob invalidates the old
+# stamp and forces a rebuild; rebuilds with unchanged flags stay incremental.
+CONFIG_STAMP := .config_sm$(SM)_dp4a$(DP4A)_bt$(BLOCK_THREADS)_gmb$(GRID_MAX_BLOCKS)_cwl$(CONSTANT_WEIGHT_LANES)_swl$(SHARED_WEIGHT_LANES).stamp
+
+$(CONFIG_STAMP):
+	@rm -f .config_*.stamp
+	@touch $@
+
+# ------------------------------------------------------------------------------
 # Targets
 # ------------------------------------------------------------------------------
 .PHONY: all debug clean info test_c_header test_ref test_cuda test_cuda_grid_stride test
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES) $(HEADERS)
+$(TARGET): $(SOURCES) $(HEADERS) $(CONFIG_STAMP)
 	$(NVCC) $(RELEASE_FLAGS) -o $@ $(SOURCES)
 	@echo "Built $(TARGET) for SM $(SM)"
 
@@ -98,8 +123,8 @@ test_c_header: $(C_HEADER_TEST_OBJ)
 test_ref: $(REF_TEST)
 	./$(REF_TEST)
 
-$(CUDA_TEST): $(TARGET) $(CUDA_TEST_SOURCES) $(CUDA_TEST_HEADERS)
-	$(NVCC) -std=c++14 -O2 -I. $(CONFIG_DEFS) $(CUDA_TEST_SOURCES) \
+$(CUDA_TEST): $(TARGET) $(CUDA_TEST_SOURCES) $(CUDA_TEST_HEADERS) $(CONFIG_STAMP)
+	$(NVCC) -std=c++14 -O2 -I. $(ARCH_FLAGS) $(CONFIG_DEFS) $(CUDA_TEST_SOURCES) \
 	    -L. -lfstatistic -Xlinker -rpath -Xlinker . -o $@
 	@echo "Built $(CUDA_TEST)"
 
@@ -107,13 +132,12 @@ test_cuda: $(CUDA_TEST)
 	./$(CUDA_TEST)
 
 test_cuda_grid_stride:
-	$(MAKE) clean
 	$(MAKE) test_cuda GRID_MAX_BLOCKS=4
 
 test: test_c_header test_ref test_cuda
 
 clean:
-	rm -f $(TARGET) $(REF_TEST) $(CUDA_TEST) $(C_HEADER_TEST_OBJ)
+	rm -f $(TARGET) $(REF_TEST) $(CUDA_TEST) $(C_HEADER_TEST_OBJ) .config_*.stamp
 	@echo "Cleaned build artifacts"
 
 info:
@@ -124,7 +148,7 @@ info:
 	@echo "C compiler:   $(CC)"
 	@echo "C++ compiler: $(CXX)"
 	@echo "Target:       $(TARGET)"
-	@echo "SM Version:   $(SM)"
+	@echo "SM Version:   $(if $(SM),$(SM),(not detected))"
 	@echo "DP4A:         $(DP4A)"
 	@echo "Block threads: $(BLOCK_THREADS)"
 	@echo "Grid max blocks: $(GRID_MAX_BLOCKS)"
@@ -158,15 +182,15 @@ help:
 	@echo "  help    Show this message"
 	@echo ""
 	@echo "Options:"
-	@echo "  SM=XX   Set compute capability (default: 89)"
+	@echo "  SM=XX   Set compute capability (default: auto-detected via nvidia-smi)"
+	@echo "          Common values: 70 (V100), 80 (A100), 86 (RTX 30xx),"
+	@echo "                         89 (RTX 40xx/Ada), 90 (H100)"
 	@echo "  GRID_MAX_BLOCKS=N"
 	@echo "          Set maximum power-accumulation grid blocks (default: 4096)"
 	@echo "  CONSTANT_WEIGHT_LANES=0|1"
 	@echo "          Store DP4A weight lanes in CUDA constant memory (default: 0)"
 	@echo "  SHARED_WEIGHT_LANES=0|1"
 	@echo "          Preload DP4A weight lanes into per-block shared memory (default: 1)"
-	@echo "          Common values: 70 (V100), 80 (A100), 86 (RTX 30xx),"
-	@echo "                         89 (RTX 40xx/Ada), 90 (H100)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make SM=89          Build for RTX 5000 Ada"

@@ -189,15 +189,11 @@ if command -v nvidia-smi >/dev/null 2>&1; then
         exit 1
     fi
     echo "==> building and staging CUDA kernel for detected arch sm_${SM}"
-    # `make build-kernel` keys only on the kernel source's timestamp, not on SM
-    # (the arch is in the recipe's -arch=sm_$(SM), invisible to make's dependency
-    # check). cuda/libfstatistic.so lives in the repo on /arc and survives across
-    # sessions, so without removing it a rerun on a different GPU type would
-    # silently re-stage a wrong-arch kernel -- it builds, then fails to load with
-    # CUDA_ERROR_INVALID_IMAGE. Remove the artifact so nvcc always recompiles for
-    # the GPU actually present.
+    # cuda/Makefile keys the build on a config stamp (arch + kernel flags), so
+    # a rerun on a different GPU type recompiles automatically -- no need to
+    # delete cuda/libfstatistic.so first. Still drop the staged cache copy so a
+    # failed build fails loud rather than silently serving a stale kernel.
     make -C "${PILOT_PROXY_DIR}" clean-cache
-    rm -f "${PILOT_PROXY_DIR}/cuda/libfstatistic.so"
     make -C "${PILOT_PROXY_DIR}" build-kernel SM="${SM}"
 else
     echo "==> no GPU detected (nvidia-smi absent) -- skipping kernel build"

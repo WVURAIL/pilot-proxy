@@ -17,6 +17,7 @@ generated/
 cuda/test_c_header
 cuda/test_fstat_cuda
 cuda/test_fstat_reference
+cuda/.config_*.stamp
 
 docs/out
 docs/auxil
