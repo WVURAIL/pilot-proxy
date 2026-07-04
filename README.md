@@ -27,23 +27,30 @@ contract.
 
 ## Choose your workflow
 
-`pilot-proxy` supports several independent paths. Pick the one that matches your
-goal before diving into the specialized sections below.
+`pilot-proxy` supports several independent paths. Pick your goal first --- it
+determines which guide you follow:
 
-| Goal | Use this path | Needs GPU? | Needs datatrawl? |
+| Goal | Guide to follow | Needs GPU? | Needs datatrawl? |
 | --- | --- | :---: | :---: |
-| Check the package installs and the CLI loads | Minimal CPU-only smoke test (below) | No | No |
-| Run the CHIME detector | `pilot-proxy chime-scan --analyzer pilot-proxy-detector` | Yes | Yes |
-| Generate / audit synthetic ATSC | Standalone testbench | Partly | No |
-| Run the CUDA detector / SNR evaluation | Standalone CUDA path | Yes | No |
-| Publication SNR sweeps without a GPU | `pilot-proxy evaluate-snr --detector-backend cpu-reference` | No | No |
+| Run the CHIME detector on the CADC archive (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) --- complete and self-contained | Yes | Yes |
+| Check the package installs and the CLI loads | This README: minimal CPU-only smoke test (below) | No | No |
+| Generate / audit synthetic ATSC | This README: standalone testbench | Partly | No |
+| Run the CUDA detector / SNR evaluation | This README: standalone CUDA path | Yes | No |
+| Publication SNR sweeps without a GPU | This README: `pilot-proxy evaluate-snr --detector-backend cpu-reference` | No | No |
+
+**Headed for CANFAR?** Go straight to the
+[runbook](docs/CANFAR_RUNBOOK.md): session launch, both clones, the
+environment (`setup_env.sh`), the CUDA kernel, survey, and scan --- in order,
+with nothing below as a prerequisite. The sections below are the guide for
+the standalone workflows; the smoke test is optional on the runbook path
+(`setup_env.sh` runs its own sanity checks).
 
 ---
 
 ## Environment
 
-All workflows run inside one Python virtual environment. Create and activate
-it before anything installs:
+The standalone workflows below run inside one Python virtual environment.
+Create and activate it before anything installs:
 
 ```bash
 python -m venv --system-site-packages ~/pilot-proxy-datatrawl
@@ -55,13 +62,9 @@ images, PEP 668 "externally managed" distros): a bare `pip install` there
 fails with `Permission denied` writing the console script.
 `--system-site-packages` keeps a session image's CuPy/CUDA stack importable
 for the GPU workflows. Re-activate on every **new** session; the venv
-persists (on CANFAR, under `/arc`).
-
-For the integrated CHIME / CANFAR workflow,
-[`scripts/setup_env.sh`](#setup-for-the-chime--canfar-workflow) builds this
-same venv --- CuPy headers, both repos editable, the CUDA kernel --- and
-**recreates** it at this default path, so running it after the manual
-creation above is expected and safe.
+persists (on CANFAR, under `/arc`). CANFAR runbook users do not create this
+venv by hand: `setup_env.sh` builds --- and recreates --- the same venv at
+this default path.
 
 ---
 
@@ -69,7 +72,7 @@ creation above is expected and safe.
 
 This verifies the Python package, the CLI entry point, and the reference detector
 metadata **without** GNU Radio, datatrawl, CADC credentials, CUDA, or CHIME HDF5
-data --- a good first step before any of the specialized workflows. Run it
+data --- a good first step before any of the standalone workflows. Run it
 inside the [environment](#environment) above.
 
 ```bash

@@ -58,9 +58,13 @@ printed URL, then run the environment setup below inside that session's terminal
 
 ## Environment setup
 
-Use the setup script from the pilot-proxy checkout:
+Clone both repositories (skip if the checkouts already exist on `/arc`), then
+run the setup script from the pilot-proxy checkout --- `setup_env.sh` requires
+both checkouts to exist:
 
 ```bash
+git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
+git clone https://github.com/WVURAIL/datatrawl.git ~/datatrawl
 cd ~/pilot-proxy
 
 VENV_DIR=~/pilot-proxy-datatrawl DATATRAWL_DIR=~/datatrawl PILOT_PROXY_DIR=~/pilot-proxy bash scripts/setup_env.sh
