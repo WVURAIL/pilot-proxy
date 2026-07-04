@@ -275,6 +275,27 @@ pilot-proxy chime-scan \
   --inventory-name chime-pilots
 ```
 
+The terminal combine stacks frames by (event, frame-in-file) identity over the
+events common to every completed channel, reporting per-channel drops in
+`stats.json` (`combine_alignment`) and the kept identities in
+`chime_frame_identity.npz`. On a ragged archive where **no** event is common
+to all channels, the scan still finishes successfully with complete per-pilot
+products and skips the stack; choose a channel subset from the presence
+report and stack it explicitly:
+
+```bash
+pilot-proxy chime-combine --report --work-dir "$HOME/pilot_proxy_runs/chime-pilots/_per_pilot"
+pilot-proxy chime-combine \
+  --work-dir "$HOME/pilot_proxy_runs/chime-pilots/_per_pilot" \
+  --drop 598,690 \
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-subset"
+```
+
+The report prints per-channel event counts, the presence histogram, and the
+greedy drop-curve (intersection size after removing the most-constraining
+channel, repeatedly) -- the decision input for which channels the stacked
+analyses keep.
+
 Validate:
 
 ```bash
@@ -316,7 +337,7 @@ If filenames do not end in `_<freq_id>.h5`, pass:
 | `pilot-proxy-detector needs cupy/CUDA` | Detector run on CPU-only env | Use a GPU node |
 | `no files matched` | `--select` does not match local filename/inventory `freq_id` | Run `datatrawl explore` or inspect filenames |
 | first file's center implies a different `freq_id` | filename/inventory mismatch | Fix filename regex or rebuild inventory |
-| combine rejects time alignment | selected pilots did not process the same events in same order | use matched files/inventory, or drop affected channel |
+| combine finds no common events | the archive holds different event sets per channel (ragged replication) | `chime-combine --report --work-dir <work>`, pick a subset, restack with `--drop <freq_ids>` |
 | all frames invalid for a pilot | selected coarse channel does not contain pilot or no valid refs | verify `freq_id` selection and HDF5 metadata |
 
 ---

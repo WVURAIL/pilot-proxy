@@ -2,6 +2,25 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Event-keyed combine: per-pilot frames now align by (event, frame-in-file)
+  identity instead of positionally. Pilots that processed different event
+  sets (the archive is ragged: not every channel holds every event) stack
+  over exactly their common identities; per-pilot drops are echoed, recorded
+  in `stats.json` (`combine_alignment`), and the kept identities are written
+  to `chime_frame_identity.npz`. Fully aligned inputs pass through
+  byte-identically (the `run_chime_analysis` parity guarantee is unchanged),
+  and products predating the identity tags keep the strict positional check.
+
+- `pilot-proxy chime-scan`: the terminal combine can no longer fail an
+  archive-scale run. When no event is common to every completed channel, the
+  scan finishes successfully with complete per-pilot products, explains, and
+  defers stacking to `chime-combine`.
+
+- `pilot-proxy chime-combine`: new `--report` (per-pilot event counts,
+  presence histogram, all-pilot intersection, greedy drop-curve -- the
+  decision input for subset selection) and `--drop <freq_ids>` (exclude
+  channels from the stack). `--output-dir` is required only when combining.
+
 - `pilot-proxy chime-scan`: `--select` is now optional for the archive source
   -- omitted, the scan covers every freq_id the inventory contains (sorted;
   companion rows without a freq_id are skipped), prints the resolved set

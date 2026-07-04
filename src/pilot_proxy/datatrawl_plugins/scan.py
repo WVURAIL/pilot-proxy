@@ -5,7 +5,10 @@ This is the implementation behind ``pilot-proxy chime-scan``. It reuses datatraw
 engine and plugin registry exactly as datatrawl's own ``scan`` command does
 (``registry.get`` -> ``plan_runs`` fan-out -> per-channel ``pipeline.run``), so a
 multi-channel pull is storage-safe and resumable, then stacks the per-pilot
-products with the combine step into PilotProxy's canonical products. This is the
+products with the event-keyed combine step into PilotProxy's canonical
+products; if no event is common to every completed channel, the scan still
+succeeds with per-pilot products and defers stacking to ``chime-combine``
+(``--report`` / ``--drop``). This is the
 recommended archive-scale entry point; ``pilot-proxy chime-run`` (the
 ``run_chime_analysis`` batch path) remains for pre-staged local directories.
 
@@ -223,7 +226,7 @@ def run_chime_scan(
     from datatrawl.instruments import load_instrument
     from datatrawl.interfaces import RunContext
 
-    from .combine import combine_detector_products
+    from .combine import CombineEmptyIntersectionError, combine_detector_products
 
     registry.load_plugins()  # bundled datatrawl plugins + pilot-proxy's entry-point plugins
     if analyzer != _DETECTOR_ANALYZER:
@@ -416,7 +419,19 @@ def run_chime_scan(
             f"(source={source}, select={select})"
         )
 
-    outputs = combine_detector_products(product_paths, output_dir)
+    try:
+        outputs = combine_detector_products(product_paths, output_dir)
+    except CombineEmptyIntersectionError as exc:
+        print(f"[chime-scan] terminal combine skipped: {exc}", flush=True)
+        print(
+            "[chime-scan] all per-pilot products are complete under "
+            f"{work}; the scan itself succeeded. Choose a channel subset with "
+            "`pilot-proxy chime-combine --report --work-dir <work>` and stack "
+            "it with `chime-combine --work-dir <work> --drop <freq_ids> "
+            "--output-dir <run>`.",
+            flush=True,
+        )
+        return {"per_pilot_work_dir": work}
     if verbose:
         print(f"[chime-scan] combined {len(product_paths)} pilot product(s) -> {output_dir}",
               flush=True)

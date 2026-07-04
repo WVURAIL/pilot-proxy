@@ -2,8 +2,10 @@
 """Combine per-pilot datatrawl analyzer products into PilotProxy's canonical products.
 
 The detector analyzer fans out one ``<channel>.npz`` per coarse channel.
-This step stacks those per-pilot products along the pilot axis and feeds the
-SAME writer functions ``run_chime_analysis`` uses, so the combined
+This step stacks those per-pilot products along the pilot axis -- aligning
+frames by (event, frame-in-file) identity, so pilots that processed different
+event sets stack over exactly their common identities with drops reported --
+and feeds the SAME writer functions ``run_chime_analysis`` uses, so the combined
 ``chime_detector_outputs`` / ``chime_spectrogram_cache`` / ``chime_reductions_10s``
 / ``mask_summary`` are byte-identical to a single-process run -- which is what
 keeps the existing plots and ``validate-products`` working unchanged on datatrawl
@@ -41,6 +43,162 @@ import json
 
 def _write_json(path: Path, obj: Any) -> None:
     Path(path).write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
+
+
+class CombineEmptyIntersectionError(ValueError):
+    """No (event, frame) identity is shared by every product handed to combine."""
+
+
+def _label(z: Mapping[str, Any]) -> str:
+    ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
+    if "freq_id" in z:
+        return f"ch{ch}/freq_id {int(np.asarray(z['freq_id']).reshape(-1)[0])}"
+    return f"ch{ch}"
+
+
+# Every per-frame array the analyzer writes (length n_frames along axis 0).
+# Event-keyed alignment gathers exactly these; everything else in a product is
+# per-pilot (scalars), per-unit (time/provenance axes), or per-bin (spectra).
+_PER_FRAME_KEYS = (
+    "frame_index", "p_target_u64", "p_ref_sum_u64", "fstat_raw",
+    "fstat_level_db", "pnr_bin_db", "snr_shelf_db", "pilot_excess_corrected",
+    "reject_mask", "valid", "baseband_power_linear",
+    "frame_unit_index", "frame_in_unit",
+)
+
+
+def _align_frames(
+    products: Sequence[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], np.ndarray, dict[str, Any]]:
+    """Event-keyed frame alignment: subset and reorder every product onto the
+    per-frame identities they all share.
+
+    A frame's identity is ``(source event, frame position within its file)``,
+    which the analyzer records for every frame. The canonical order is the
+    reference (lowest-channel) product's own order restricted to the common
+    identities, so a fully aligned set passes through untouched (byte-parity
+    with ``run_chime_analysis``) and a ragged set stacks exactly its overlap,
+    reporting what each pilot dropped. Products predating the identity tags
+    fall back to the strict positional check unchanged.
+    """
+    identities = [_frame_identity(z) for z in products]
+    if not all(identity is not None for identity in identities):
+        # legacy products: strict positional semantics, exactly as before
+        return [dict(z) for z in products], _check_frames(products), {
+            "mode": "strict_positional"}
+    for z, ids in zip(products, identities):
+        n = int(np.asarray(z["frame_index"]).reshape(-1).size)
+        if ids.size != n:
+            raise ValueError(
+                "combine: frame identity length does not match frame_index length")
+        if len(set(ids.tolist())) != ids.size:
+            raise ValueError(
+                f"combine: {_label(z)} contains duplicate (event, frame) "
+                f"identities; one acquisition appears twice in that product")
+    sets = [set(ids.tolist()) for ids in identities]
+    common = set.intersection(*sets)
+    if not common:
+        counts = ", ".join(
+            f"{_label(z)}: {len(s)} frames/"
+            f"{len({i.split(chr(0))[0] for i in s})} events"
+            for z, s in zip(products, sets))
+        raise CombineEmptyIntersectionError(
+            f"combine: the {len(products)} per-pilot products share no common "
+            f"(event, frame) identity -- there is nothing every pilot saw, so an "
+            f"event-keyed stack over all of them is empty. Per-pilot inventory: "
+            f"{counts}. Stack a channel subset instead (`pilot-proxy "
+            f"chime-combine --report` shows the presence histogram and the "
+            f"drop-curve; `--drop <freq_ids>` excludes channels).")
+    ref_ids = identities[0].tolist()
+    canonical = [i for i in ref_ids if i in common]
+    aligned: list[dict[str, Any]] = []
+    by_pilot: list[dict[str, Any]] = []
+    kept_events = {i.split("\0")[0] for i in canonical}
+    for z, ids in zip(products, identities):
+        pos = {i: r for r, i in enumerate(ids.tolist())}
+        rows = np.asarray([pos[i] for i in canonical], dtype=np.int64)
+        out = dict(z)
+        for key in _PER_FRAME_KEYS:
+            if key in out:
+                out[key] = np.asarray(out[key])[rows]
+        aligned.append(out)
+        pilot_events = {i.split("\0")[0] for i in ids.tolist()}
+        by_pilot.append({
+            "physical_channel": int(np.asarray(z["physical_channel"]).reshape(-1)[0]),
+            "freq_id": (int(np.asarray(z["freq_id"]).reshape(-1)[0])
+                        if "freq_id" in z else None),
+            "n_frames_total": int(ids.size),
+            "n_frames_dropped": int(ids.size - len(canonical)),
+            "n_events_total": len(pilot_events),
+            "n_events_dropped": len(pilot_events - kept_events),
+        })
+    info = {
+        "mode": "event_keyed",
+        "n_frames_common": len(canonical),
+        "n_events_common": len(kept_events),
+        "by_pilot": by_pilot,
+        "frame_event_key": [i.split("\0")[0] for i in canonical],
+        "frame_in_unit": [int(i.split("\0")[1]) for i in canonical],
+    }
+    dropped = [p for p in by_pilot if p["n_frames_dropped"]]
+    if dropped:
+        detail = ", ".join(
+            f"ch{p['physical_channel']}"
+            + (f"/freq_id {p['freq_id']}" if p["freq_id"] is not None else "")
+            + f": -{p['n_frames_dropped']} frames/-{p['n_events_dropped']} events"
+            for p in dropped)
+        print(
+            f"[combine] event-keyed alignment: kept {len(canonical)} frame(s) / "
+            f"{len(kept_events)} event(s) common to {len(products)} pilot(s); "
+            f"dropped {detail}", flush=True)
+    frame_index = np.arange(len(canonical), dtype=np.int64)
+    return aligned, frame_index, info
+
+
+def report_products(product_paths: Sequence[str | Path]) -> str:
+    """Event-presence report for a set of per-pilot products: per-pilot counts,
+    the presence histogram, the all-pilot intersection, and the greedy
+    drop-curve (intersection after removing the most-constraining pilot,
+    repeatedly). This is the decision input for choosing a combine subset."""
+    import collections
+    ev: dict[str, set[str]] = {}
+    for p in product_paths:
+        with np.load(str(p)) as z:
+            label = (f"ch{int(np.asarray(z['physical_channel']).reshape(-1)[0])}"
+                     + (f"/freq_id {int(np.asarray(z['freq_id']).reshape(-1)[0])}"
+                        if "freq_id" in z.files else ""))
+            events = set(np.asarray(z["source_event_keys"]).reshape(-1).astype(str)
+                         .tolist()) if "source_event_keys" in z.files else set()
+        ev[label] = events
+    lines = [f"per-pilot products: {len(ev)}"]
+    for label in sorted(ev):
+        lines.append(f"  {label}: {len(ev[label])} events")
+    if not ev or not any(ev.values()):
+        lines.append("no event metadata present; report unavailable")
+        return "\n".join(lines)
+    union = set().union(*ev.values())
+    presence = collections.Counter()
+    for s in ev.values():
+        for e in s:
+            presence[e] += 1
+    hist = collections.Counter(presence.values())
+    lines.append(f"union: {len(union)} distinct events")
+    lines.append("events by how many pilots hold them: "
+                 + ", ".join(f"{k}: {v}" for k, v in sorted(hist.items())))
+    lines.append(f"intersection of all {len(ev)} pilots: "
+                 f"{len(set.intersection(*ev.values()))}")
+    work = dict(ev)
+    lines.append("drop-curve (removing the most-constraining pilot each step):")
+    while len(work) > max(2, len(ev) // 2):
+        best = None
+        for c in work:
+            n = len(set.intersection(*(work[x] for x in work if x != c)))
+            if best is None or n > best[1]:
+                best = (c, n)
+        c, n = best
+        del work[c]
+        lines.append(f"  drop {c}: intersection of remaining {len(work)} = {n}")
+    return "\n".join(lines)
 
 
 def _detector_contract_from(products: Sequence[Mapping[str, Any]], nfft: int) -> dict:
@@ -159,12 +317,6 @@ def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
 
     if grids_match and events_match and identity_match:
         return ref_fi
-
-    def _label(z: Mapping[str, Any]) -> str:
-        ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
-        if "freq_id" in z:
-            return f"ch{ch}/freq_id {int(np.asarray(z['freq_id']).reshape(-1)[0])}"
-        return f"ch{ch}"
 
     lines = []
     for i, z in enumerate(products):
@@ -338,9 +490,27 @@ def combine_detector_products(
     run_dir: str | Path,
     *,
     chunk_seconds: float = 10.0,
+    drop_freq_ids: Sequence[int] | None = None,
 ) -> dict[str, Path]:
-    """Stack per-pilot detector products and write the canonical detector products."""
+    """Stack per-pilot detector products and write the canonical detector products.
+
+    Frames are aligned by (event, frame-in-file) identity: pilots that
+    processed different event sets stack over their common identities, with
+    per-pilot drops reported and recorded. ``drop_freq_ids`` excludes whole
+    pilots up front (the subset-selection knob the drop-curve report feeds).
+    """
     products = _load_sorted(product_paths)
+    if drop_freq_ids:
+        drop = {int(f) for f in drop_freq_ids}
+        kept = [z for z in products
+                if int(np.asarray(z.get("freq_id", -1)).reshape(-1)[0]) not in drop]
+        excluded = len(products) - len(kept)
+        if not kept:
+            raise ValueError("combine: --drop excluded every per-pilot product")
+        if excluded:
+            print(f"[combine] --drop excluded {excluded} pilot(s): "
+                  f"{sorted(drop)}", flush=True)
+        products = kept
     _check_invariants(
         products,
         ("schema_version", "nfft", "detector_window_samples", "sense",
@@ -350,8 +520,20 @@ def combine_detector_products(
          "dtv_bandwidth_hz", "pilot_capture_efficiency"),
         "detector geometry",
     )
-    frame_index = _check_frames(products)
+    products_full = products
+    products, frame_index, align_info = _align_frames(products_full)
     nfft = int(np.asarray(products[0]["nfft"]))
+
+    # per-channel diagnostic paired with the integrated spectra, which are
+    # accumulated at analyzer time over each pilot's FULL processed frame set
+    # and cannot be re-subset here -- computed over the full set to match.
+    def _masked_fraction(z: Mapping[str, Any]) -> float:
+        rej = np.asarray(z["reject_mask"]).reshape(-1).astype(np.float64)
+        n_valid = float(np.asarray(z["valid"]).reshape(-1).sum())
+        return float(rej.sum() / n_valid) if n_valid > 0 else float("nan")
+
+    masked_fraction = np.asarray(
+        [_masked_fraction(z) for z in products_full], np.float64)
 
     physical_channel = _scalars(products, "physical_channel", np.int32)
     pilot_frequency_hz = _scalars(products, "pilot_frequency_hz", np.float64)
@@ -405,13 +587,6 @@ def combine_detector_products(
     spec_after = np.stack([
         np.asarray(z["integrated_spectrum_after_mask"], np.float64).reshape(-1)
         for z in products])
-
-    def _masked_fraction(z: Mapping[str, Any]) -> float:
-        rej = np.asarray(z["reject_mask"]).reshape(-1).astype(np.float64)
-        n_valid = float(np.asarray(z["valid"]).reshape(-1).sum())
-        return float(rej.sum() / n_valid) if n_valid > 0 else float("nan")
-
-    masked_fraction = np.asarray([_masked_fraction(z) for z in products], np.float64)
 
     # Sample rate for the spectra frequency axis is shared only when every
     # per-pilot product carries consistent timing metadata.
@@ -527,10 +702,23 @@ def combine_detector_products(
         common["freq_id_by_pilot"] = [int(v) for v in freq_id]
     _write_json(run_dir / "run_config.json",
                 {"schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION, **common})
+    if align_info.get("mode") == "event_keyed":
+        identity_path = run_dir / "chime_frame_identity.npz"
+        np.savez_compressed(
+            str(identity_path),
+            frame_event_key=np.asarray(align_info["frame_event_key"], dtype=str),
+            frame_in_unit=np.asarray(align_info["frame_in_unit"], dtype=np.int64),
+        )
+        outputs["frame_identity"] = identity_path
+    stats_alignment = {
+        k: v for k, v in align_info.items()
+        if k not in ("frame_event_key", "frame_in_unit")
+    }
     _write_json(run_dir / "stats.json", {
         "schema_version": CHIME_STATS_SCHEMA_VERSION,
         "num_frames": int(frame_index.size),
         "num_pilots": len(products),
+        "combine_alignment": stats_alignment,
         "windows_per_stream": int(nfft) // k,
         "rational_overflow_count_by_pilot": [
             int(np.asarray(z.get("rational_overflow_count", 0))) for z in products
@@ -553,4 +741,8 @@ def combine_detector_products(
     return outputs
 
 
-__all__ = ["combine_detector_products"]
+__all__ = [
+    "CombineEmptyIntersectionError",
+    "combine_detector_products",
+    "report_products",
+]

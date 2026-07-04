@@ -303,7 +303,10 @@ def _cmd_chime_run(args: argparse.Namespace) -> None:
 
 def _cmd_chime_combine(args: argparse.Namespace) -> None:
     try:
-        from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
+        from pilot_proxy.datatrawl_plugins.combine import (
+            combine_detector_products,
+            report_products,
+        )
     except ImportError as exc:
         raise SystemExit(
             "chime-combine needs the datatrawl integration installed "
@@ -322,7 +325,17 @@ def _cmd_chime_combine(args: argparse.Namespace) -> None:
             f"chime-combine: no per-pilot products matched {args.glob!r} under "
             f"{args.work_dir}"
         )
-    outputs = combine_detector_products(paths, args.output_dir)
+    if args.report:
+        print(report_products(paths))
+        return
+    if args.output_dir is None:
+        raise SystemExit("chime-combine: --output-dir is required (or use --report).")
+    drop_freq_ids = (
+        [int(x) for x in str(args.drop).split(",") if x.strip()]
+        if args.drop else None
+    )
+    outputs = combine_detector_products(
+        paths, args.output_dir, drop_freq_ids=drop_freq_ids)
     print(f"Combined {len(paths)} pilot product(s) -> {args.output_dir}")
     for label, path in outputs.items():
         print(f"  {label}: {path}")
@@ -1043,8 +1056,19 @@ def build_parser() -> argparse.ArgumentParser:
                                 help="Explicit per-pilot product path (repeatable).")
     chime_combine.add_argument("--glob", default="*.npz",
                                help="Product glob under --work-dir.")
-    chime_combine.add_argument("--output-dir", type=Path, required=True,
-                               help="Where the combined canonical products are written.")
+    chime_combine.add_argument("--output-dir", type=Path, default=None,
+                               help="Where the combined canonical products are "
+                                    "written. Required unless --report.")
+    chime_combine.add_argument("--drop", default=None,
+                               help="Comma-separated freq_ids to exclude from "
+                                    "the stack (subset selection; see --report "
+                                    "for the drop-curve).")
+    chime_combine.add_argument("--report", action="store_true",
+                               help="Print the event-presence report for the "
+                                    "given products (per-pilot event counts, "
+                                    "presence histogram, all-pilot "
+                                    "intersection, greedy drop-curve) and "
+                                    "exit without combining.")
     chime_combine.set_defaults(func=_cmd_chime_combine)
 
     inject = _add_command(
