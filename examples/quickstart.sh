@@ -45,7 +45,7 @@ LD_LIBRARY_PATH="$CUDA_LD_LIBRARY_PATH" PYTHONPATH=src "$CUDA_PYTHON" \
   --noise-source gnuradio \
   --gnuradio-python "$GNURADIO_PYTHON"
 
+# pilot identity comes from the metadata.json sidecar quantize wrote above
 LD_LIBRARY_PATH="$CUDA_LD_LIBRARY_PATH" PYTHONPATH=src "$CUDA_PYTHON" \
   -m pilot_proxy.detect \
-  --input-detector-matrix generated/detector_input/detector_matrix_i4.npy \
-  --physical-channel 14
+  --input-detector-matrix generated/detector_input/detector_matrix_i4.npy

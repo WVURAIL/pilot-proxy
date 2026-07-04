@@ -253,15 +253,15 @@ white noise at every CI run; this section is its on-sky counterpart.
 
 ## Full pilot detector run
 
-After the bounded detector smoke test passes:
+After the bounded detector smoke test passes, run the production scan.
+`--select` defaults to every `freq_id` the inventory contains and the resolved
+set is printed before any staging; `--source cadc-datatrail` is inferred from
+`--inventory-name`:
 
 ```bash
 pilot-proxy chime-scan \
   --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
-  --source cadc-datatrail \
-  --inventory-name chime-pilots \
-  --analyzer pilot-proxy-detector \
-  --select 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844
+  --inventory-name chime-pilots
 ```
 
 Validate:

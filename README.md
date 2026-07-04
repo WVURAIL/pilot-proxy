@@ -300,7 +300,11 @@ analyzers through `datatrawl` and combines the per-pilot products into PilotProx
 canonical CHIME outputs. Two things to know before running:
 
 - **Selection is in the CHIME `freq_id` coarse-channel namespace**, not ATSC
-  physical-channel numbers. The default ATSC 14-36 pilot set (23 `freq_id`s) is
+  physical-channel numbers. With `--source cadc-datatrail`, omitting `--select`
+  scans every freq_id the inventory contains (the resolved set is printed
+  before any staging); pass `--select` to scan a subset. `--source` itself is
+  inferred: `--inventory`/`--inventory-name` name the archive source. The
+  default ATSC 14-36 pilot set (23 `freq_id`s) is
   listed in
   [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention); `844` is
   the single-channel smoke-test default (the ATSC 14 pilot).

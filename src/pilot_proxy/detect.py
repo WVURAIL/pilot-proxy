@@ -5,6 +5,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import math
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -292,7 +294,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=argparse.SUPPRESS,
     )
-    parser.add_argument("--physical-channel", type=int, default=None)
+    parser.add_argument("--physical-channel", type=int, default=None,
+                        help="ATSC physical channel of the packed matrix. Default: "
+                             "read from the metadata.json sidecar quantize wrote "
+                             "next to the matrix; an explicit value must agree "
+                             "with it. Without a sidecar, one of --physical-channel/"
+                             "--dtv-pilot-mhz is required.")
     parser.add_argument("--dtv-pilot-mhz", type=float, default=None)
     parser.add_argument(
         "--pilot-frequency-tolerance-hz",
@@ -340,6 +347,69 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _sidecar_pilot_hz(input_path: Path) -> tuple[float | None, Path]:
+    """The pilot frequency quantize recorded in the matrix's ``metadata.json``
+    sidecar, or None when the sidecar is absent, unreadable, or lacks a finite
+    ``dtv_pilot_hz``."""
+    sidecar = Path(input_path).parent / "metadata.json"
+    try:
+        with open(sidecar) as fh:
+            meta = json.load(fh)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None, sidecar
+    value = meta.get("dtv_pilot_hz") if isinstance(meta, dict) else None
+    try:
+        hz = float(value)
+    except (TypeError, ValueError):
+        return None, sidecar
+    if not math.isfinite(hz) or hz <= 0:
+        return None, sidecar
+    return hz, sidecar
+
+
+def _resolve_pilot_request(
+    physical_channel: int | None,
+    dtv_pilot_mhz: float | None,
+    input_path: Path,
+    tolerance_hz: float,
+) -> tuple[int | None, float | None]:
+    """Resolve the pilot identity for a packed detector matrix.
+
+    The sidecar records what quantize actually packed, so it is authoritative:
+    with no flags the pilot comes from the sidecar; an explicit flag must agree
+    with it (a mismatched channel would run the detector against the wrong
+    weight row); with neither a sidecar nor a flag, refuse rather than guess."""
+    if physical_channel is not None and dtv_pilot_mhz is not None:
+        raise SystemExit("Use either --physical-channel or --dtv-pilot-mhz, not both.")
+    sidecar_hz, sidecar_path = _sidecar_pilot_hz(input_path)
+    if physical_channel is None and dtv_pilot_mhz is None:
+        if sidecar_hz is None:
+            raise SystemExit(
+                "detect: no --physical-channel/--dtv-pilot-mhz given and no readable "
+                f"metadata.json sidecar next to {input_path} (quantize writes one "
+                "with dtv_pilot_hz). Pass the pilot identity explicitly."
+            )
+        print(
+            f"Pilot frequency from sidecar {sidecar_path}: "
+            f"{sidecar_hz / HZ_PER_MHZ:.6f} MHz"
+        )
+        return None, sidecar_hz / HZ_PER_MHZ
+    if sidecar_hz is not None:
+        requested_hz = (
+            physical_channel_to_pilot_hz(int(physical_channel))
+            if physical_channel is not None
+            else float(dtv_pilot_mhz) * HZ_PER_MHZ
+        )
+        if abs(requested_hz - sidecar_hz) > float(tolerance_hz):
+            raise SystemExit(
+                f"detect: requested pilot {requested_hz / HZ_PER_MHZ:.6f} MHz "
+                f"disagrees with the matrix sidecar {sidecar_path} "
+                f"({sidecar_hz / HZ_PER_MHZ:.6f} MHz). The sidecar records what "
+                f"quantize packed; fix the flag or requantize."
+            )
+    return physical_channel, dtv_pilot_mhz
+
+
 def _resolve_layout_metadata(
     *,
     rows: int,
@@ -384,14 +454,15 @@ def _resolve_layout_metadata(
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.physical_channel is not None and args.dtv_pilot_mhz is not None:
-        raise SystemExit("Use either --physical-channel or --dtv-pilot-mhz, not both.")
-    if args.physical_channel is None and args.dtv_pilot_mhz is None:
-        args.physical_channel = 14
-
     resolved_input_path = _resolve_detector_input_path(args.input_detector_matrix)
     if resolved_input_path != args.input_detector_matrix:
         print(f"Using detector input {resolved_input_path}")
+    args.physical_channel, args.dtv_pilot_mhz = _resolve_pilot_request(
+        args.physical_channel,
+        args.dtv_pilot_mhz,
+        Path(resolved_input_path),
+        float(args.pilot_frequency_tolerance_hz),
+    )
     packed, batch, rows = _load_detector_input(resolved_input_path)
     kernel = FStatKernel(args.lib_path)
     weights_bank = DetectorWeightBank(

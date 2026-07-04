@@ -2,6 +2,29 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `pilot-proxy chime-scan`: `--select` is now optional for the archive source
+  -- omitted, the scan covers every freq_id the inventory contains (sorted;
+  companion rows without a freq_id are skipped), prints the resolved set
+  before any staging, and notes when the survey sidecar's requested
+  `freq_ids` disagree with the rows (patchy replication, partial surveys).
+  One product per freq_id either way; the analyzer-level explicit-selection
+  guard is unchanged. `--source local` still requires `--select` (no
+  inventory to derive the scope from).
+
+- `pilot-proxy chime-scan`: `--source` is inferred from the flags that name
+  it (`--inventory`/`--inventory-name` select `cadc-datatrail`; bare
+  `--source-root` keeps the historic local default). The previously silent
+  wrong pairings are now hard errors (`--source local` with inventory flags;
+  `--input-dir` with the archive source), and `--instrument` is
+  cross-checked against the inventory sidecar's recorded `telescope`.
+
+- `pilot-proxy detect`: the pilot identity comes from the `metadata.json`
+  sidecar quantize writes next to the packed matrix (`dtv_pilot_hz` is
+  authoritative); an explicit `--physical-channel`/`--dtv-pilot-mhz` must
+  agree with it within the pilot-frequency tolerance. Behavior change: with
+  neither a flag nor a sidecar, `detect` refuses instead of silently
+  assuming channel 14.
+
 - `pilot-proxy evaluate-snr` now inherits the testbench evaluator's parser
   directly (`parents=`) and calls it in-process instead of hand-mirroring
   arguments into a subprocess. This fixes `--detector-backend` (and 15 other

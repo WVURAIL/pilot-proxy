@@ -56,7 +56,11 @@ For detector runs, use a GPU node with a CuPy build matching the CUDA runtime.
 ## Selection: CHIME `freq_id`, not ATSC channel
 
 `pilot-proxy chime-scan --select` is in the CHIME coarse-channel namespace. It is
-not the ATSC physical-channel namespace.
+not the ATSC physical-channel namespace. For `--source cadc-datatrail` it is
+optional: omitted, the scan covers every `freq_id` the inventory contains (one
+product per `freq_id` either way), and the resolved set is printed before any
+staging. It stays required for `--source local`, which has no inventory to
+derive the scope from.
 
 A CHIME baseband file is one coarse channel. The local source and CADC inventory
 key files by `freq_id`, and archive-style filenames look like:
@@ -157,15 +161,23 @@ pilot-proxy chime-scan \
   --max-chunks-per-file 1
 ```
 
-Run the detector analyzer over all default pilot `freq_id`s:
+Run the detector analyzer over every pilot `freq_id` in the inventory
+(`--select` defaults to all of them; `--source` and `--analyzer` are the
+inferred/default values and can be omitted):
 
 ```bash
 pilot-proxy chime-scan \
   --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
-  --source cadc-datatrail \
+  --inventory-name chime-pilots
+```
+
+To scan a subset, pass it explicitly:
+
+```bash
+pilot-proxy chime-scan \
+  --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
   --inventory-name chime-pilots \
-  --analyzer pilot-proxy-detector \
-  --select 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844
+  --select 660,675,690,752
 ```
 
 ---

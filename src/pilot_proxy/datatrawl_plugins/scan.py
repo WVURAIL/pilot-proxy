@@ -18,6 +18,7 @@ hooks ``run_chime_analysis`` exposes), which is how the GPU-free parity tests ru
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -43,11 +44,136 @@ def _named_inventory_path(name: str, source_root: str | Path | None = None) -> P
     return root / "data" / str(name).strip() / "inventory.jsonl"
 
 
+def _inventory_path_from_options(options: Mapping[str, Any], instrument_name: str) -> Path:
+    """The inventory path the cadc-datatrail source will read, mirrored here so
+    the scan layer can consult the same file (freq_id derivation, sidecar meta)
+    without instantiating the source."""
+    p = options.get("inventory")
+    if p:
+        return Path(p)
+    return Path(options.get("root", ".")) / "data" / str(instrument_name) / "inventory.jsonl"
+
+
+def _read_inventory_meta(inventory_path: Path) -> dict | None:
+    """The survey's sidecar meta (``<inventory>.meta.json``), or None when it is
+    absent or unreadable. Best-effort by design, matching datatrawl's own
+    stance: a missing sidecar is never fatal."""
+    meta_path = inventory_path.with_suffix(".meta.json")
+    try:
+        with open(meta_path) as fh:
+            meta = json.load(fh)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+    return meta if isinstance(meta, dict) else None
+
+
+def _freq_ids_in_inventory(inventory_path: Path) -> list[int]:
+    """Sorted distinct freq_ids across the inventory's rows.
+
+    Rows without a freq_id (companion shapes: gains, N2) are skipped -- they are
+    exactly the rows the source's freq_id filter never serves to a per-pilot
+    run. Malformed lines are skipped too, matching the source's tolerant
+    ``enumerate``."""
+    if not inventory_path.exists():
+        raise SystemExit(
+            f"chime-scan: inventory not found: {inventory_path}\n"
+            f"Build one with `datatrawl survey` (or pass --inventory <path>)."
+        )
+    ids: set[int] = set()
+    with open(inventory_path) as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except (json.JSONDecodeError, ValueError):
+                continue
+            ch = row.get("freq_id") if isinstance(row, dict) else None
+            if ch is None:
+                continue
+            try:
+                ids.add(int(ch))
+            except (TypeError, ValueError):
+                continue
+    return sorted(ids)
+
+
+def _parse_freq_id_list(spec: Any) -> list[int] | None:
+    """Tolerant parse of a sidecar ``freq_ids`` field ('506,521', '506-521',
+    [506, 521], ...). None when absent or not confidently parseable ('all')."""
+    if spec is None:
+        return None
+    if isinstance(spec, (list, tuple)):
+        try:
+            return sorted({int(s) for s in spec})
+        except (TypeError, ValueError):
+            return None
+    out: set[int] = set()
+    for part in str(spec).split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            if "-" in part:
+                lo, hi = part.split("-")
+                out.update(range(int(lo), int(hi) + 1))
+            else:
+                out.add(int(part))
+        except ValueError:
+            return None
+    return sorted(out) if out else None
+
+
+def _selection_is_empty(select: Any) -> bool:
+    return (
+        select is None
+        or (isinstance(select, str) and not select.strip())
+        or (isinstance(select, (list, tuple)) and len(select) == 0)
+    )
+
+
+def _default_selection_from_inventory(
+    inventory_path: Path, *, label: str, meta: dict | None, verbose: bool
+) -> list[int]:
+    """No --select: every freq_id the inventory contains, echoed before any
+    staging so the scope of the run is visible up front. When the sidecar's
+    requested ``freq_ids`` disagree with the rows (patchy replication, partial
+    survey), say so."""
+    found = _freq_ids_in_inventory(inventory_path)
+    if not found:
+        raise SystemExit(
+            f"chime-scan: no --select given and inventory {inventory_path} has no "
+            f"rows with a freq_id -- pass --select explicitly."
+        )
+    if verbose:
+        print(
+            f"[chime-scan] no --select: scanning all {len(found)} freq_id(s) from "
+            f"inventory '{label}': {','.join(str(f) for f in found)}",
+            flush=True,
+        )
+        requested = _parse_freq_id_list((meta or {}).get("freq_ids"))
+        if requested is not None and set(requested) != set(found):
+            missing = sorted(set(requested) - set(found))
+            extra = sorted(set(found) - set(requested))
+            parts = []
+            if missing:
+                parts.append("missing from inventory: " + ",".join(map(str, missing)))
+            if extra:
+                parts.append("not in the survey request: " + ",".join(map(str, extra)))
+            print(
+                f"[chime-scan] note: survey requested {len(requested)} freq_id(s); "
+                f"inventory rows cover {len(found)} ({'; '.join(parts)})",
+                flush=True,
+            )
+    return found
+
+
 def run_chime_scan(
     *,
     input_dir: str | Path | None = None,
     output_dir: str | Path,
-    source: str = "local",
+    source: str | None = None,
     analyzer: str = _DETECTOR_ANALYZER,
     select: Any = None,
     instrument: str = "chime",
@@ -68,9 +194,12 @@ def run_chime_scan(
 ) -> dict[str, Path]:
     """Fan out the chosen analyzer over CHIME data and combine into canonical products.
 
-    Source plumbing is explicit per source: ``--source local`` reads files under
-    ``--input-dir``. ``--source cadc-datatrail`` streams from an inventory, provided
-    as one of:
+    ``--source`` is inferred from the flags that name it: ``--inventory`` /
+    ``--inventory-name`` select ``cadc-datatrail``; everything else keeps the
+    local default (``--source-root`` alone serves both layouts and never
+    infers). An explicit ``--source`` that conflicts with those flags is an
+    error. ``--source local`` reads files under ``--input-dir``.
+    ``--source cadc-datatrail`` streams from an inventory, provided as one of:
 
     * ``--inventory <inventory.jsonl>`` for an explicit inventory path;
     * ``--inventory-name <name>`` for newer datatrawl named inventories, resolved as
@@ -78,6 +207,11 @@ def run_chime_scan(
       the current working directory;
     * ``--source-root <dir>`` alone for the legacy
       ``<root>/data/<instrument>/inventory.jsonl`` layout.
+
+    ``--select`` scopes the run to specific freq_ids; for the archive source it
+    defaults to every freq_id the inventory contains (echoed before any
+    staging, with a note when the survey sidecar's requested set disagrees
+    with the rows). Local scans have no inventory and still require it.
 
     The detector analyzer's CUDA kernel is GPU-only, so ``--analyzer pilot-proxy-detector``
     requires a GPU node -- a missing ``cupy`` is caught up front (rather than
@@ -99,14 +233,28 @@ def run_chime_scan(
         )
     reader_name = reader or _READER_FOR_ANALYZER[analyzer]
 
-    if select is None or (isinstance(select, str) and not select.strip()) or (
-        isinstance(select, (list, tuple)) and len(select) == 0
-    ):
+    # -- source: infer from the flags that name it ---------------------------
+    # --inventory/--inventory-name only mean anything for the archive source, so
+    # their presence names it; everything else keeps the historic local default
+    # (--source-root alone legitimately serves both layouts and never infers).
+    # Conflicting pairings are errors, not silent ignores.
+    has_inventory_flags = inventory is not None or inventory_name is not None
+    if source is None:
+        source = "cadc-datatrail" if has_inventory_flags else "local"
+        if verbose and has_inventory_flags:
+            flag = "--inventory" if inventory is not None else "--inventory-name"
+            print(f"[chime-scan] source: cadc-datatrail (inferred from {flag})",
+                  flush=True)
+    if source == "local" and has_inventory_flags:
         raise SystemExit(
-            "chime-scan: --select is required (e.g. --select 844 or --select 829,844). "
-            "It names CHIME freq_id coarse channels (one freq_id = one pilot). The "
-            "PilotProxy analyzers have no 'all' mode, to avoid accumulating multiple "
-            "channels into one product."
+            "chime-scan: --inventory/--inventory-name belong to --source "
+            "cadc-datatrail, but --source local was requested. Drop --source (it is "
+            "inferred from the inventory flags) or drop the inventory flags."
+        )
+    if source == "cadc-datatrail" and input_dir is not None:
+        raise SystemExit(
+            "chime-scan: --input-dir belongs to --source local; the archive source "
+            "reads from the inventory. Drop one of the two."
         )
 
     # The PilotProxy analyzers append frames in delivery order; with download_workers > 1
@@ -134,6 +282,13 @@ def run_chime_scan(
         options["source_glob"] = source_glob
         if source_channel_regex:
             options["source_channel_regex"] = source_channel_regex
+        if _selection_is_empty(select):
+            raise SystemExit(
+                "chime-scan: --select is required for --source local (e.g. "
+                "--select 844 or --select 829,844): a local directory has no "
+                "inventory to derive the freq_id scope from. For archive scans, "
+                "--select defaults to every freq_id in the inventory."
+            )
     elif source == "cadc-datatrail":
         # datatrawl's CADC source reads ctx.options["inventory"] (explicit path) or
         # ctx.options["root"] (the legacy <root>/data/<instrument>/inventory.jsonl
@@ -159,6 +314,22 @@ def run_chime_scan(
                 "alone for the legacy <dir>/data/<instrument>/inventory.jsonl "
                 "layout. Build the inventory with `datatrawl survey` first, and "
                 "pass --source-root if the survey root is not the current directory."
+            )
+        inv_path = _inventory_path_from_options(options, inst.name)
+        meta = _read_inventory_meta(inv_path)
+        if meta and meta.get("telescope") and str(meta["telescope"]) != str(inst.name):
+            raise SystemExit(
+                f"chime-scan: --instrument {inst.name!r} does not match this "
+                f"inventory's telescope {str(meta['telescope'])!r} (recorded in "
+                f"{inv_path.with_suffix('.meta.json')}). Point at the right "
+                f"inventory or fix --instrument."
+            )
+        if _selection_is_empty(select):
+            select = _default_selection_from_inventory(
+                inv_path,
+                label=(inventory_name or str(inv_path)),
+                meta=meta,
+                verbose=verbose,
             )
     else:
         raise SystemExit(

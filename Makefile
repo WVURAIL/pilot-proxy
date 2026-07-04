@@ -84,8 +84,7 @@ evaluate:
 
 detect:
 	PYTHONPATH=src $(PYTHON) -m pilot_proxy.detect \
-	    --input-detector-matrix generated/detector_input/detector_matrix_i4.npy \
-	    --physical-channel 14
+	    --input-detector-matrix generated/detector_input/detector_matrix_i4.npy
 
 clean-cache:
 	rm -f $(CACHED_CUDA_LIB)

@@ -1150,20 +1150,27 @@ def build_parser() -> argparse.ArgumentParser:
                                  "or the legacy root containing "
                                  "data/<instrument>/inventory.jsonl.")
     chime_scan.add_argument("--source", choices=["local", "cadc-datatrail"],
-                            default="local",
-                            help="local: files on disk; cadc-datatrail: stream from the archive.")
+                            default=None,
+                            help="local: files on disk; cadc-datatrail: stream from "
+                                 "the archive. Default: inferred -- cadc-datatrail "
+                                 "when --inventory/--inventory-name is given, local "
+                                 "otherwise (--source-root alone serves both layouts "
+                                 "and keeps the local default). An explicit value "
+                                 "that conflicts with the flags is an error.")
     chime_scan.add_argument("--analyzer", choices=["pilot-proxy-detector"],
                             default="pilot-proxy-detector")
-    chime_scan.add_argument("--select", required=True,
-                            help="CHIME freq_id (coarse-channel indices): '844' "
-                                 "or '829,844'. This is the namespace the CADC "
-                                 "file inventory and on-disk filenames key on; "
-                                 "one freq_id is one pilot. Each product is labelled "
-                                 "with the ATSC channel that pilot falls in (derived "
-                                 "from the file's centre frequency). Required: there "
-                                 "is no 'all' mode, because one product holds exactly "
-                                 "one coarse channel and an unscoped run would mix "
-                                 "several under the first file's label. For the "
+    chime_scan.add_argument("--select", default=None,
+                            help="CHIME freq_id (coarse-channel indices): '844', "
+                                 "'829,844', or ranges '829-844'. This is the "
+                                 "namespace the CADC file inventory and on-disk "
+                                 "filenames key on; one freq_id is one pilot, and "
+                                 "the scan always fans out to one product per "
+                                 "freq_id. For --source cadc-datatrail this "
+                                 "defaults to every freq_id the inventory "
+                                 "contains (the resolved set is printed before "
+                                 "any staging); pass --select to scan a subset. "
+                                 "Required for --source local, which has no "
+                                 "inventory to derive the scope from. For the "
                                  "DTV 14-36 pilot set, see README.md or INTEGRATION.md.")
     chime_scan.add_argument("--instrument", default="chime")
     chime_scan.add_argument("--max-files", type=int, default=None,

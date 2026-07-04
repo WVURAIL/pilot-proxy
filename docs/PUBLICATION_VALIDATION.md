@@ -88,8 +88,7 @@ section.
 3. **Bounded scans** (same pattern as the pre-production gates):
 
    ```bash
-   pilot-proxy chime-scan --source cadc-datatrail --name h0check \
-     --analyzer pilot-proxy-detector --select <freq_id> \
+   pilot-proxy chime-scan --name h0check --select <freq_id> \
      --max-files 50 --checkpoint-every 10 --output-dir runs/h0check_<freq_id>
    pilot-proxy validate-products --run-dir runs/h0check_<freq_id>/<...>
    ```
