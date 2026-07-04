@@ -271,20 +271,20 @@ set is printed before any staging; `--source cadc-datatrail` is inferred from
 
 ```bash
 pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots" \
   --inventory-name chime-pilots
 ```
 
 Validate:
 
 ```bash
-pilot-proxy validate-products   --run-dir "$HOME/pilot_proxy_runs/detector_pilots"   --output-json "$HOME/pilot_proxy_runs/detector_pilots/product_validation.json"
+pilot-proxy validate-products   --run-dir "$HOME/pilot_proxy_runs/chime-pilots"   --output-json "$HOME/pilot_proxy_runs/chime-pilots/product_validation.json"
 ```
 
 Plot:
 
 ```bash
-pilot-proxy chime-plot   --run-dir "$HOME/pilot_proxy_runs/detector_pilots"   --clean-figures
+pilot-proxy chime-plot   --run-dir "$HOME/pilot_proxy_runs/chime-pilots"   --clean-figures
 ```
 
 ---

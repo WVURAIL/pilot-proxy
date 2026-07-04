@@ -167,7 +167,7 @@ inferred/default values and can be omitted):
 
 ```bash
 pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots" \
   --inventory-name chime-pilots
 ```
 
@@ -175,7 +175,7 @@ To scan a subset, pass it explicitly:
 
 ```bash
 pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/detector_pilots" \
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots" \
   --inventory-name chime-pilots \
   --select 660,675,690,752
 ```
