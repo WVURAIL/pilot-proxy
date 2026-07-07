@@ -378,6 +378,18 @@ def _cmd_analyze_injection_recovery(args: argparse.Namespace) -> None:
     raise SystemExit(recovery_main(argv))
 
 
+def _cmd_analyze_transmitter_census(args: argparse.Namespace) -> None:
+    from pilot_proxy.testbench.transmitter_census import main as census_main
+
+    argv: list[str] = ["--census", str(args.census),
+                       "--lines", str(args.lines),
+                       "--output-dir", str(args.output_dir),
+                       "--association", str(args.association)]
+    if args.snr_threshold_db is not None:
+        argv += ["--snr-threshold-db", str(args.snr_threshold_db)]
+    census_main(argv)
+
+
 def _cmd_analyze_cleaning_tradeoff(args: argparse.Namespace) -> None:
     from pilot_proxy.chime.cleaning_tradeoff import main as tradeoff_main
 
@@ -1102,6 +1114,25 @@ def build_parser() -> argparse.ArgumentParser:
                           dest="false_alarm_rates", default=None)
     recovery.add_argument("--output-dir", type=Path, required=True)
     recovery.set_defaults(func=_cmd_analyze_injection_recovery)
+
+    census_cmd = _add_command(
+        "analyze-transmitter-census",
+        "Case-study analysis over the pilotcal line list and the FCC/ISED "
+        "transmitter census: carrier-offset dispersion by service class "
+        "(association table, class-split and spread-vs-composition figures, "
+        "Spearman rank correlation with bootstrap CI).",
+    )
+    census_cmd.add_argument("--census", type=Path, required=True,
+                            help="Census CSV: rf_channel, callsign, "
+                                 "service_class, erp_kw, distance_km.")
+    census_cmd.add_argument("--lines", type=Path, required=True,
+                            help="Line CSV: rf_channel, offset_hz, snr_db.")
+    census_cmd.add_argument("--output-dir", type=Path, required=True)
+    census_cmd.add_argument("--association",
+                            choices=["ranked", "dominant_secondary"],
+                            default="ranked")
+    census_cmd.add_argument("--snr-threshold-db", type=float, default=None)
+    census_cmd.set_defaults(func=_cmd_analyze_transmitter_census)
 
     tradeoff = _add_command(
         "analyze-cleaning-tradeoff",

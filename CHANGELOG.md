@@ -2,6 +2,28 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Documentation rolled to DS001/UG001 v1.6 (files renamed to match): kernel
+  build examples updated for SM auto-detection, the `detect` example now
+  relies on the quantize metadata.json sidecar for the pilot identity, and
+  the environment prerequisites reference the repository venv (conda
+  references removed).
+
+- New `analyze-transmitter-census` command: the 500-mile case-study analysis
+  over a pilotcal line list and the FCC/ISED transmitter census. Associates
+  detected carrier lines to census entries per RF channel (rank pairing by
+  SNR vs an ERP/distance^2 detectability score, with a dominant/secondary
+  fallback strategy), and produces the class-split offset-dispersion figure,
+  the per-channel spread-vs-composition figure with Spearman rank
+  correlation and bootstrap CI, the association table, and an SNR-threshold
+  stability sweep. Input schemas are declared in the module docstring;
+  nothing touches the archive.
+
+- Documentation builds are now part of the tooling: `make docs` builds the
+  data sheet and user guide with latexmk (`docs/auxil/` scratch, PDFs in
+  `docs/out/`), and the README's Build-documentation section records the
+  verified Debian/Ubuntu TeX package set, including the extras that
+  `PILOT_PROXY_USE_TEX=1` figure rendering needs.
+
 - Event-keyed combine: per-pilot frames now align by (event, frame-in-file)
   identity instead of positionally. Pilots that processed different event
   sets (the archive is ragged: not every channel holds every event) stack

@@ -396,13 +396,25 @@ write vector PDFs with the same stems for manuscript use.
 
 ## Build documentation
 
-Generated PDFs are ignored by git. Build locally when needed:
+Generated PDFs are ignored by git. Build locally with:
 
 ```bash
-mkdir -p docs/out
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_DS001_v1_5_Data_Sheet.tex)
-(cd docs && latexmk -g -pdf -interaction=nonstopmode -halt-on-error   -outdir=out PilotProxy_UG001_v1_5_User_Guide.tex)
+make docs        # latexmk; scratch in docs/auxil/, PDFs in docs/out/
 ```
+
+The toolchain on Debian/Ubuntu (verified package set --- each package below
+is required; `--no-install-recommends` with anything less fails on
+`lmodern.sty`):
+
+```bash
+sudo apt-get install --no-install-recommends \
+    texlive-latex-base texlive-latex-recommended texlive-latex-extra \
+    texlive-fonts-recommended texlive-pictures lmodern latexmk
+```
+
+Publication figures rendered with `PILOT_PROXY_USE_TEX=1` use the same
+toolchain plus `dvipng cm-super ghostscript`. CANFAR session images ship no
+TeX and no root, so build documentation locally, not in a session.
 
 ---
 

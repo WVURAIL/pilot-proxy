@@ -6,7 +6,7 @@ CUDA_LIB := cuda/libfstatistic.so
 CACHED_CUDA_LIB := $(CUDA_CACHE_DIR)/libfstatistic.so
 PYTHON_TEST_ENV := MPLBACKEND=Agg PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PILOT_PROXY_USE_TEX=0 PYTHONPATH=src
 
-.PHONY: build-kernel test-kernel test-python test generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean
+.PHONY: build-kernel test-kernel test-python test generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs
 
 build-kernel:
 	$(MAKE) -C cuda
@@ -21,6 +21,15 @@ test-python:
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
 
 test: test-kernel test-python
+
+docs:
+	@command -v latexmk >/dev/null || { \
+	    echo "latexmk not found -- see 'Build documentation' in README.md"; exit 1; }
+	cd docs && for t in *.tex; do \
+	    latexmk -pdf -interaction=nonstopmode -halt-on-error \
+	        -auxdir=auxil -outdir=out $$t || exit 1; \
+	done
+	@echo "PDFs in docs/out/"
 
 release-check:
 	bash scripts/check_no_legacy_guard_terms.sh

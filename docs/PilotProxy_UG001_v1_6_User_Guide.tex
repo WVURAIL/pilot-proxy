@@ -99,7 +99,7 @@
 \fancyhead[L]{\small PilotProxy-UG001}
 \fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.2.0}
 \fancyhead[R]{\small User Guide}
-\fancyfoot[L]{\small PilotProxy-UG001 v1.5}
+\fancyfoot[L]{\small PilotProxy-UG001 v1.6}
 \fancyfoot[C]{\small Standalone ATSC 1.0 pilot-tone detector}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -109,7 +109,7 @@
 
 \title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.2.0\\User Guide}
 \author{West Virginia University}
-\date{PilotProxy-UG001 v1.5 \\ July 3, 2026}
+\date{PilotProxy-UG001 v1.6 \\ July 7, 2026}
 
 \begin{document}
 \thispagestyle{empty}
@@ -124,7 +124,7 @@
 \vspace{0.08in}
 {\Large User Guide}\par
 \vspace{0.35in}
-{\large PilotProxy-UG001 v1.5}\par
+{\large PilotProxy-UG001 v1.6}\par
 {\large July 3, 2026}\par
 \vfill
 \begin{tabularx}{\linewidth}{|>{\bfseries}L{0.25\linewidth}|Y|}
@@ -254,13 +254,13 @@ Installed packages carry the reference weight bank and the \code{configs/} tree,
 Use two Python interpreters when GNU Radio is installed as a system package:
 \begin{itemize}
   \item GNU Radio Python: used for ATSC generation and GNU Radio AWGN, typically \code{/usr/bin/python3}.
-  \item CUDA Python: used for CuPy, the CUDA shared library, and detector evaluation, typically a conda environment with \code{numpy}, \code{pytest}, and \code{cupy-cuda12x}.
+  \item CUDA Python: used for CuPy, the CUDA shared library, and detector evaluation --- the repository virtual environment (README: Environment) with \code{numpy}, \code{pytest}, and \code{cupy-cuda12x}.
 \end{itemize}
 
 Install \code{pilot-proxy} into the CUDA environment and keep that environment active; every listing in this guide is then a plain \code{pilot-proxy} invocation.  GNU Radio never needs to be on the command line directly: \code{generate-atsc} and the GNU Radio noise source run it through \code{--gnuradio-python} (typically \code{/usr/bin/python3}).  On WSL the CUDA driver path is \code{/usr/lib/wsl/lib}.
 
-On WSL, do not add the conda environment \code{lib/} directory to
-\code{LD_LIBRARY_PATH}.  It can make \code{/usr/bin/bash} load conda's
+On WSL, do not add the Python environment's \code{lib/} directory to
+\code{LD_LIBRARY_PATH}.  It can make \code{/usr/bin/bash} load that environment's
 \code{libtinfo.so.6} and print a \code{no version information available}
 warning.  The CUDA detector examples only require the WSL CUDA driver path.
 Pass \code{--no-python-user-site} if user-site packages shadow the NumPy build used by GNU Radio.
@@ -271,7 +271,7 @@ Pass \code{--no-python-user-site} if user-site packages shadow the NumPy build u
 
 Build for the target GPU architecture:
 \begin{lstlisting}[style=shell]
-make build-kernel SM=89
+make build-kernel   % SM auto-detected from nvidia-smi; pass SM=<arch> to override
 \end{lstlisting}
 This builds \code{cuda/libfstatistic.so} and stages a copy to:
 \begin{lstlisting}[style=shell]
@@ -290,7 +290,7 @@ python -m pytest tests -q
 \end{lstlisting}
 Run CUDA/kernel tests on a CUDA-capable host:
 \begin{lstlisting}[style=shell]
-make -C cuda test SM=89 DP4A=1
+make -C cuda test DP4A=1   % SM auto-detected
 \end{lstlisting}
 The release-candidate source tree used for this document passed the Python release checks available in this environment.  Run CUDA and GNU Radio quickstart tests on the target machine before tagging a release.
 
@@ -298,7 +298,7 @@ The release-candidate source tree used for this document passed the Python relea
 
 The provided script performs the release sanity-check flow:
 \begin{lstlisting}[style=shell]
-SM=89 bash examples/quickstart.sh
+bash examples/quickstart.sh   % GPU arch auto-detected
 \end{lstlisting}
 The expected output includes a waveform audit, detector input generation, SNR evaluation, and detection JSON.  A typical excerpt is:
 \begin{lstlisting}[style=shell]
@@ -498,9 +498,12 @@ Run detection on a prebuilt packed detector matrix:
 LD_LIBRARY_PATH=/usr/lib/wsl/lib \
 pilot-proxy detect \
   --input-detector-matrix generated/detector_input/detector_matrix_i4.npy \
-  --physical-channel 14 \
   --threshold-snr-shelf-db -26
 \end{lstlisting}
+The pilot identity is read from the \code{metadata.json} sidecar that
+\code{quantize} writes next to the matrix; an explicit
+\code{--physical-channel} or \code{--dtv-pilot-mhz} must agree with it, and
+with neither a sidecar nor a flag, \code{detect} refuses rather than guess.
 If \code{detector_matrix_i4.npy} is absent but the batched
 \code{detector_blocks_i4.npy} file exists, \code{detect} resolves the default
 input to the batched file automatically.  If neither file exists, run

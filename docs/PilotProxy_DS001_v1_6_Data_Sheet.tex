@@ -99,7 +99,7 @@
 \fancyhead[L]{\small PilotProxy-DS001}
 \fancyhead[C]{\small CUDA F-Statistic DTV Pilot Detector v0.2.0}
 \fancyhead[R]{\small Product Specification}
-\fancyfoot[L]{\small PilotProxy-DS001 v1.5}
+\fancyfoot[L]{\small PilotProxy-DS001 v1.6}
 \fancyfoot[C]{\small West Virginia University}
 \fancyfoot[R]{\small Page \thepage\ of \pageref{LastPage}}
 \renewcommand{\headrulewidth}{0.8pt}
@@ -109,14 +109,14 @@
 
 \title{PilotProxy CUDA F-Statistic DTV Pilot Detector v0.2.0\\Product Specification}
 \author{West Virginia University}
-\date{PilotProxy-DS001 v1.5 \\ July 3, 2026}
+\date{PilotProxy-DS001 v1.6 \\ July 7, 2026}
 
 \begin{document}
 \thispagestyle{fancy}
 {\sffamily
 \begin{minipage}[t]{0.39\textwidth}
   {\fontsize{24}{26}\selectfont\bfseries\color{FStatRed}PilotProxy}\par
-  {\small PilotProxy-DS001 v1.5, July 3, 2026}
+  {\small PilotProxy-DS001 v1.6, July 7, 2026}
 \end{minipage}
 \hfill
 \begin{minipage}[t]{0.58\textwidth}
@@ -444,12 +444,12 @@ python -m pip install -e .
 \end{lstlisting}
 Build the CUDA kernel:
 \begin{lstlisting}[style=shell]
-make build-kernel SM=89
+make build-kernel   % SM auto-detected from nvidia-smi; pass SM=<arch> to override
 \end{lstlisting}
 Run Python tests and kernel tests on a CUDA-capable machine:
 \begin{lstlisting}[style=shell]
 PYTHONPATH=src python -m pytest tests -q
-make -C cuda test SM=89 DP4A=1
+make -C cuda test DP4A=1   % SM auto-detected
 \end{lstlisting}
 
 \begin{figure}[H]
