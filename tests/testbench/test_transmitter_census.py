@@ -169,16 +169,23 @@ def test_snr_threshold_filters_before_analysis(tmp_path):
 
 # -- line extraction from scan products ---------------------------------------
 
-def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096):
+def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096,
+                           pilot_minus_center_hz=0.0, kwin=128):
     """Per-pilot npz with just the spectrum keys the extractor reads.
 
-    ``spikes``: [(offset_hz, snr_db), ...] about the nominal pilot; centre is
-    placed AT the pilot so bin math is exercised through the sense flip.
+    Encodes REAL product semantics: fs = 390625 Hz, bin_enbw_hz = fs/K (the
+    DETECTOR bin, not the spectrum spacing), detector_window_samples = K,
+    spectrum spacing = fs/nfft. ``spikes``: [(offset_hz, snr_db), ...] about
+    the nominal pilot; the pilot can sit off-centre so the full
+    centre/sense/spacing mapping is exercised.
     """
-    spacing = 390625.0 / nfft
+    fs = 390625.0
+    spacing = fs / nfft
+    center = 500e6
+    pilot = center + pilot_minus_center_hz
     spec = np.ones(nfft, dtype=np.float64)
     for off, snr in spikes:
-        f_bb = sense * off
+        f_bb = sense * (off + pilot - center)
         k = int(round(f_bb / spacing)) % nfft
         spec[k] = 10.0 ** (snr / 10.0)
     path = Path(dirpath) / f"{freq_id}.npz"
@@ -186,20 +193,66 @@ def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096):
              integrated_spectrum_before_mask=spec,
              integrated_spectrum_after_mask=spec * 0.5,
              nfft=np.asarray([nfft]), sense=np.asarray([sense]),
-             chime_frequency_hz=np.asarray([500e6]),
-             pilot_frequency_hz=np.asarray([500e6]),
+             chime_frequency_hz=np.asarray([center]),
+             pilot_frequency_hz=np.asarray([pilot]),
              physical_channel=np.asarray([ch]),
-             bin_enbw_hz=np.asarray([spacing]))
+             bin_enbw_hz=np.asarray([fs / kwin]),
+             detector_window_samples=np.asarray([kwin]))
     return path
+
+
+def test_extract_matches_real_product_convention(tmp_path):
+    """Regression pinned to production numbers: ch26 (freq_id 660) has
+    sense=-1 and pilot 121941 Hz above centre; the dominant carrier observed
+    at spectrum bin 11270 of 16384 must decode to about -16 Hz offset."""
+    from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
+    fs, nfft = 390625.0, 16384
+    spacing = fs / nfft
+    spec = np.ones(nfft)
+    spec[11270] = 1e3
+    np.savez(tmp_path / "660.npz",
+             integrated_spectrum_before_mask=spec,
+             integrated_spectrum_after_mask=spec,
+             nfft=np.asarray([nfft]), sense=np.asarray([-1]),
+             chime_frequency_hz=np.asarray([500e6]),
+             pilot_frequency_hz=np.asarray([500e6 + 121941.0]),
+             physical_channel=np.asarray([26]),
+             bin_enbw_hz=np.asarray([fs / 128.0]),
+             detector_window_samples=np.asarray([128]))
+    (line,) = extract_lines_from_run(tmp_path)
+    expected = 500e6 + (-1) * (11270 - nfft) * spacing - (500e6 + 121941.0)
+    assert line.offset_hz == pytest.approx(expected, abs=1e-6)
+    assert abs(line.offset_hz - (-16.0)) < spacing
+
+
+def test_extract_never_calls_the_dc_spur_a_carrier(tmp_path):
+    from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
+    # pilot 18.7 kHz from centre (the ch25 geometry): a huge DC spike sits
+    # inside the search window but must be guarded out; the true pilot line
+    # next to it must survive
+    _fake_spectrum_product(tmp_path, 25, 675,
+                           [(0.0, 20)], sense=-1,
+                           pilot_minus_center_hz=-18_684.0)
+    with np.load(tmp_path / "675.npz") as z:
+        spec = np.asarray(z["integrated_spectrum_before_mask"]).copy()
+        keep = {k: z[k] for k in z.files}
+    spec[0] = 1e6  # the DC spur
+    keep["integrated_spectrum_before_mask"] = spec
+    np.savez(tmp_path / "675.npz", **keep)
+    lines = extract_lines_from_run(tmp_path)
+    offs = [l.offset_hz for l in lines]
+    assert all(abs(o - 18_684.0) > 200 for o in offs), offs  # DC excluded
+    assert any(abs(o) < 100 for o in offs)                   # pilot kept
 
 
 def test_extract_lines_recovers_offsets_both_senses(tmp_path):
     from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
     spacing = 390625.0 / 4096
     _fake_spectrum_product(tmp_path, 20, 700, [(0.0, 30), (5000.0, 15),
-                                               (-12000.0, 10)], sense=1)
+                                               (-12000.0, 10)], sense=1,
+                           pilot_minus_center_hz=60_000.0)
     _fake_spectrum_product(tmp_path, 21, 690, [(0.0, 28), (-7000.0, 12)],
-                           sense=-1)
+                           sense=-1, pilot_minus_center_hz=-45_000.0)
     lines = extract_lines_from_run(tmp_path)
     by_ch = {}
     for l in lines:
@@ -218,7 +271,8 @@ def test_extract_lines_recovers_offsets_both_senses(tmp_path):
 
 def test_extract_lines_window_threshold_separation(tmp_path):
     from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
-    _fake_spectrum_product(tmp_path, 22, 660, [
+    _fake_spectrum_product(tmp_path, 22, 660, pilot_minus_center_hz=70_000.0,
+                           spikes=[
         (0.0, 30),          # kept
         (50_000.0, 25),     # outside +/-30 kHz window
         (2000.0, 3),        # below 6 dB floor threshold
@@ -233,7 +287,8 @@ def test_extract_lines_window_threshold_separation(tmp_path):
 def test_end_to_end_lines_from_run(tmp_path):
     (tmp_path / "work").mkdir()
     _fake_spectrum_product(tmp_path / "work", 20, 700,
-                           [(0.0, 30), (4000.0, 12)])
+                           [(0.0, 30), (4000.0, 12)],
+                           pilot_minus_center_hz=55_000.0)
     census = _write_csv(tmp_path / "c.csv", [
         {"rf_channel": 20, "callsign": "KPRI", "service_class": "Full-power",
          "detectability_db": "84", "distance_km": "60"},

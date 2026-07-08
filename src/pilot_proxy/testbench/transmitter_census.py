@@ -26,7 +26,10 @@ lines:   rf_channel:int, offset_hz:float (about the channel's nominal
          high-resolution time-averaged spectrum of its coarse channel
          (integrated_spectrum_before/after_mask; natural FFT order, bin 0
          at the coarse-channel centre, `sense` flipping the frequency
-         axis, `bin_enbw_hz` the bin spacing).
+         axis). The spectrum's bin spacing is fs/nfft, derived from the
+         product as bin_enbw_hz * detector_window_samples / nfft --
+         `bin_enbw_hz` itself is the DETECTOR's bin width (fs/K), not the
+         spectrum's.
 
 Association rule (pluggable, recorded per line in association.csv)
 ------------------------------------------------------------------
@@ -161,7 +164,7 @@ def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
     if key is None:
         raise SystemExit(f"unknown --spectrum {spectrum!r} (before/after)")
     need = {key, "nfft", "sense", "chime_frequency_hz", "pilot_frequency_hz",
-            "physical_channel", "bin_enbw_hz"}
+            "physical_channel", "bin_enbw_hz", "detector_window_samples"}
     lines: list[Line] = []
     paths = sorted(Path(work_dir).glob("*.npz"))
     if not paths:
@@ -176,11 +179,21 @@ def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
             center = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
             pilot = float(np.asarray(z["pilot_frequency_hz"]).reshape(-1)[0])
             ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
-            spacing = float(np.asarray(z["bin_enbw_hz"]).reshape(-1)[0])
+            enbw = float(np.asarray(z["bin_enbw_hz"]).reshape(-1)[0])
+            kwin = int(np.asarray(z["detector_window_samples"]).reshape(-1)[0])
         if spec.size != nfft:
             continue
+        # spectrum bin spacing = fs / nfft; the product self-describes fs as
+        # bin_enbw_hz * K (the detector's rectangular-window bin is fs/K)
+        spacing = enbw * kwin / nfft
         offs = _bin_offsets_hz(nfft, sense, center, pilot, spacing)
         sel = np.abs(offs) <= float(search_window_hz)
+        # DC guard: the coarse-channel centre bin carries the known DC spur
+        # (dominant on the translator-oscillator channels); never call it a
+        # carrier line
+        k = np.arange(nfft)
+        f_bb = np.where(k < nfft // 2, k, k - nfft).astype(np.float64) * spacing
+        sel &= np.abs(f_bb) > 1.5 * spacing
         w, wo = spec[sel], offs[sel]
         order = np.argsort(wo)
         w, wo = w[order], wo[order]
