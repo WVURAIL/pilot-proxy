@@ -70,6 +70,10 @@ number is what argues for the higher-tier venue).
 | 7 | Cleaning operating curve (`cleaning_tradeoff_operating_curve`) | `pilot-proxy analyze-cleaning-tradeoff` | combined survey + control | tooling shipped; **pending survey** |
 | 8 | Recovered bandwidth vs threshold (`recovered_bandwidth_vs_threshold`) | same command as Fig. 7 | same | same |
 | 9 | Survey gallery: spectrogram + mask + before/after spectra for one loud and one quiet channel | `pilot-proxy chime-plot` | production-run figure set | tooling shipped; **pending survey** |
+| 10 | Case study Fig. A: carrier-offset dispersion by service class (per detected line, pooled) | `pilot-proxy analyze-transmitter-census --lines-from-run` | per-pilot integrated spectra + census v2 | previewed at slab depth (27 lines / 14 ch); final at full survey |
+| 11 | Case study Fig. B: per-channel spread vs non-primary composition, Spearman + bootstrap CI | same command | same | previewed; verdict deferred to full depth under the pre-registered n>=3 rule |
+| 12 | Coherent before/after: bearing-steered beamformed spectrum, all-frames vs mask-kept accumulators | visibility analyzer (planned) over a bounded companion scan | companion-scan products + gains companion | design agreed; analyzer pending build |
+| 13 | Mask expansion across one full ATSC sibling span: 8-VSB shelf before/after the pilot-keyed mask | same analyzer, `--mask-from <pilot product>` | same companion scan | gated on the sibling-probe coverage answer |
 
 All figures render with `PILOT_PROXY_USE_TEX=1 PILOT_PROXY_FIGURE_FORMATS=png,pdf`;
 manuscripts take the PDFs.
@@ -79,9 +83,27 @@ manuscripts take the PDFs.
 | # | Table | Source | Status |
 |---|-------|--------|--------|
 | 1 | Detector parameters (K, offsets, guard bins, int4, thresholds) | `docs/METHOD_SPEC.md` / detector contract | done |
-| 2 | Census summary (channels, nearest transmitters, measured offsets) | station catalog + survey carrier peaks | catalog done; offsets from survey |
+| 2 | Census summary (channels, nearest transmitters, measured offsets) | merged-emitter census v2 + `--lines-from-run` extraction | catalog done (v2, sharing partners merged); offsets extract from survey product spectra |
 | 3 | Per-channel survey summary (mask fraction, `mu0`, mean excess) | combined `stats.json` + tradeoff CSV | **pending survey** |
 | 4 | Validation acceptance summary (items 1--5, pass criteria, measured values) | `docs/PUBLICATION_VALIDATION.md` acceptance lines | pending runs |
+
+## Pre-registered analysis decisions
+
+Registered 2026-07-08, while the production survey's first (capped) pass was
+roughly two-thirds complete and before any full-depth statistic existed.
+Changes after this date are amendments and say so.
+
+1. **Combine subset selection.** Starting from all completed channels,
+   iteratively drop the most event-constraining channel while doing so grows
+   the common-event count by at least 50%; stop otherwise, subject to
+   retaining at least 16 channels. The full drop-curve is reported in an
+   appendix regardless of the stopping point.
+
+2. **Case-study Figure B channel inclusion.** Channels enter the
+   spread-vs-composition panel only with at least 3 extracted lines (a MAD
+   over fewer points is not a dispersion). Excluded channels are shown
+   grayed in the figure, not hidden, and `summary.json` carries the Spearman
+   statistic both ways (qualifying-only and all-channels).
 
 ## Statements to support with artifacts
 

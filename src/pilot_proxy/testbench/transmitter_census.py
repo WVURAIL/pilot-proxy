@@ -369,7 +369,8 @@ def threshold_sweep(records: list[dict], thresholds: np.ndarray) -> list[dict]:
 
 # ------------------------------------------------------------------ figures
 
-def _figures(records, chan_stats, rho, ci, out_dir: Path) -> None:
+def _figures(records, chan_stats, rho, ci, out_dir: Path,
+             qualifying=None) -> None:
     from pilot_proxy.plot_style import setup_matplotlib
     setup_matplotlib()
     import matplotlib.pyplot as plt
@@ -401,16 +402,23 @@ def _figures(records, chan_stats, rho, ci, out_dir: Path) -> None:
     # Figure B: per-channel spread vs composition
     xs = np.asarray([c["non_primary_fraction"] for c in chan_stats], np.float64)
     ys = np.asarray([c["mad_hz"] for c in chan_stats], np.float64)
-    ok = np.isfinite(xs) & np.isfinite(ys)
+    finite = np.isfinite(xs) & np.isfinite(ys)
+    qual = (np.asarray(qualifying, bool) if qualifying is not None
+            else finite)
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
-    ax.plot(xs[ok], ys[ok], "o", ms=5)
-    for c in chan_stats:
-        if np.isfinite(c["non_primary_fraction"]) and np.isfinite(c["mad_hz"]):
+    ax.plot(xs[qual], ys[qual], "o", ms=5)
+    excl = finite & ~qual
+    if excl.any():   # pre-registered exclusions shown, not hidden
+        ax.plot(xs[excl], ys[excl], "o", ms=4, mfc="none", color="0.6")
+    for c, q, f in zip(chan_stats, qual, finite):
+        if f:
             ax.annotate(str(c["rf_channel"]),
                         (c["non_primary_fraction"], c["mad_hz"]),
-                        textcoords="offset points", xytext=(4, 3), fontsize=7)
+                        textcoords="offset points", xytext=(4, 3), fontsize=7,
+                        color=("0.2" if q else "0.6"))
     label = (f"Spearman $\\rho$ = {rho:.2f} "
-             f"[{ci[0]:.2f}, {ci[1]:.2f}], N = {int(ok.sum())}")
+             f"[{ci[0]:.2f}, {ci[1]:.2f}], N = {int(qual.sum())}"
+             + (f" ({int(excl.sum())} grayed: n<min)" if excl.any() else ""))
     ax.set_xlabel("non-primary fraction among associated lines")
     ax.set_ylabel("per-channel offset MAD (Hz)")
     ax.set_title(label)
@@ -440,6 +448,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--min-snr-db", type=float, default=6.0)
     p.add_argument("--min-separation-hz", type=float, default=100.0)
     p.add_argument("--min-prominence-db", type=float, default=6.0)
+    p.add_argument("--min-channel-lines", type=int, default=3,
+                   help="Pre-registered Figure-B inclusion rule: channels "
+                        "enter the spread-vs-composition panel only with at "
+                        "least this many extracted lines (MAD is not a "
+                        "dispersion below n=3). Excluded channels are shown "
+                        "grayed; summary.json carries the Spearman statistic "
+                        "both ways.")
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--association", choices=["ranked", "dominant_secondary"],
                    default="ranked")
@@ -478,9 +493,12 @@ def main(argv: list[str] | None = None) -> int:
 
     xs = np.asarray([c["non_primary_fraction"] for c in chan_stats], np.float64)
     ys = np.asarray([c["mad_hz"] for c in chan_stats], np.float64)
-    ok = np.isfinite(xs) & np.isfinite(ys)
+    ns = np.asarray([c["n_lines"] for c in chan_stats])
+    finite = np.isfinite(xs) & np.isfinite(ys)
+    ok = finite & (ns >= int(args.min_channel_lines))   # pre-registered rule
     rho = spearman(xs[ok], ys[ok])
     ci = bootstrap_ci(xs[ok], ys[ok], n_boot=args.bootstrap, seed=args.seed)
+    rho_all = spearman(xs[finite], ys[finite])
 
     by_class = {}
     for cls in ("primary", "non_primary", "unassociated"):
@@ -510,6 +528,10 @@ def main(argv: list[str] | None = None) -> int:
     summary = {"schema_version": "transmitter_census_v1",
                "association_strategy": args.association,
                "line_source": line_source,
+               "min_channel_lines": int(args.min_channel_lines),
+               "spearman_rho_all_channels": rho_all,
+               "n_channels_qualifying": int(ok.sum()),
+               "n_channels_excluded": int(finite.sum() - ok.sum()),
                "snr_threshold_db": args.snr_threshold_db,
                "by_class": by_class, "per_channel": chan_stats,
                "spearman_rho": rho,
@@ -517,7 +539,8 @@ def main(argv: list[str] | None = None) -> int:
                "n_channels": int(ok.sum())}
     with open(args.output_dir / "summary.json", "w") as fh:
         json.dump(summary, fh, indent=2)
-    _figures(records, chan_stats, rho, ci, args.output_dir)
+    _figures(records, chan_stats, rho, ci, args.output_dir,
+             qualifying=ok.tolist())
 
     print(f"lines: {len(records)}  channels: {len(chan_stats)}  "
           f"primary MAD {by_class['primary']['mad_hz']:.1f} Hz vs "

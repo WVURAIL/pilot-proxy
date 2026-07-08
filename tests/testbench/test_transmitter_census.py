@@ -141,9 +141,13 @@ def test_end_to_end_recovers_class_and_correlation(tmp_path):
     by = summary["by_class"]
     # the constructed physics: primaries tight, translators wide
     assert by["primary"]["mad_hz"] < 40.0 < by["non_primary"]["mad_hz"]
-    # more translators -> larger spread, by construction
-    assert summary["spearman_rho"] > 0.6
-    assert summary["spearman_ci95"][0] > 0.2
+    # more translators -> larger spread, by construction. The all-channels
+    # statistic sees the full constructed relation; the qualifying statistic
+    # (pre-registered n>=3 rule) drops the 1- and 2-line anchor channels and
+    # is correspondingly weaker but still positive.
+    assert summary["spearman_rho_all_channels"] > 0.6
+    assert summary["n_channels_qualifying"] == 12
+    assert summary["spearman_rho"] > 0.4
     for name in ("association.csv", "threshold_stability.csv",
                  "fig_offset_by_class.png", "fig_offset_by_class.pdf",
                  "fig_spread_vs_composition.png"):
@@ -351,3 +355,38 @@ def test_lines_sources_are_mutually_exclusive(tmp_path):
          "detectability_db": "80", "distance_km": "60"}])
     with pytest.raises(SystemExit):
         main(["--census", str(census), "--output-dir", str(tmp_path / "o")])
+
+
+def test_min_channel_lines_gates_figure_b_statistic(tmp_path):
+    """The pre-registered n>=3 rule: single-line channels are excluded from
+    the qualifying Spearman but still reported in the all-channels variant
+    and counted as excluded."""
+    census_rows = []
+    (tmp_path / "work").mkdir()
+    # three qualifying channels (3 lines each), one single-line channel
+    for ch, freq in ((20, 700), (21, 690), (22, 680)):
+        _fake_spectrum_product(tmp_path / "work", ch, freq,
+                               [(0.0, 30), (900.0, 12), (-700.0, 10)],
+                               pilot_minus_center_hz=60_000.0)
+        census_rows += [
+            {"rf_channel": ch, "callsign": f"K{ch}", "service_class":
+             "Full-power", "detectability_db": "80", "distance_km": "60"},
+            {"rf_channel": ch, "callsign": f"K{ch}T", "service_class":
+             "Translator (LPTV)", "detectability_db": "", "distance_km": "150"},
+            {"rf_channel": ch, "callsign": f"K{ch}U", "service_class":
+             "Translator (LPTV)", "detectability_db": "", "distance_km": "200"},
+        ]
+    _fake_spectrum_product(tmp_path / "work", 23, 670, [(0.0, 25)],
+                           pilot_minus_center_hz=55_000.0)
+    census_rows.append({"rf_channel": 23, "callsign": "K23", "service_class":
+                        "Full-power", "detectability_db": "80",
+                        "distance_km": "60"})
+    census = _write_csv(tmp_path / "c.csv", census_rows)
+    out = tmp_path / "out"
+    main(["--census", str(census), "--lines-from-run", str(tmp_path / "work"),
+          "--output-dir", str(out), "--bootstrap", "50"])
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["min_channel_lines"] == 3
+    assert summary["n_channels_qualifying"] == 3
+    assert summary["n_channels_excluded"] == 1
+    assert "spearman_rho_all_channels" in summary
