@@ -712,7 +712,9 @@ def plot_baseband_spectrum(run_dir: Path) -> list[Path]:
     ax.plot(x, after_db, marker="o", label=r"after mask")
     ax.set_xlabel(r"CHIME frequency, $f_{\mathrm{CHIME}}\;[\mathrm{MHz}]$")
     ax.set_ylabel(r"$10\log_{10}P_{\mathrm{bb}}\;[\mathrm{dB}]$")
-    title = r"Integrated baseband power at ATSC pilot coarse channels"
+    title = (r"Integrated baseband power at ATSC pilot coarse channels"
+             + "\n" + r"Per-frame means: 'before' over valid frames, 'after' "
+             r"over unmasked frames -- reweighting can move either way")
     mask_label = _mask_label_for_run(Path(run_dir))
     if mask_label:
         title += "\n" + mask_label
@@ -748,6 +750,26 @@ def plot_baseband_spectrum(run_dir: Path) -> list[Path]:
     return outputs
 
 
+def _event_boundaries(run_dir: Path):
+    """Frame indices where the source event changes, from the combined
+    product's frame-identity sidecar (written by event-keyed combines), plus
+    the event count. None when the sidecar is absent (chime-run products, or
+    combines of identity-less legacy products). On stitched products the
+    frame axis concatenates acquisitions, so 'relative time' is data seconds,
+    not wall clock -- the boundaries make that visible."""
+    path = Path(run_dir) / "chime_frame_identity.npz"
+    if not path.exists():
+        return None
+    with np.load(str(path)) as z:
+        if "frame_event_key" not in z.files:
+            return None
+        keys = np.asarray(z["frame_event_key"]).astype(str).reshape(-1)
+    if keys.size == 0:
+        return None
+    change = np.nonzero(keys[1:] != keys[:-1])[0] + 1
+    return change, len(set(keys.tolist()))
+
+
 def _plot_spectrogram(
     *,
     run_dir: Path,
@@ -756,6 +778,7 @@ def _plot_spectrogram(
     frequency_hz: np.ndarray,
     frame_index: np.ndarray,
     relative_time_s: np.ndarray,
+    event_boundaries=None,
     title: str,
     colorbar_label: str,
     basename: str,
@@ -778,6 +801,9 @@ def _plot_spectrogram(
     channel_array = np.asarray(physical_channel).reshape(-1)
     x_edges = _coordinate_edges(time_s)
     value_array = np.asarray(values)
+    if event_boundaries is not None:
+        _, _n_events = event_boundaries
+        title = rf"{title} ({_n_events} events stitched)"
     panels: list[tuple[str, np.ndarray]] = [
         (title, np.ones_like(channel_array, dtype=bool)),
     ]
@@ -811,6 +837,10 @@ def _plot_spectrogram(
             if discrete_mask_colorbar and BoundaryNorm is not None
             else None
         )
+        if event_boundaries is not None:
+            for _b in event_boundaries[0]:
+                ax.axvline(x_edges[int(_b)], color="tab:red", lw=0.7,
+                           alpha=0.85, linestyle=(0, (2, 2)), zorder=3)
         image = ax.pcolormesh(
             x_edges,
             y_edges,
@@ -822,7 +852,10 @@ def _plot_spectrogram(
             norm=norm,
         )
         if panel_index == len(panels) - 1:
-            ax.set_xlabel(r"Relative time, $t_{\mathrm{rel}}\;[\mathrm{s}]$")
+            ax.set_xlabel(
+                r"Relative time, $t_{\mathrm{rel}}\;[\mathrm{s}]$"
+                + (" (data seconds; events stitched)"
+                   if event_boundaries is not None else ""))
         ax.set_ylabel(r"CHIME frequency, $f_{\mathrm{CHIME}}\;[\mathrm{MHz}]$")
         ax.set_title(panel_title)
         ax.set_yticks(panel_freq_mhz)
@@ -859,6 +892,7 @@ def plot_baseband_spectrogram(run_dir: Path) -> list[Path]:
         frequency_hz=_run_frequency_hz(Path(run_dir), cache),
         frame_index=cache["frame_index"],
         relative_time_s=cache["relative_time_s"],
+        event_boundaries=_event_boundaries(Path(run_dir)),
         title=r"Baseband power spectrogram",
         colorbar_label=r"$10\log_{10}P_{\mathrm{bb}}\;[\mathrm{dB}]$",
         basename="baseband_spectrogram",
@@ -876,6 +910,7 @@ def plot_fstat_level_spectrogram(run_dir: Path) -> list[Path]:
         frequency_hz=_run_frequency_hz(Path(run_dir), detector),
         frame_index=detector["frame_index"],
         relative_time_s=cache["relative_time_s"],
+        event_boundaries=_event_boundaries(Path(run_dir)),
         title=r"$F$-statistic level spectrogram",
         colorbar_label=r"$R_F=10\log_{10}F\;[\mathrm{dB}]$",
         basename="fstat_level_spectrogram",
@@ -900,6 +935,7 @@ def plot_mask_spectrogram(run_dir: Path) -> list[Path]:
         frequency_hz=_run_frequency_hz(Path(run_dir), cache),
         frame_index=cache["frame_index"],
         relative_time_s=cache["relative_time_s"],
+        event_boundaries=_event_boundaries(Path(run_dir)),
         title=title,
         colorbar_label=r"Mask $M$",
         basename="mask_spectrogram",

@@ -243,6 +243,14 @@ def test_scan_ragged_inventory_combines_intersection(tmp_path, monkeypatch):
         assert z["frame_index"].size == 4  # both events, two pilots
         assert z["fstat_raw"].shape == (4, 2)
 
+    # spectrogram figures must render with event-boundary ticks driven by
+    # the frame-identity sidecar (out2 stitches two events -> one boundary)
+    from pilot_proxy.chime.plots import _event_boundaries, plot_mask_spectrogram
+    change, n_events = _event_boundaries(out2)
+    assert n_events == 2 and list(change) == [2]
+    figs = plot_mask_spectrogram(out2)
+    assert figs[0].exists()
+
     # validate-products must accept keyed-combine run dirs (frame-identity
     # sidecar file, combine_alignment stats block)
     import subprocess, sys
