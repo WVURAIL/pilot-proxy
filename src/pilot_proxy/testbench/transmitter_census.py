@@ -3,7 +3,8 @@
 
 Consumes two declared inputs and produces the paper's two case-study figures
 plus their supporting tables. Nothing here touches the archive; both inputs
-already exist (pilotcal line lists; the FCC/ISED 500-mile census).
+already exist (the scan's per-pilot high-resolution spectra -- or a
+pre-detected line CSV -- and the FCC/ISED 500-mile census).
 
 Input schemas (CSV with a header row; extra columns are ignored)
 -----------------------------------------------------------------
@@ -20,6 +21,12 @@ census:  rf_channel:int, callsign:str, service_class:str, and either
            anything else                              -> other
 lines:   rf_channel:int, offset_hz:float (about the channel's nominal
          pilot), snr_db:float [, epoch, ...]
+         Alternatively, --lines-from-run extracts the line list directly
+         from a scan work dir's per-pilot products: each carries the
+         high-resolution time-averaged spectrum of its coarse channel
+         (integrated_spectrum_before/after_mask; natural FFT order, bin 0
+         at the coarse-channel centre, `sense` flipping the frequency
+         axis, `bin_enbw_hz` the bin spacing).
 
 Association rule (pluggable, recorded per line in association.csv)
 ------------------------------------------------------------------
@@ -123,6 +130,81 @@ def load_census(path: Path) -> list[Transmitter]:
             distance_km=dist,
         ))
     return out
+
+
+def _bin_offsets_hz(nfft: int, sense: int, center_hz: float,
+                    pilot_hz: float, bin_spacing_hz: float) -> np.ndarray:
+    """Offset from the nominal pilot for every spectrum bin (natural FFT
+    order: bin 0 = DC = coarse-channel centre, upper half negative)."""
+    k = np.arange(int(nfft))
+    f_bb = np.where(k < nfft // 2, k, k - nfft).astype(np.float64) * bin_spacing_hz
+    return center_hz + sense * f_bb - pilot_hz
+
+
+_SPECTRUM_KEYS = {
+    "before": "integrated_spectrum_before_mask",
+    "after": "integrated_spectrum_after_mask",
+}
+
+
+def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
+                           search_window_hz: float = 30_000.0,
+                           min_snr_db: float = 6.0,
+                           min_separation_hz: float = 100.0) -> list[Line]:
+    """Detected carrier lines from a scan work dir's per-pilot spectra.
+
+    Within +/- search_window_hz of each channel's nominal pilot, local maxima
+    at least min_snr_db above the window's median floor become lines, greedily
+    thinned (strongest first) to min_separation_hz. This is the case study's
+    line source; it replaces the retired pilotcal offset survey."""
+    key = _SPECTRUM_KEYS.get(spectrum)
+    if key is None:
+        raise SystemExit(f"unknown --spectrum {spectrum!r} (before/after)")
+    need = {key, "nfft", "sense", "chime_frequency_hz", "pilot_frequency_hz",
+            "physical_channel", "bin_enbw_hz"}
+    lines: list[Line] = []
+    paths = sorted(Path(work_dir).glob("*.npz"))
+    if not paths:
+        raise SystemExit(f"--lines-from-run: no per-pilot products in {work_dir}")
+    for path in paths:
+        with np.load(str(path)) as z:
+            if not need.issubset(set(z.files)):
+                continue
+            spec = np.asarray(z[key], np.float64).reshape(-1)
+            nfft = int(np.asarray(z["nfft"]).reshape(-1)[0])
+            sense = int(np.asarray(z["sense"]).reshape(-1)[0])
+            center = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
+            pilot = float(np.asarray(z["pilot_frequency_hz"]).reshape(-1)[0])
+            ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
+            spacing = float(np.asarray(z["bin_enbw_hz"]).reshape(-1)[0])
+        if spec.size != nfft:
+            continue
+        offs = _bin_offsets_hz(nfft, sense, center, pilot, spacing)
+        sel = np.abs(offs) <= float(search_window_hz)
+        w, wo = spec[sel], offs[sel]
+        order = np.argsort(wo)
+        w, wo = w[order], wo[order]
+        pos = w[w > 0]
+        if w.size < 8 or pos.size == 0:
+            continue
+        floor = float(np.median(pos))
+        snr = 10.0 * np.log10(np.maximum(w, 1e-300) / floor)
+        interior = np.arange(1, w.size - 1)
+        peaks = interior[(snr[interior] >= min_snr_db)
+                         & (snr[interior] > snr[interior - 1])
+                         & (snr[interior] >= snr[interior + 1])]
+        kept: list[int] = []
+        for i in sorted(peaks, key=lambda i: -snr[i]):
+            if all(abs(wo[i] - wo[j]) >= min_separation_hz for j in kept):
+                kept.append(i)
+        for i in sorted(kept, key=lambda i: wo[i]):
+            lines.append(Line(rf_channel=ch, offset_hz=float(wo[i]),
+                              snr_db=float(snr[i])))
+    if not lines:
+        raise SystemExit(
+            f"--lines-from-run: no carrier lines extracted from {work_dir} "
+            f"(window {search_window_hz} Hz, floor+{min_snr_db} dB)")
+    return lines
 
 
 def load_lines(path: Path) -> list[Line]:
@@ -311,8 +393,17 @@ def build_parser() -> argparse.ArgumentParser:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--census", type=Path, required=True,
                    help="Census CSV (schema in the module docstring).")
-    p.add_argument("--lines", type=Path, required=True,
-                   help="Detected-line CSV from the pilotcal high-res spectra.")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--lines", type=Path, default=None,
+                     help="Detected-line CSV: rf_channel, offset_hz, snr_db.")
+    src.add_argument("--lines-from-run", type=Path, default=None,
+                     help="Scan work dir (_per_pilot/): extract the line "
+                          "list from the products' integrated high-res "
+                          "spectra instead of reading a CSV.")
+    p.add_argument("--spectrum", choices=["before", "after"], default="before")
+    p.add_argument("--search-window-hz", type=float, default=30_000.0)
+    p.add_argument("--min-snr-db", type=float, default=6.0)
+    p.add_argument("--min-separation-hz", type=float, default=100.0)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--association", choices=["ranked", "dominant_secondary"],
                    default="ranked")
@@ -330,7 +421,16 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     census = load_census(args.census)
-    lines = load_lines(args.lines)
+    if args.lines_from_run is not None:
+        lines = extract_lines_from_run(
+            args.lines_from_run, spectrum=args.spectrum,
+            search_window_hz=args.search_window_hz,
+            min_snr_db=args.min_snr_db,
+            min_separation_hz=args.min_separation_hz)
+        line_source = f"extracted:{args.lines_from_run}"
+    else:
+        lines = load_lines(args.lines)
+        line_source = f"csv:{args.lines}"
     if args.snr_threshold_db is not None:
         lines = [l for l in lines if l.snr_db >= args.snr_threshold_db]
     if not lines:
@@ -355,6 +455,12 @@ def main(argv: list[str] | None = None) -> int:
                                      if offs.size else float("nan"))}
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
+    if args.lines_from_run is not None:
+        with open(args.output_dir / "extracted_lines.csv", "w", newline="") as fh:
+            w = csv.DictWriter(fh, fieldnames=["rf_channel", "offset_hz", "snr_db"])
+            w.writeheader()
+            w.writerows({"rf_channel": l.rf_channel, "offset_hz": l.offset_hz,
+                         "snr_db": l.snr_db} for l in lines)
     with open(args.output_dir / "association.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(records[0].keys()))
         w.writeheader(); w.writerows(records)
@@ -366,6 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         w.writeheader(); w.writerows(sweep)
     summary = {"schema_version": "transmitter_census_v1",
                "association_strategy": args.association,
+               "line_source": line_source,
                "snr_threshold_db": args.snr_threshold_db,
                "by_class": by_class, "per_channel": chan_stats,
                "spearman_rho": rho,

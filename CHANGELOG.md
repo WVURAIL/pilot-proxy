@@ -2,6 +2,16 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- pilotcal is retired. The one artifact the analysis still needs from it --
+  the high-resolution time-averaged spectrum per coarse channel -- is
+  carried by every per-pilot scan product
+  (`integrated_spectrum_before/after_mask`: 23.8 Hz bins, accumulated over
+  the full processed frame set), and `analyze-transmitter-census
+  --lines-from-run <work_dir>` now extracts the carrier line list directly
+  from those spectra (windowed peak detection about the nominal pilot with
+  a median floor; window, SNR threshold, and separation are CLI knobs; the
+  derived list is written alongside the outputs for provenance).
+
 - `analyze-transmitter-census`: the census loader now accepts a precomputed
   `detectability_db` column (e.g. a propagation-model field strength) as the
   association ranking score, with blanks ranking last tie-broken by distance;
@@ -16,7 +26,7 @@
   references removed).
 
 - New `analyze-transmitter-census` command: the 500-mile case-study analysis
-  over a pilotcal line list and the FCC/ISED transmitter census. Associates
+  over a detected-carrier line list and the FCC/ISED transmitter census. Associates
   detected carrier lines to census entries per RF channel (rank pairing by
   SNR vs an ERP/distance^2 detectability score, with a dominant/secondary
   fallback strategy), and produces the class-split offset-dispersion figure,

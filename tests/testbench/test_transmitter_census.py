@@ -165,3 +165,97 @@ def test_snr_threshold_filters_before_analysis(tmp_path):
     # only the 30 dB primaries survive a 25 dB cut
     assert summary["by_class"]["non_primary"]["n"] == 0
     assert summary["by_class"]["primary"]["n"] == 14
+
+
+# -- line extraction from scan products ---------------------------------------
+
+def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096):
+    """Per-pilot npz with just the spectrum keys the extractor reads.
+
+    ``spikes``: [(offset_hz, snr_db), ...] about the nominal pilot; centre is
+    placed AT the pilot so bin math is exercised through the sense flip.
+    """
+    spacing = 390625.0 / nfft
+    spec = np.ones(nfft, dtype=np.float64)
+    for off, snr in spikes:
+        f_bb = sense * off
+        k = int(round(f_bb / spacing)) % nfft
+        spec[k] = 10.0 ** (snr / 10.0)
+    path = Path(dirpath) / f"{freq_id}.npz"
+    np.savez(path,
+             integrated_spectrum_before_mask=spec,
+             integrated_spectrum_after_mask=spec * 0.5,
+             nfft=np.asarray([nfft]), sense=np.asarray([sense]),
+             chime_frequency_hz=np.asarray([500e6]),
+             pilot_frequency_hz=np.asarray([500e6]),
+             physical_channel=np.asarray([ch]),
+             bin_enbw_hz=np.asarray([spacing]))
+    return path
+
+
+def test_extract_lines_recovers_offsets_both_senses(tmp_path):
+    from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
+    spacing = 390625.0 / 4096
+    _fake_spectrum_product(tmp_path, 20, 700, [(0.0, 30), (5000.0, 15),
+                                               (-12000.0, 10)], sense=1)
+    _fake_spectrum_product(tmp_path, 21, 690, [(0.0, 28), (-7000.0, 12)],
+                           sense=-1)
+    lines = extract_lines_from_run(tmp_path)
+    by_ch = {}
+    for l in lines:
+        by_ch.setdefault(l.rf_channel, []).append(l)
+    assert sorted(by_ch) == [20, 21]
+    offs20 = sorted(l.offset_hz for l in by_ch[20])
+    assert len(offs20) == 3
+    for got, want in zip(offs20, (-12000.0, 0.0, 5000.0)):
+        assert abs(got - want) <= spacing
+    snr20 = {round(l.offset_hz / 1000): l.snr_db for l in by_ch[20]}
+    assert snr20[0] == pytest.approx(30.0, abs=0.6)
+    offs21 = sorted(l.offset_hz for l in by_ch[21])
+    for got, want in zip(offs21, (-7000.0, 0.0)):
+        assert abs(got - want) <= spacing
+
+
+def test_extract_lines_window_threshold_separation(tmp_path):
+    from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
+    _fake_spectrum_product(tmp_path, 22, 660, [
+        (0.0, 30),          # kept
+        (50_000.0, 25),     # outside +/-30 kHz window
+        (2000.0, 3),        # below 6 dB floor threshold
+        (500.0, 20), (540.0, 14),   # within 100 Hz: weaker one thinned
+    ])
+    lines = extract_lines_from_run(tmp_path)
+    offs = sorted(l.offset_hz for l in lines)
+    assert len(offs) == 2
+    assert abs(offs[0] - 0.0) < 100 and abs(offs[1] - 500.0) < 100
+
+
+def test_end_to_end_lines_from_run(tmp_path):
+    (tmp_path / "work").mkdir()
+    _fake_spectrum_product(tmp_path / "work", 20, 700,
+                           [(0.0, 30), (4000.0, 12)])
+    census = _write_csv(tmp_path / "c.csv", [
+        {"rf_channel": 20, "callsign": "KPRI", "service_class": "Full-power",
+         "detectability_db": "84", "distance_km": "60"},
+        {"rf_channel": 20, "callsign": "KTRX",
+         "service_class": "Translator (LPTV)", "detectability_db": "",
+         "distance_km": "150"},
+    ])
+    out = tmp_path / "out"
+    rc = main(["--census", str(census), "--lines-from-run",
+               str(tmp_path / "work"), "--output-dir", str(out),
+               "--bootstrap", "50"])
+    assert rc == 0
+    assert (out / "extracted_lines.csv").exists()
+    summary = json.loads((out / "summary.json").read_text())
+    assert summary["line_source"].startswith("extracted:")
+    assert summary["by_class"]["primary"]["n"] == 1
+    assert summary["by_class"]["non_primary"]["n"] == 1
+
+
+def test_lines_sources_are_mutually_exclusive(tmp_path):
+    census = _write_csv(tmp_path / "c.csv", [
+        {"rf_channel": 20, "callsign": "K", "service_class": "Full-power",
+         "detectability_db": "80", "distance_km": "60"}])
+    with pytest.raises(SystemExit):
+        main(["--census", str(census), "--output-dir", str(tmp_path / "o")])
