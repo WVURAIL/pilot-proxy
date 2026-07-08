@@ -46,3 +46,7 @@ pilot_proxy_runs/
 # survey inventories / enum caches (regenerable; keep on disk, never commit)
 data/*
 !data/census/
+
+# provenance snapshot exception (must be last: overrides *.csv/*.xlsx rules)
+!data/census/
+!data/census/**
