@@ -8,6 +8,7 @@ scatter wide, and channels with more translators show larger spread.
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 from pathlib import Path
 
@@ -55,6 +56,13 @@ def _fixture(tmp_path, rng=None):
                           "snr_db": 12.0 - k})
     return (_write_csv(tmp_path / "census.csv", census),
             _write_csv(tmp_path / "lines.csv", lines))
+
+
+requires_matplotlib = pytest.mark.skipif(
+    importlib.util.find_spec("matplotlib") is None,
+    reason="census figure rendering needs matplotlib (the [plot] extra); "
+    "these run in the cpu-release CI job",
+)
 
 
 def test_class_normalization_aliases():
@@ -131,6 +139,7 @@ def test_mad_is_robust_to_one_outlier():
     assert mad_hz(tight) < 10.0
 
 
+@requires_matplotlib
 def test_end_to_end_recovers_class_and_correlation(tmp_path):
     census_path, lines_path = _fixture(tmp_path)
     out = tmp_path / "out"
@@ -159,6 +168,7 @@ def test_end_to_end_recovers_class_and_correlation(tmp_path):
     assert all(np.isfinite(c["mad_hz"]) for c in chans if c["n_lines"] > 1)
 
 
+@requires_matplotlib
 def test_snr_threshold_filters_before_analysis(tmp_path):
     census_path, lines_path = _fixture(tmp_path)
     out = tmp_path / "out_thresh"
@@ -325,6 +335,7 @@ def test_extract_lines_window_threshold_separation(tmp_path):
     assert abs(offs[0] - 0.0) < 100 and abs(offs[1] - 500.0) < 100
 
 
+@requires_matplotlib
 def test_end_to_end_lines_from_run(tmp_path):
     (tmp_path / "work").mkdir()
     _fake_spectrum_product(tmp_path / "work", 20, 700,
@@ -357,6 +368,7 @@ def test_lines_sources_are_mutually_exclusive(tmp_path):
         main(["--census", str(census), "--output-dir", str(tmp_path / "o")])
 
 
+@requires_matplotlib
 def test_min_channel_lines_gates_figure_b_statistic(tmp_path):
     """The pre-registered n>=3 rule: single-line channels are excluded from
     the qualifying Spearman but still reported in the all-channels variant

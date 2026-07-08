@@ -372,8 +372,14 @@ def threshold_sweep(records: list[dict], thresholds: np.ndarray) -> list[dict]:
 def _figures(records, chan_stats, rho, ci, out_dir: Path,
              qualifying=None) -> None:
     from pilot_proxy.plot_style import setup_matplotlib
-    setup_matplotlib()
-    import matplotlib.pyplot as plt
+    try:
+        plt = setup_matplotlib()
+    except ImportError as exc:
+        raise SystemExit(
+            "matplotlib is required for the census figures. Install the "
+            "optional plot dependency, for example: "
+            "python -m pip install matplotlib"
+        ) from exc
 
     # Figure A: class-split offset distribution (per detected line)
     fig, ax = plt.subplots(figsize=(6.0, 3.4))
