@@ -245,6 +245,43 @@ def test_extract_never_calls_the_dc_spur_a_carrier(tmp_path):
     assert any(abs(o) < 100 for o in offs)                   # pilot kept
 
 
+def test_prominence_rejects_sidelobe_skirt_keeps_isolated_line(tmp_path):
+    """A 40 dB carrier's leakage skirt (smoothly decaying, with few-dB
+    ripples) must yield exactly one line; an isolated 12 dB carrier away
+    from the skirt must survive."""
+    from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
+    fs, nfft, kwin = 390625.0, 4096, 128
+    spacing = fs / nfft
+    spec = np.ones(nfft, dtype=np.float64)
+    center, pilot_off = 500e6, 60_000.0
+    c = int(round(pilot_off / spacing)) % nfft   # carrier bin (sense=+1)
+    spec[c] = 1e4                                # 40 dB carrier
+    spec[c - 1] = spec[c + 1] = 10 ** 3.6        # leakage shoulder (36 dB)
+    for k in range(2, 60, 2):                    # skirt: ripple maxima every
+        for side in (-1, 1):                     # 2 bins, ~3 dB over valleys
+            skirt_db = 34.0 - 0.5 * k
+            if skirt_db <= 3:
+                break
+            spec[c + side * k] = 10 ** (skirt_db / 10)
+            spec[c + side * (k + 1)] = 10 ** ((skirt_db - 3.0) / 10)
+    iso = int(round((pilot_off + 8000.0) / spacing)) % nfft
+    spec[iso] = 10 ** (12.0 / 10)                # isolated real carrier
+    np.savez(tmp_path / "700.npz",
+             integrated_spectrum_before_mask=spec,
+             integrated_spectrum_after_mask=spec,
+             nfft=np.asarray([nfft]), sense=np.asarray([1]),
+             chime_frequency_hz=np.asarray([center]),
+             pilot_frequency_hz=np.asarray([center + pilot_off]),
+             physical_channel=np.asarray([20]),
+             bin_enbw_hz=np.asarray([fs / kwin]),
+             detector_window_samples=np.asarray([kwin]))
+    lines = extract_lines_from_run(tmp_path)
+    offs = sorted(l.offset_hz for l in lines)
+    assert len(offs) == 2, offs                  # carrier + isolated only
+    assert abs(offs[0] - 0.0) < spacing
+    assert abs(offs[1] - 8000.0) < spacing
+
+
 def test_extract_lines_recovers_offsets_both_senses(tmp_path):
     from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
     spacing = 390625.0 / 4096

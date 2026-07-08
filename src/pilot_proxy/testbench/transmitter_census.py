@@ -150,16 +150,36 @@ _SPECTRUM_KEYS = {
 }
 
 
+def _prominence_db(snr: np.ndarray, i: int) -> float:
+    """Topographic prominence of peak i in a 1-D dB array: height above the
+    higher of the two key saddles (the minimum between the peak and the
+    nearest higher sample on each side; the window edge if none)."""
+    peak = snr[i]
+    saddles = []
+    for step in (-1, 1):
+        j, lo = i + step, peak
+        while 0 <= j < snr.size and snr[j] <= peak:
+            lo = min(lo, snr[j])
+            j += step
+        saddles.append(lo)
+    return float(peak - max(saddles))
+
+
 def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
                            search_window_hz: float = 30_000.0,
                            min_snr_db: float = 6.0,
-                           min_separation_hz: float = 100.0) -> list[Line]:
+                           min_separation_hz: float = 100.0,
+                           min_prominence_db: float = 6.0) -> list[Line]:
     """Detected carrier lines from a scan work dir's per-pilot spectra.
 
     Within +/- search_window_hz of each channel's nominal pilot, local maxima
-    at least min_snr_db above the window's median floor become lines, greedily
-    thinned (strongest first) to min_separation_hz. This is the case study's
-    line source; it replaces the retired pilotcal offset survey."""
+    at least min_snr_db above the window's median floor AND at least
+    min_prominence_db above their key saddle become lines, greedily thinned
+    (strongest first) to min_separation_hz. The prominence criterion rejects
+    window-leakage sidelobes: a strong carrier's accumulated skirt carries
+    ripples a few dB above their local valleys, while a real isolated carrier
+    rises its full SNR from the floor. This is the case study's line source;
+    it replaces the retired pilotcal offset survey."""
     key = _SPECTRUM_KEYS.get(spectrum)
     if key is None:
         raise SystemExit(f"unknown --spectrum {spectrum!r} (before/after)")
@@ -208,6 +228,8 @@ def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
                          & (snr[interior] >= snr[interior + 1])]
         kept: list[int] = []
         for i in sorted(peaks, key=lambda i: -snr[i]):
+            if _prominence_db(snr, i) < min_prominence_db:
+                continue
             if all(abs(wo[i] - wo[j]) >= min_separation_hz for j in kept):
                 kept.append(i)
         for i in sorted(kept, key=lambda i: wo[i]):
@@ -417,6 +439,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--search-window-hz", type=float, default=30_000.0)
     p.add_argument("--min-snr-db", type=float, default=6.0)
     p.add_argument("--min-separation-hz", type=float, default=100.0)
+    p.add_argument("--min-prominence-db", type=float, default=6.0)
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--association", choices=["ranked", "dominant_secondary"],
                    default="ranked")
@@ -439,7 +462,8 @@ def main(argv: list[str] | None = None) -> int:
             args.lines_from_run, spectrum=args.spectrum,
             search_window_hz=args.search_window_hz,
             min_snr_db=args.min_snr_db,
-            min_separation_hz=args.min_separation_hz)
+            min_separation_hz=args.min_separation_hz,
+            min_prominence_db=args.min_prominence_db)
         line_source = f"extracted:{args.lines_from_run}"
     else:
         lines = load_lines(args.lines)

@@ -388,6 +388,8 @@ def _cmd_analyze_transmitter_census(args: argparse.Namespace) -> None:
         argv += ["--lines", str(args.lines)]
     if args.lines_from_run is not None:
         argv += ["--lines-from-run", str(args.lines_from_run)]
+    if args.min_prominence_db is not None:
+        argv += ["--min-prominence-db", str(args.min_prominence_db)]
     if args.snr_threshold_db is not None:
         argv += ["--snr-threshold-db", str(args.snr_threshold_db)]
     census_main(argv)
@@ -1140,6 +1142,7 @@ def build_parser() -> argparse.ArgumentParser:
                             choices=["ranked", "dominant_secondary"],
                             default="ranked")
     census_cmd.add_argument("--snr-threshold-db", type=float, default=None)
+    census_cmd.add_argument("--min-prominence-db", type=float, default=None)
     census_cmd.set_defaults(func=_cmd_analyze_transmitter_census)
 
     tradeoff = _add_command(
