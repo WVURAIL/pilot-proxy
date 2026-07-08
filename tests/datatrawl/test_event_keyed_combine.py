@@ -278,3 +278,33 @@ def test_scan_disjoint_inventory_soft_fails_terminal_combine(tmp_path, monkeypat
     printed = capsys.readouterr().out
     assert "terminal combine skipped" in printed
     assert "chime-combine --report" in printed
+
+
+def _ver(source, kernel="2548aef"):
+    return (f"pilot-proxy/0.2.0.dev0 source={source} kernel=1.0.0 "
+            f"kernel_sha256={kernel} pilotproxy_detector_datatrawl_v2 K=128")
+
+
+def test_invariants_allow_mixed_source_builds_same_geometry():
+    from pilot_proxy.datatrawl_plugins.combine import _check_invariants
+    a = {"detector_version": np.asarray([_ver("aaa111")]),
+         "nfft": np.asarray([16384])}
+    b = {"detector_version": np.asarray([_ver("bbb222")]),
+         "nfft": np.asarray([16384])}
+    notes = _check_invariants([a, b], ("nfft", "detector_version"), "geometry")
+    assert len(notes["detector_versions"]) == 2
+
+
+def test_invariants_refuse_mixed_kernel_geometry():
+    from pilot_proxy.datatrawl_plugins.combine import _check_invariants
+    a = {"detector_version": np.asarray([_ver("aaa111", kernel="k1")])}
+    b = {"detector_version": np.asarray([_ver("aaa111", kernel="k2")])}
+    with pytest.raises(ValueError, match="geometry tokens"):
+        _check_invariants([a, b], ("detector_version",), "detector geometry")
+
+
+def test_invariants_identical_versions_add_no_note():
+    from pilot_proxy.datatrawl_plugins.combine import _check_invariants
+    a = {"detector_version": np.asarray([_ver("aaa111")])}
+    b = {"detector_version": np.asarray([_ver("aaa111")])}
+    assert _check_invariants([a, b], ("detector_version",), "g") == {}

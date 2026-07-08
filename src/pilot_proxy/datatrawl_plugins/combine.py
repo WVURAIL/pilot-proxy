@@ -346,17 +346,59 @@ def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
     )
 
 
-def _check_invariants(products: Sequence[Mapping[str, Any]], keys, what: str) -> None:
+def _version_geometry(version: str) -> tuple:
+    """The geometry-bearing tokens of a detector_version string: everything
+    except the `source=<tree hash>` token, which is build provenance. Patches
+    applied mid-survey change the source hash without touching detector math;
+    the kernel hash, K, and schema tag are what stacking correctness needs."""
+    return tuple(t for t in str(version).split()
+                 if not t.startswith("source="))
+
+
+def _check_invariants(products: Sequence[Mapping[str, Any]],
+                      keys, what: str) -> dict[str, Any]:
     """Assert all per-pilot products agree on geometry/config scalars before stacking.
 
     The combiner takes per-pilot frame arrays and the first product's metadata; it
     must verify the rest of the products were produced with the same geometry/config
     (nfft, K, spectral sense, schema, sample rate), or stacking would silently fuse
     inconsistent products into one canonical output.
+
+    `detector_version` gets token-aware treatment: its `source=` component is
+    build provenance, not geometry, so products from different mid-survey
+    builds stack freely as long as every other token (kernel hash, K, schema)
+    matches. Returns provenance notes: {"detector_versions": [...]} when more
+    than one build contributed.
     """
+    notes: dict[str, Any] = {}
     ref = products[0]
     for key in keys:
         if key not in ref:
+            continue
+        if key == "detector_version":
+            versions = []
+            for z in products:
+                if key not in z:
+                    raise ValueError(
+                        f"combine: a product is missing '{key}', needed to "
+                        f"verify {what}.")
+                versions.append(str(np.asarray(z[key]).reshape(-1)[0]))
+            geoms = {_version_geometry(v) for v in versions}
+            if len(geoms) > 1:
+                raise ValueError(
+                    f"combine: per-pilot products disagree on detector_version "
+                    f"geometry tokens ({sorted(' '.join(g) for g in geoms)!r}); "
+                    f"refusing to stack mismatched {what}.")
+            distinct = sorted(set(versions))
+            if len(distinct) > 1:
+                notes["detector_versions"] = distinct
+                short = ", ".join(
+                    next((t[len("source="):][:12] for t in v.split()
+                          if t.startswith("source=")), "?")
+                    for v in distinct)
+                print(f"[combine] provenance: {len(distinct)} source builds "
+                      f"with identical detector geometry contributed "
+                      f"(source={short}); stacking.", flush=True)
             continue
         base = np.asarray(ref[key]).reshape(-1)
         for z in products[1:]:
@@ -371,6 +413,7 @@ def _check_invariants(products: Sequence[Mapping[str, Any]], keys, what: str) ->
                     f"({base.tolist()!r} vs {other.tolist()!r}); refusing to stack "
                     f"mismatched {what}."
                 )
+    return notes
 
 
 def _common_sample_rate_hz(products: Sequence[Mapping[str, Any]]) -> float:
@@ -511,7 +554,7 @@ def combine_detector_products(
             print(f"[combine] --drop excluded {excluded} pilot(s): "
                   f"{sorted(drop)}", flush=True)
         products = kept
-    _check_invariants(
+    invariant_notes = _check_invariants(
         products,
         ("schema_version", "nfft", "detector_window_samples", "sense",
          "detector_contract_json", "max_chunks_per_file", "num_input_streams",
@@ -719,6 +762,7 @@ def combine_detector_products(
         "num_frames": int(frame_index.size),
         "num_pilots": len(products),
         "combine_alignment": stats_alignment,
+        **invariant_notes,
         "windows_per_stream": int(nfft) // k,
         "rational_overflow_count_by_pilot": [
             int(np.asarray(z.get("rational_overflow_count", 0))) for z in products
