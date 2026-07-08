@@ -128,8 +128,8 @@ pilot-proxy check-layout \
 - `docs/CANFAR_RUNBOOK.md` - bounded CANFAR operating procedure.
 - `docs/KOTEKAN_INTERFACE_PREP.md` - runtime-bundle and Kotekan handoff notes.
 - `docs/DESIGN_DECISIONS.md` - recorded detector and integration decisions.
-- `docs/PilotProxy_DS001_v1_5_Data_Sheet.tex` - formal data sheet (build to PDF).
-- `docs/PilotProxy_UG001_v1_5_User_Guide.tex` - formal user guide (build to PDF).
+- `docs/PilotProxy_DS001_v1_6_Data_Sheet.tex` - formal data sheet (build to PDF).
+- `docs/PilotProxy_UG001_v1_6_User_Guide.tex` - formal user guide (build to PDF).
 - `examples/quickstart.sh` - standalone release sanity-check workflow (CUDA +
   GNU Radio; environment-specific defaults --- override `SM`, `CUDA_PYTHON`,
   `GNURADIO_PYTHON`).
