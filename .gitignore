@@ -44,4 +44,5 @@ smoke_out/
 pilot_proxy_runs/
 
 # survey inventories / enum caches (regenerable; keep on disk, never commit)
-data/
+data/*
+!data/census/
