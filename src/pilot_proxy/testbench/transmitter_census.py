@@ -7,11 +7,16 @@ already exist (pilotcal line lists; the FCC/ISED 500-mile census).
 
 Input schemas (CSV with a header row; extra columns are ignored)
 -----------------------------------------------------------------
-census:  rf_channel:int, callsign:str, service_class:str, erp_kw:float,
-         distance_km:float [, bearing_deg, lat, lon, ...]
-         service_class is normalized case-insensitively:
+census:  rf_channel:int, callsign:str, service_class:str, and either
+         detectability_db:float (a precomputed received-strength score, e.g.
+         a propagation-model field strength; blanks rank last, tie-broken by
+         distance_km when present) or erp_kw:float + distance_km:float
+         (score = ERP / distance^2) [, bearing_deg, lat, lon, ...]
+         service_class is normalized case-insensitively (punctuation and
+         parentheticals collapse to underscores):
            full_service / full-power / primary        -> primary
-           translator / repeater / lptv / low_power   -> non_primary
+           translator (lptv) / repeater / relay /
+           lptv / low-power (lptv) / class a          -> non_primary
            anything else                              -> other
 lines:   rf_channel:int, offset_hz:float (about the channel's nominal
          pilot), snr_db:float [, epoch, ...]
@@ -47,6 +52,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 import json
 import math
 from dataclasses import dataclass
@@ -56,13 +62,14 @@ import numpy as np
 
 PRIMARY_ALIASES = {"primary", "full_service", "full-service", "full_power",
                    "full-power", "fs", "dt", "dtv"}
-NON_PRIMARY_ALIASES = {"non_primary", "translator", "tx_translator",
-                       "repeater", "rebroadcaster", "lptv", "low_power",
-                       "low-power", "ld", "dc", "class_a", "class-a"}
+NON_PRIMARY_ALIASES = {"non_primary", "translator", "translator_lptv",
+                       "tx_translator", "repeater", "rebroadcaster", "relay",
+                       "lptv", "low_power", "low_power_lptv", "ld", "dc",
+                       "class_a"}
 
 
 def normalize_class(raw: str) -> str:
-    key = str(raw).strip().lower().replace(" ", "_")
+    key = re.sub(r"[^a-z0-9]+", "_", str(raw).strip().lower()).strip("_")
     if key in PRIMARY_ALIASES:
         return "primary"
     if key in NON_PRIMARY_ALIASES:
@@ -76,7 +83,8 @@ class Transmitter:
     callsign: str
     service_class: str          # normalized
     raw_class: str
-    detectability: float        # ERP / distance^2 (linear, arbitrary units)
+    detectability: float        # higher ranks first; -inf when unscored
+    distance_km: float          # tiebreak among unscored; inf when absent
 
 
 @dataclass
@@ -92,18 +100,27 @@ def _read_rows(path: Path) -> list[dict]:
 
 
 def load_census(path: Path) -> list[Transmitter]:
+    rows = _read_rows(path)
+    if not rows:
+        raise SystemExit(f"census: {path} is empty")
+    scored_mode = "detectability_db" in rows[0]
     out = []
-    for r in _read_rows(path):
-        erp = float(r["erp_kw"])
-        dist = float(r["distance_km"])
+    for r in rows:
+        dist = float(r["distance_km"]) if str(r.get("distance_km", "")).strip() else float("inf")
         if dist <= 0:
             raise SystemExit(f"census: non-positive distance for {r.get('callsign')}")
+        if scored_mode:
+            raw = str(r.get("detectability_db", "")).strip()
+            score = float(raw) if raw else float("-inf")
+        else:
+            score = float(r["erp_kw"]) / (dist * dist)
         out.append(Transmitter(
             rf_channel=int(r["rf_channel"]),
             callsign=str(r.get("callsign", "")).strip(),
             service_class=normalize_class(r["service_class"]),
             raw_class=str(r["service_class"]).strip(),
-            detectability=erp / (dist * dist),
+            detectability=score,
+            distance_km=dist,
         ))
     return out
 
@@ -128,7 +145,7 @@ def associate(lines: list[Line], census: list[Transmitter], *,
         ch_lines = sorted((l for l in lines if l.rf_channel == ch),
                           key=lambda l: -l.snr_db)
         ch_census = sorted((t for t in census if t.rf_channel == ch),
-                           key=lambda t: -t.detectability)
+                           key=lambda t: (-t.detectability, t.distance_km))
         for rank, line in enumerate(ch_lines):
             rec = {"rf_channel": ch, "offset_hz": line.offset_hz,
                    "snr_db": line.snr_db, "line_rank": rank,

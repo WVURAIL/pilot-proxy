@@ -2,6 +2,13 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- `analyze-transmitter-census`: the census loader now accepts a precomputed
+  `detectability_db` column (e.g. a propagation-model field strength) as the
+  association ranking score, with blanks ranking last tie-broken by distance;
+  the ERP/distance^2 path remains for schemas without one. Class
+  normalization handles real FCC/ISED export strings ("Translator (LPTV)",
+  "Low-power (LPTV)", "Relay", "Class A") via punctuation-insensitive keys.
+
 - Documentation rolled to DS001/UG001 v1.6 (files renamed to match): kernel
   build examples updated for SM auto-detection, the `detect` example now
   relies on the quantize metadata.json sidecar for the pilot identity, and

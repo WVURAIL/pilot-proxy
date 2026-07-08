@@ -62,6 +62,27 @@ def test_class_normalization_aliases():
     assert normalize_class("TRANSLATOR") == "non_primary"
     assert normalize_class("LPTV") == "non_primary"
     assert normalize_class("experimental") == "other"
+    # real-world census strings (FCC/ISED exports)
+    assert normalize_class("Translator (LPTV)") == "non_primary"
+    assert normalize_class("Low-power (LPTV)") == "non_primary"
+    assert normalize_class("Relay") == "non_primary"
+    assert normalize_class("Class A") == "non_primary"
+    assert normalize_class("Full-power") == "primary"
+
+
+def test_scored_census_ranks_by_detectability_then_distance(tmp_path):
+    path = _write_csv(tmp_path / "c.csv", [
+        {"rf_channel": 20, "callsign": "A", "service_class": "Full-power",
+         "detectability_db": "84.1", "distance_km": "60"},
+        {"rf_channel": 20, "callsign": "B", "service_class": "Translator (LPTV)",
+         "detectability_db": "", "distance_km": "90"},
+        {"rf_channel": 20, "callsign": "C", "service_class": "Relay",
+         "detectability_db": "", "distance_km": "40"},
+    ])
+    census = load_census(path)
+    order = [t.callsign for t in
+             sorted(census, key=lambda t: (-t.detectability, t.distance_km))]
+    assert order == ["A", "C", "B"]  # scored first; unscored by distance
 
 
 def test_association_tiers_and_unassociated(tmp_path):
