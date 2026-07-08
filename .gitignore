@@ -50,3 +50,7 @@ data/*
 # provenance snapshot exception (must be last: overrides *.csv/*.xlsx rules)
 !data/census/
 !data/census/**
+
+# provenance snapshot exception (must be last: overrides *.csv/*.xlsx rules)
+!data/census/
+!data/census/**
