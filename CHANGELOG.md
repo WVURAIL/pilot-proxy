@@ -2,6 +2,14 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Mask boundary aligned to the contract: the CUDA kernel used inclusive
+  `>=` where the schema, method spec, and Python reference declare strict
+  positive excess (`>`). Behavior differs only on exact integer equality
+  (measure-~zero on real u64 accumulations; existing products unaffected,
+  `mask_rule` string unchanged). Python-level equality-boundary regression
+  added; C-harness and CUDA-path boundary tests follow with the next GPU
+  release-check. Credit: external review.
+
 - pilotcal is retired. The one artifact the analysis still needs from it --
   the high-resolution time-averaged spectrum per coarse channel -- is
   carried by every per-pilot scan product

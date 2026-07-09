@@ -392,7 +392,7 @@ void FStat_Compute_DiagnosticFloat(void* handle, const InputType* w_in);
  *   d_num_out[idx] = P_target
  *   d_den_out[idx] = P_ref1 + P_ref2
  *   d_mask_out[idx] =
- *       (P_target * threshold_half_den >=
+ *       (P_target * threshold_half_den >
  *        threshold_half_num * (P_ref1 + P_ref2)) ? 1 : 0
  *
  * The comparison is evaluated only when P_ref1 + P_ref2 is nonzero. If

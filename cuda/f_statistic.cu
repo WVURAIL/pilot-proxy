@@ -877,7 +877,7 @@ kernel_write_num_den_mask_threshold_half_rational(
         threshold_half_num,
         denominator,
         rational_overflow_count);
-    Mask_Result[idx] = (lhs >= rhs) ? 1u : 0u;
+    Mask_Result[idx] = (lhs > rhs) ? 1u : 0u;  /* strict: contract says positive excess */
 }
 
 /* ===========================================================================
