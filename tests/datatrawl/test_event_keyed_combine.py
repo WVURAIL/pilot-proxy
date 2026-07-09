@@ -316,3 +316,17 @@ def test_invariants_identical_versions_add_no_note():
     a = {"detector_version": np.asarray([_ver("aaa111")])}
     b = {"detector_version": np.asarray([_ver("aaa111")])}
     assert _check_invariants([a, b], ("detector_version",), "g") == {}
+
+
+def test_resume_provenance_token_policy():
+    """Specification of the resume identity rule (implemented inline in the
+    detector's resume check; combine's twins pin the same policy at the other
+    site): detector_version strings differing ONLY in the source= token are
+    geometry-identical and must not block resume; any other token difference
+    must. Tonight's production resume is the integration test."""
+    geom = lambda v: tuple(t for t in str(v).split()
+                           if not t.startswith("source="))
+    a, b = _ver("aaa111"), _ver("bbb222")
+    assert a != b and geom(a) == geom(b)          # source-only: continue
+    c = _ver("aaa111", kernel="other")
+    assert geom(a) != geom(c)                     # kernel change: refuse

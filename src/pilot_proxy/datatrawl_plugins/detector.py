@@ -770,6 +770,29 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             key for key in current
             if saved.get(key) != current.get(key)
         ]
+        # detector_version gets token-aware treatment: its `source=` token is
+        # build provenance (patches applied mid-survey change the tree hash
+        # without touching detector math); the kernel hash, K, and schema
+        # tokens are what resume correctness needs. Same policy as combine's
+        # _check_invariants.
+        if "detector_version" in mismatches:
+            def _geom(v):
+                return tuple(t for t in str(v).split()
+                             if not t.startswith("source="))
+            def _src(v):
+                for t in str(v).split():
+                    if t.startswith("source="):
+                        return t[len("source="):][:12]
+                return "?"
+            sv, cv = saved.get("detector_version"), current.get("detector_version")
+            if _geom(sv) == _geom(cv):
+                mismatches.remove("detector_version")
+                print(
+                    "[resume] provenance: source build changed "
+                    f"({_src(sv)} -> {_src(cv)}); detector geometry "
+                    "identical, continuing.",
+                    flush=True,
+                )
         if mismatches:
             details = "; ".join(
                 f"{key}: saved={saved.get(key)!r} current={current.get(key)!r}"
