@@ -5,7 +5,9 @@
 - Mask boundary aligned to the contract: the CUDA kernel used inclusive
   `>=` where the schema, method spec, and Python reference declare strict
   positive excess (`>`). Behavior differs only on exact integer equality
-  (measure-~zero on real u64 accumulations; existing products unaffected,
+  (exact integer equality boundary cases, expected to be rare in real
+  products; stored products are not rewritten, and any old product that
+  happened to hit equality would carry the inclusive-rule mask,
   `mask_rule` string unchanged). Python-level equality-boundary regression
   added; C-harness and CUDA-path boundary tests follow with the next GPU
   release-check. Credit: external review.

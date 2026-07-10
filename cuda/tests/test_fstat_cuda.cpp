@@ -334,7 +334,7 @@ void test_zero_denominator_and_threshold_equality()
     d_mask.copy_to_host(mask);
     assert(num[0] == 1ULL);
     assert(den[0] == 1ULL);
-    assert(mask[0] == 1u);
+    assert(mask[0] == 0u);  /* exact equality is NOT positive excess (strict >) */
     assert(overflow[0] == 0u);
 
     FStat_Destroy(handle);
@@ -402,7 +402,8 @@ void run_deployed_numden_case(
 void test_deployed_numden_null_output_threshold_cases()
 {
     run_deployed_numden_case(3ULL, 1ULL, 0u, 0u);
-    run_deployed_numden_case(1ULL, 2ULL, 1u, 0u);
+    run_deployed_numden_case(1ULL, 2ULL, 0u, 0u);  /* 1*2 == 1*2: equality masks 0 */
+    run_deployed_numden_case(1ULL, 3ULL, 1u, 0u);  /* 1*3 > 1*2: just-above boundary */
     run_deployed_numden_case(1ULL, 4ULL, 1u, 0u);
 }
 
