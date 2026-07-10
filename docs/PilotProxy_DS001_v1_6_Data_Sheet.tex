@@ -323,8 +323,11 @@ T_{\mathrm{half}} &= \frac{F_{\mathrm{thr}}}{2}=\frac{N_{\mathrm{half}}}{D_{\mat
 \end{align}
 The CUDA kernel evaluates:
 \begin{equation}
-  P_t D_{\mathrm{half}} \geq N_{\mathrm{half}}(P_{r1}+P_{r2}).
+  P_t D_{\mathrm{half}} > N_{\mathrm{half}}(P_{r1}+P_{r2}).
 \end{equation}
+Exact equality is not a positive detection; this matches the
+CHIME positive-excess convention and the deployed rational-half API.
+
 
 \notebox{For a threshold of \(-26\dB\) shelf SNR with the included reference geometry, the package reports approximately \(\mathrm{PNR}_{\mathrm{bin}}=-4.364\dB\), \(F_{\mathrm{thr}}=1.36610123\), and \(T_{\mathrm{half}}\approx0.68305\).}
 

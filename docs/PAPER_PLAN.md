@@ -125,7 +125,7 @@ Changes after this date are amendments and say so.
   cite via each `CITATION.cff`.
 - Data: CHIME baseband via CADC/Datatrail per CHIME policy; derived products
   (detector NPZ, tradeoff CSVs, ladder manifests) archived with the paper.
-- Documents: PilotProxy DS001/UG001 v1.4 and Datatrawl DS001/UG001 v1.0
+- Documents: PilotProxy DS001/UG001 v1.6 and Datatrawl DS001/UG001 v1.0
   attached to the tagged releases.
 
 ## Assembly order

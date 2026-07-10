@@ -1,5 +1,11 @@
 # PilotProxy v0.2 CHIME Real-Data Adapter
 
+> **Status:** Historical adapter notes. For new CANFAR/CADC archive-scale
+> work, use `pilot-proxy chime-scan` via `docs/CANFAR_RUNBOOK.md`. The
+> `chime-run` examples below are retained for already-staged local HDF5 data
+> and regression comparisons.
+
+
 This revision adds an optional CHIME adapter layer under `pilot_proxy.chime`.
 The CUDA kernel contract is unchanged:
 
@@ -96,7 +102,7 @@ pilot fine-bin offset can be flipped twice. The runner records the validated
 weight convention in `run_config.json` and `stats.json`, and rejects raw
 inverted-coordinate manifests when time reversal is active.
 
-## Canonical Calibration Workflow
+## Legacy staged-data workflow
 
 Use this order for local 10 s CHIME calibration and as the CANFAR template:
 
@@ -145,7 +151,7 @@ PYTHONPATH=src python -m pilot_proxy.cli check-layout \
   --num-selected-channels 1
 ```
 
-Positive-excess detector run. This is the current local/CANFAR pilot workflow;
+Positive-excess detector run. for already-staged local HDF5 data;
 it reads the real samples once and writes detector and mask products into one
 run directory:
 
@@ -277,6 +283,11 @@ num_detector_valid_frames     # reference denominator > 0
 num_positive_excess_frames    # finite SNR shelf, equivalent to F > mu0
 positive_excess_fraction
 ```
+
+> **Note (finite SNR vs positive excess):** frames with `F <= 1` have no
+> finite `SNR_shelf` (`10 log10(F-1)` undefined). That fraction is NOT the
+> norm-corrected positive-excess mask fraction when `mu0 != 1`; the mask
+> follows `F > mu0` and is recorded separately as `positive_excess_fraction`.
 
 ## Injection-recovery and cleaning tradeoff
 

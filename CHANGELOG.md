@@ -8,9 +8,9 @@
   (exact integer equality boundary cases, expected to be rare in real
   products; stored products are not rewritten, and any old product that
   happened to hit equality would carry the inclusive-rule mask,
-  `mask_rule` string unchanged). Python-level equality-boundary regression
-  added; C-harness and CUDA-path boundary tests follow with the next GPU
-  release-check. Credit: external review.
+  `mask_rule` string unchanged). Python
+  equality-boundary regression added, and CUDA regression expectations
+  updated for exact equality and just-above-boundary cases. Credit: external review.
 
 - pilotcal is retired. The one artifact the analysis still needs from it --
   the high-resolution time-averaged spectrum per coarse channel -- is

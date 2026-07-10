@@ -150,7 +150,9 @@ runtime-bundle validation (needs a C++ compiler, not a GPU).
 - `INTEGRATION.md` - detailed `pilot-proxy` <-> `datatrawl` integration notes.
 - `docs/METHOD_SPEC.md` - equation-first method contract for CHIME products.
 - `docs/product_schema_v2.md` - per-pilot detector product schema (v2).
-- `docs/CHIME_REAL_DATA_V0_2.md` - CHIME real-data adapter notes (v0.2).
+- `docs/CHIME_REAL_DATA_V0_2.md` - historical CHIME real-data adapter notes
+  for the older `chime-run` path; use `docs/CANFAR_RUNBOOK.md` for new
+  `chime-scan` archive runs.
 - `docs/DATA_PRODUCTS.md` - emitted file, array, and table definitions.
 - `docs/CANFAR_RUNBOOK.md` - bounded CANFAR operating procedure.
 - `docs/KOTEKAN_INTERFACE_PREP.md` - runtime-bundle and Kotekan handoff notes.
