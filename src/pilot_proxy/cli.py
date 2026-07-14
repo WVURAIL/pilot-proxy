@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 from pathlib import Path
-from typing import Sequence, cast
+from typing import Any, Mapping, Sequence, cast
 
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
 from pilot_proxy.detector_weights import DetectorWeightBank
@@ -131,6 +131,8 @@ def _cmd_audit_atsc(args: argparse.Namespace) -> None:
         "--output-json",
         args.output_json,
     ]
+    if args.fail_on_quality:
+        argv.append("--fail-on-quality")
     _run_module("pilot_proxy.testbench.audit_atsc_signal", argv)
 
 
@@ -574,6 +576,9 @@ def _cmd_make_weights(args: argparse.Namespace) -> None:
         f"{','.join(str(channel) for channel in physical_channels)}, "
         f"{manifest['receiver_profile_hash']}"
     )
+    _print_adaptive_reference_diagnostics(
+        cast(Sequence[Mapping[str, Any]], manifest.get("target_reference_layout", ()))
+    )
 
 
 def _cmd_export_runtime_weight_bundle(args: argparse.Namespace) -> None:
@@ -610,12 +615,14 @@ def _cmd_validate_runtime_weight_bundle(args: argparse.Namespace) -> None:
 
 def _cmd_list_channels(args: argparse.Namespace) -> None:
     weights = DetectorWeightBank(explicit_path=args.weights_path)
+    layouts: list[Mapping[str, Any]] = []
     print(
         "physical_channel,pilot_mhz,coarse_channel_index,"
         "adaptive_reference_placement"
     )
     for channel in weights.supported_physical_channels():
         layout = weights.layout_for_physical_channel(channel)
+        layouts.append(cast(Mapping[str, Any], layout))
         coarse_channel_index = cast(int, layout["coarse_channel_index"])
         adaptive_reference_placement = cast(
             bool,
@@ -626,6 +633,42 @@ def _cmd_list_channels(args: argparse.Namespace) -> None:
             f"{physical_channel_to_pilot_hz(channel) / HZ_PER_MHZ:.6f},"
             f"{int(coarse_channel_index)},"
             f"{bool(adaptive_reference_placement)}"
+        )
+    _print_adaptive_reference_diagnostics(layouts)
+
+
+def _print_adaptive_reference_diagnostics(
+    layouts: Sequence[Mapping[str, Any]],
+) -> None:
+    for layout in layouts:
+        if not bool(layout.get("adaptive_reference_placement", False)):
+            continue
+        channel = layout.get("physical_channel", "?")
+        coarse = layout.get("coarse_channel_index", "?")
+        status = str(layout.get("reference_placement_status", "unknown"))
+        reason = str(layout.get("reference_placement_reason", "unknown"))
+        lower = layout.get("lower_reference_offset_bins", "?")
+        upper = layout.get("upper_reference_offset_bins", "?")
+        details: list[str] = []
+        if bool(layout.get("lower_reference_edge_wrapped", False)):
+            details.append("lower_reference=edge_wrapped")
+        if bool(layout.get("upper_reference_edge_wrapped", False)):
+            details.append("upper_reference=edge_wrapped")
+        if bool(layout.get("lower_reference_dc_shifted", False)):
+            details.append("lower_reference=dc_shifted")
+        if bool(layout.get("upper_reference_dc_shifted", False)):
+            details.append("upper_reference=dc_shifted")
+        warning = str(layout.get("placement_warnings", "")).strip()
+        detail_text = f"; {'; '.join(details)}" if details else ""
+        warning_text = f"; warning={warning}" if warning else ""
+        print(
+            "NOTE adaptive reference placement: "
+            f"physical_channel={channel}, coarse_channel_index={coarse}, "
+            f"status={status}, reason={reason}, "
+            f"lower_reference_offset_bins={lower}, "
+            f"upper_reference_offset_bins={upper}"
+            f"{detail_text}{warning_text}",
+            file=sys.stderr,
         )
 
 
@@ -748,6 +791,11 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument(
         "--output-json",
         default=str(GENERATED_DIR / "atsc" / "atsc_waveform_audit.json"),
+    )
+    audit.add_argument(
+        "--fail-on-quality",
+        action="store_true",
+        help="Exit non-zero if any waveform quality check fails.",
     )
     audit.set_defaults(func=_cmd_audit_atsc)
 

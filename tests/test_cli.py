@@ -8,7 +8,7 @@ import pytest
 
 from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
 from pilot_proxy import cli
-from pilot_proxy.paths import CONFIGS_DIR
+from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH
 
 CUSTOM_GNURADIO_PYTHON = "/custom/gnuradio-python"
 SMOKE_IQ_SAMPLES = "128"
@@ -81,6 +81,36 @@ def test_generate_atsc_uses_gnuradio_python_and_disables_user_site(
     assert cwd == cli.REPO_ROOT
     assert env["PYTHONNOUSERSITE"] == "1"
     assert env["PYTHONPATH"].split(os.pathsep)[0] == str(cli.SRC_ROOT)
+
+
+def test_audit_atsc_forwards_fail_on_quality(monkeypatch, tmp_path) -> None:
+    calls = []
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+
+    result = cli.main(
+        [
+            "audit-atsc",
+            "--input-iq",
+            str(tmp_path / "in.cfile"),
+            "--output-json",
+            str(tmp_path / "audit.json"),
+            "--fail-on-quality",
+        ]
+    )
+
+    assert result == 0
+    cmd = calls[0][0]
+    assert cmd[:3] == [
+        cli.sys.executable,
+        "-m",
+        "pilot_proxy.testbench.audit_atsc_signal",
+    ]
+    assert "--fail-on-quality" in cmd
 
 
 def test_detect_wrapper_forwards_public_calibration_controls(monkeypatch, tmp_path) -> None:
@@ -400,6 +430,32 @@ def test_make_weights_from_reference_profile(tmp_path, capsys) -> None:
     assert CHANNEL_14 in out
 
 
+def test_make_weights_reports_adaptive_reference_on_stderr(tmp_path, capsys) -> None:
+    output = tmp_path / "weights.bin"
+
+    result = cli.main(
+        [
+            "make-weights",
+            "--receiver-profile",
+            REFERENCE_PROFILE,
+            "--physical-channel-range",
+            "21",
+            "--weight-coordinate-system",
+            WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+            "--output",
+            str(output),
+        ]
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "NOTE adaptive reference placement" in captured.err
+    assert "physical_channel=21" in captured.err
+    assert "status=edge_wrapped" in captured.err
+    assert "lower_reference=edge_wrapped" in captured.err
+    assert "physical_channel=21" not in captured.out
+
+
 def test_make_weights_requires_weight_coordinate_system(tmp_path) -> None:
     with pytest.raises(SystemExit) as exc_info:
         cli.main(
@@ -415,6 +471,24 @@ def test_make_weights_requires_weight_coordinate_system(tmp_path) -> None:
         )
 
     assert exc_info.value.code == 2
+
+
+def test_list_channels_reports_adaptive_reference_on_stderr(capsys) -> None:
+    result = cli.main(
+        [
+            "list-channels",
+            "--weights-path",
+            str(DEFAULT_WEIGHTS_PATH),
+        ]
+    )
+
+    assert result == 0
+    captured = capsys.readouterr()
+    assert "physical_channel,pilot_mhz,coarse_channel_index" in captured.out
+    assert "21,512.309441,735,True" in captured.out
+    assert "NOTE adaptive reference placement" in captured.err
+    assert "physical_channel=21" in captured.err
+    assert "reason=edge_reference_wrapped" in captured.err
 
 
 def test_export_runtime_weight_bundle_wrapper(monkeypatch, tmp_path, capsys) -> None:

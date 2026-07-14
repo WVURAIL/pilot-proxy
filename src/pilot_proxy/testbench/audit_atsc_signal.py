@@ -12,6 +12,7 @@ from typing import Any
 import numpy as np
 
 from pilot_proxy.json_utils import write_json_strict
+from pilot_proxy.dtv_units import PILOT_BELOW_DATA_DB
 from pilot_proxy.testbench.quantize import (
     ATSC_CHANNEL_WIDTH_HZ,
     ATSC_PILOT_OFFSET_HZ,
@@ -31,6 +32,12 @@ DEFAULT_OCCUPIED_POWER_FRACTION = 0.99
 SHELF_FLATNESS_LOW_PERCENTILE = 5
 SHELF_FLATNESS_HIGH_PERCENTILE = 95
 MIN_SHELF_MASK_BINS = 16
+DEFAULT_MAX_PILOT_FREQUENCY_ERROR_HZ = 1_000.0
+DEFAULT_PILOT_BELOW_DATA_TOLERANCE_DB = 2.0
+DEFAULT_MIN_OCCUPIED_BANDWIDTH_FRACTION = 0.80
+DEFAULT_MAX_OCCUPIED_BANDWIDTH_FRACTION = 1.03
+DEFAULT_MAX_SHELF_FLATNESS_DB = 12.0
+DEFAULT_MAX_EDGE_ROLLOFF_DB = -3.0
 
 
 def _positive_to_db(value: float) -> float:
@@ -86,6 +93,131 @@ def _occupied_bandwidth_hz(
     return float(hi - lo)
 
 
+def _quality_check(
+    *,
+    name: str,
+    passed: bool,
+    value: float,
+    margin: float,
+    units: str,
+    description: str,
+    target: float | None = None,
+    tolerance: float | None = None,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> dict[str, Any]:
+    out: dict[str, Any] = {
+        "name": name,
+        "passed": bool(passed),
+        "value": float(value),
+        "margin": float(margin),
+        "units": units,
+        "description": description,
+    }
+    if target is not None:
+        out["target"] = float(target)
+    if tolerance is not None:
+        out["tolerance"] = float(tolerance)
+    if minimum is not None:
+        out["minimum"] = float(minimum)
+    if maximum is not None:
+        out["maximum"] = float(maximum)
+    return out
+
+
+def _quality_report(
+    audit: dict[str, Any],
+    *,
+    expected_pilot_below_data_db: float,
+    max_pilot_frequency_error_hz: float,
+    pilot_below_data_tolerance_db: float,
+    min_occupied_bandwidth_hz: float,
+    max_occupied_bandwidth_hz: float,
+    max_shelf_flatness_db: float,
+    max_edge_rolloff_db: float,
+) -> dict[str, Any]:
+    pilot_frequency_error = abs(float(audit["pilot_frequency_error_hz"]))
+    pilot_frequency_margin = float(max_pilot_frequency_error_hz) - pilot_frequency_error
+
+    pilot_level_error = abs(
+        float(audit["measured_pilot_below_data_db"])
+        - float(expected_pilot_below_data_db)
+    )
+    pilot_level_margin = float(pilot_below_data_tolerance_db) - pilot_level_error
+
+    occupied = float(audit["occupied_bandwidth_hz"])
+    occupied_margin = min(
+        occupied - float(min_occupied_bandwidth_hz),
+        float(max_occupied_bandwidth_hz) - occupied,
+    )
+
+    shelf_flatness = float(audit["shelf_flatness_db"])
+    shelf_flatness_margin = float(max_shelf_flatness_db) - shelf_flatness
+
+    edge_rolloff = float(audit["edge_rolloff_check_db"])
+    edge_rolloff_margin = float(max_edge_rolloff_db) - edge_rolloff
+
+    checks = [
+        _quality_check(
+            name="pilot_frequency_error",
+            passed=pilot_frequency_margin >= 0.0,
+            value=pilot_frequency_error,
+            target=0.0,
+            tolerance=float(max_pilot_frequency_error_hz),
+            margin=pilot_frequency_margin,
+            units="Hz",
+            description="Absolute pilot frequency error from the expected ATSC pilot offset.",
+        ),
+        _quality_check(
+            name="pilot_level",
+            passed=pilot_level_margin >= 0.0,
+            value=float(audit["measured_pilot_below_data_db"]),
+            target=float(expected_pilot_below_data_db),
+            tolerance=float(pilot_below_data_tolerance_db),
+            margin=pilot_level_margin,
+            units="dB",
+            description="Measured ATSC pilot power below the estimated data shelf.",
+        ),
+        _quality_check(
+            name="occupied_bandwidth",
+            passed=occupied_margin >= 0.0,
+            value=occupied,
+            minimum=float(min_occupied_bandwidth_hz),
+            maximum=float(max_occupied_bandwidth_hz),
+            margin=occupied_margin,
+            units="Hz",
+            description="99% occupied bandwidth inside the nominal 6 MHz channel.",
+        ),
+        _quality_check(
+            name="shelf_flatness",
+            passed=shelf_flatness_margin >= 0.0,
+            value=shelf_flatness,
+            maximum=float(max_shelf_flatness_db),
+            margin=shelf_flatness_margin,
+            units="dB",
+            description="95th-to-5th percentile PSD spread over the interior data shelf.",
+        ),
+        _quality_check(
+            name="edge_rolloff",
+            passed=edge_rolloff_margin >= 0.0,
+            value=edge_rolloff,
+            maximum=float(max_edge_rolloff_db),
+            margin=edge_rolloff_margin,
+            units="dB",
+            description="Mean channel-edge PSD relative to the interior data shelf; more negative is better.",
+        ),
+    ]
+    passed = sum(1 for check in checks if bool(check["passed"]))
+    return {
+        "schema_version": "fstat_atsc_waveform_quality_v1",
+        "quality_passed": bool(passed == len(checks)),
+        "quality_score": float(passed / len(checks)),
+        "num_quality_checks_passed": int(passed),
+        "num_quality_checks": int(len(checks)),
+        "quality_checks": checks,
+    }
+
+
 def audit_atsc_iq(
     *,
     input_iq: Path,
@@ -98,6 +230,13 @@ def audit_atsc_iq(
     pilot_exclusion_hz: float = DEFAULT_PILOT_EXCLUSION_HZ,
     edge_exclusion_hz: float = DEFAULT_EDGE_EXCLUSION_HZ,
     occupied_power_fraction: float = DEFAULT_OCCUPIED_POWER_FRACTION,
+    expected_pilot_below_data_db: float = PILOT_BELOW_DATA_DB,
+    max_pilot_frequency_error_hz: float = DEFAULT_MAX_PILOT_FREQUENCY_ERROR_HZ,
+    pilot_below_data_tolerance_db: float = DEFAULT_PILOT_BELOW_DATA_TOLERANCE_DB,
+    min_occupied_bandwidth_hz: float | None = None,
+    max_occupied_bandwidth_hz: float | None = None,
+    max_shelf_flatness_db: float = DEFAULT_MAX_SHELF_FLATNESS_DB,
+    max_edge_rolloff_db: float = DEFAULT_MAX_EDGE_ROLLOFF_DB,
 ) -> dict[str, Any]:
     """Return spectral audit metrics for a clean ATSC IQ file."""
     iq = _read_iq(input_iq, max_samples)
@@ -164,7 +303,7 @@ def audit_atsc_iq(
         fraction=float(occupied_power_fraction),
     )
 
-    return {
+    audit = {
         "schema_version": "fstat_atsc_waveform_audit_v1",
         "input_iq": str(input_iq),
         "num_samples_used": int(iq.size),
@@ -188,6 +327,29 @@ def audit_atsc_iq(
         "shelf_psd_median": float(shelf_psd_median),
         "shelf_psd_mean": float(shelf_psd_mean),
     }
+    min_bw = (
+        float(min_occupied_bandwidth_hz)
+        if min_occupied_bandwidth_hz is not None
+        else float(channel_width_hz) * DEFAULT_MIN_OCCUPIED_BANDWIDTH_FRACTION
+    )
+    max_bw = (
+        float(max_occupied_bandwidth_hz)
+        if max_occupied_bandwidth_hz is not None
+        else float(channel_width_hz) * DEFAULT_MAX_OCCUPIED_BANDWIDTH_FRACTION
+    )
+    audit["quality"] = _quality_report(
+        audit,
+        expected_pilot_below_data_db=float(expected_pilot_below_data_db),
+        max_pilot_frequency_error_hz=float(max_pilot_frequency_error_hz),
+        pilot_below_data_tolerance_db=float(pilot_below_data_tolerance_db),
+        min_occupied_bandwidth_hz=float(min_bw),
+        max_occupied_bandwidth_hz=float(max_bw),
+        max_shelf_flatness_db=float(max_shelf_flatness_db),
+        max_edge_rolloff_db=float(max_edge_rolloff_db),
+    )
+    audit["quality_passed"] = bool(audit["quality"]["quality_passed"])
+    audit["quality_score"] = float(audit["quality"]["quality_score"])
+    return audit
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -230,6 +392,38 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=DEFAULT_OCCUPIED_POWER_FRACTION,
     )
+    parser.add_argument(
+        "--expected-pilot-below-data-db",
+        type=float,
+        default=PILOT_BELOW_DATA_DB,
+    )
+    parser.add_argument(
+        "--max-pilot-frequency-error-hz",
+        type=float,
+        default=DEFAULT_MAX_PILOT_FREQUENCY_ERROR_HZ,
+    )
+    parser.add_argument(
+        "--pilot-below-data-tolerance-db",
+        type=float,
+        default=DEFAULT_PILOT_BELOW_DATA_TOLERANCE_DB,
+    )
+    parser.add_argument("--min-occupied-bandwidth-hz", type=float, default=None)
+    parser.add_argument("--max-occupied-bandwidth-hz", type=float, default=None)
+    parser.add_argument(
+        "--max-shelf-flatness-db",
+        type=float,
+        default=DEFAULT_MAX_SHELF_FLATNESS_DB,
+    )
+    parser.add_argument(
+        "--max-edge-rolloff-db",
+        type=float,
+        default=DEFAULT_MAX_EDGE_ROLLOFF_DB,
+    )
+    parser.add_argument(
+        "--fail-on-quality",
+        action="store_true",
+        help="Exit non-zero if any waveform quality check fails.",
+    )
     return parser
 
 
@@ -246,6 +440,13 @@ def main(argv: list[str] | None = None) -> int:
         pilot_exclusion_hz=float(args.pilot_exclusion_hz),
         edge_exclusion_hz=float(args.edge_exclusion_hz),
         occupied_power_fraction=float(args.occupied_power_fraction),
+        expected_pilot_below_data_db=float(args.expected_pilot_below_data_db),
+        max_pilot_frequency_error_hz=float(args.max_pilot_frequency_error_hz),
+        pilot_below_data_tolerance_db=float(args.pilot_below_data_tolerance_db),
+        min_occupied_bandwidth_hz=args.min_occupied_bandwidth_hz,
+        max_occupied_bandwidth_hz=args.max_occupied_bandwidth_hz,
+        max_shelf_flatness_db=float(args.max_shelf_flatness_db),
+        max_edge_rolloff_db=float(args.max_edge_rolloff_db),
     )
     args.output_json.parent.mkdir(parents=True, exist_ok=True)
     write_json_strict(args.output_json, audit, indent=2)
@@ -259,6 +460,21 @@ def main(argv: list[str] | None = None) -> int:
     print(f"occupied_bandwidth_hz={audit['occupied_bandwidth_hz']:.9g}")
     print(f"shelf_flatness_db={audit['shelf_flatness_db']:.3f}")
     print(f"edge_rolloff_check_db={audit['edge_rolloff_check_db']:.3f}")
+    print(
+        "quality_passed="
+        f"{audit['quality_passed']} "
+        f"({int(audit['quality']['num_quality_checks_passed'])}/"
+        f"{int(audit['quality']['num_quality_checks'])})"
+    )
+    for check in audit["quality"]["quality_checks"]:
+        status = "PASS" if bool(check["passed"]) else "FAIL"
+        print(
+            f"quality_check.{check['name']}={status} "
+            f"value={float(check['value']):.6g}{check['units']} "
+            f"margin={float(check['margin']):.6g}{check['units']}"
+        )
+    if args.fail_on_quality and not bool(audit["quality_passed"]):
+        return 1
     return 0
 
 

@@ -36,7 +36,7 @@ determines which guide you follow:
 | Check the package installs and the CLI loads | This README: minimal CPU-only smoke test (below) | No | No |
 | Generate / audit synthetic ATSC | This README: standalone testbench | Partly | No |
 | Run the CUDA detector / SNR evaluation | This README: standalone CUDA path | Yes | No |
-| Publication SNR sweeps without a GPU | This README: `pilot-proxy evaluate-snr --detector-backend cpu-reference` | No | No |
+| Publication SNR sweeps without a GPU | This README: `pilot-proxy evaluate-snr --detector-backend cpu-reference --noise-source python` | No | No |
 
 **Headed for CANFAR?** Go straight to the
 [runbook](docs/CANFAR_RUNBOOK.md): session launch, both clones, the
@@ -49,12 +49,19 @@ the standalone workflows; the smoke test is optional on the runbook path
 
 ## Environment
 
-The standalone workflows below run inside one Python virtual environment.
-Create and activate it before anything installs:
+The standalone workflows below run inside one Python virtual environment. Choose
+any writable, persistent path for the venv; it does **not** need to live inside
+the source checkout. Use a Python that can create virtual environments; on
+minimal Debian/Ubuntu installs, install `python3-venv` first, or set
+`PYTHON_BIN` to a Miniconda/session Python that already includes `venv` and
+`ensurepip`.
 
 ```bash
-python -m venv --system-site-packages ~/pilot-proxy-datatrawl
-source ~/pilot-proxy-datatrawl/bin/activate
+export VENV_DIR="${VENV_DIR:-$HOME/.venvs/pilot-proxy-datatrawl}"
+export PYTHON_BIN="${PYTHON_BIN:-python3}"
+mkdir -p "$(dirname "$VENV_DIR")"
+"$PYTHON_BIN" -m venv --system-site-packages "$VENV_DIR"
+source "$VENV_DIR/bin/activate"
 ```
 
 The venv is not optional on shared or image-managed Pythons (CANFAR session
@@ -62,9 +69,9 @@ images, PEP 668 "externally managed" distros): a bare `pip install` there
 fails with `Permission denied` writing the console script.
 `--system-site-packages` keeps a session image's CuPy/CUDA stack importable
 for the GPU workflows. Re-activate on every **new** session; the venv
-persists (on CANFAR, under `/arc`). CANFAR runbook users do not create this
-venv by hand: `setup_env.sh` builds --- and recreates --- the same venv at
-this default path.
+persists if `VENV_DIR` points at persistent storage (on CANFAR, under `/arc`).
+CANFAR runbook users do not create this venv by hand: `setup_env.sh` builds ---
+and recreates --- its own configured venv.
 
 ---
 
@@ -76,8 +83,9 @@ data --- a good first step before any of the standalone workflows. Run it
 inside the [environment](#environment) above.
 
 ```bash
-git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
-cd ~/pilot-proxy
+export REPO_DIR="${REPO_DIR:-$PWD/pilot-proxy}"
+git clone https://github.com/WVURAIL/pilot-proxy.git "$REPO_DIR"
+cd "$REPO_DIR"
 python -m pip install -U pip setuptools wheel
 python -m pip install -e ".[test]"
 
@@ -89,14 +97,33 @@ pilot-proxy check-layout \
     --receiver-profile configs/receiver_profiles/reference_800mhz_pfb.json
 ```
 
-> **Test commands.** `make test` is *not* a CPU-only check --- it runs
-> `test-kernel` (which needs `nvcc`/CUDA) alongside the Python tests. On a CPU
-> host run the Python tests directly (`make test-python`, or
-> `pytest tests/test_cli.py -q` for just the CLI). `make release-check` adds the
-> CPU C/C++ reference checks plus profile/layout and runtime-bundle validation
-> (needs a C++ compiler, not a GPU). Use `make test-kernel` only on a CUDA
-> build host (the GPU arch is auto-detected from `nvidia-smi`; pass
-> `SM=<arch>` to override).
+### Repository test targets
+
+The smoke test above only runs `tests/test_cli.py`. To run the repository's
+Python test target, install the test extra first:
+
+```bash
+python -m pip install -e ".[test]"
+make test-python
+```
+
+The `test` extra includes `h5py` because the checked-in Python tests cover CHIME
+HDF5 adapters. No CHIME data files are required.
+
+`make test` is **not** CPU-only: it runs `test-kernel` and then `test-python`.
+Run it only on a CUDA build/test host after these checks pass:
+
+```bash
+command -v nvidia-smi && nvidia-smi --query-gpu=name,compute_cap --format=csv
+command -v nvcc && nvcc --version
+```
+
+`nvidia-smi` comes from the NVIDIA driver/tooling, not from Python. On WSL it
+comes through the Windows NVIDIA driver with WSL CUDA support; on Linux it comes
+from the NVIDIA driver packages. If `nvidia-smi` is unavailable, do not run
+`make test` or `make test-kernel`; use `make test-python` instead. `make
+release-check` adds the CPU C/C++ reference checks plus profile/layout and
+runtime-bundle validation (needs a C++ compiler, not a GPU).
 
 ---
 
@@ -214,11 +241,35 @@ Generate the default CHIME DTV weight bank with:
 pilot-proxy make-weights   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json   --detector-core-profile configs/detector_core/pilotproxy_cuda_fstat_v1.json   --physical-channel-range 14:36   --weight-coordinate-system post_spectral_sense_normalization   --output weights/chime_dtv_weights_k128.bin
 ```
 
-The default detector path expects:
+The default detector path expects this data file:
 
 ```text
 weights/chime_dtv_weights_k128.bin
 ```
+
+Do not run the `.bin` directly; it is a detector weight bank, not an executable.
+Leave the default in place, or pass it explicitly to commands that consume
+weights, for example:
+
+```bash
+pilot-proxy list-channels --weights-path weights/chime_dtv_weights_k128.bin
+pilot-proxy chime-run --weights-path weights/chime_dtv_weights_k128.bin --help
+```
+
+`list-channels` reports whether reference placement was adaptive for each
+physical channel; adaptive cases also print an explanatory `NOTE` to the screen
+without changing the CSV output. The shipped K=128 bank uses
+`reference_offset_bins=2` and `skipped_guard_bins=1`: one fine bin is skipped on
+each side of the target, and the next fine bin is used as the lower/upper
+reference. If a requested reference would leave the coarse-channel edge, it wraps
+around the circular coarse-channel FFT. If a requested reference collides with
+the forbidden coarse-channel DC tone, that reference shifts one bin farther from
+the target and records a placement warning in the weight manifest. If the target
+itself collides with DC, weight generation fails hard because the target signal
+cannot be moved. For the shipped ATSC 14-36 CHIME bank, only physical channel 21
+uses adaptive placement: its lower reference wraps across the coarse-channel
+edge. Physical channel 14 has DC inside the skipped guard region but no
+target/reference DC collision, so it is not marked adaptive.
 
 Export and validate a compact runtime bundle with:
 
@@ -250,7 +301,7 @@ Convert compute capability to `SM` by removing the decimal point. Examples:
 The Python side of the GPU path uses CuPy. The integrated CHIME/CANFAR workflow
 installs it via `setup_env.sh` (which delegates to `datatrawl setup-cupy`); for the
 standalone workflow, install the build matching your CUDA runtime directly, e.g.
-`pip install "pilot-proxy[cuda]"` (CUDA 12.x) or the appropriate
+`python -m pip install -e ".[cuda]"` (CUDA 12.x) or the appropriate
 `cupy-cudaXXx` wheel for your driver.
 
 Both `setup_env.sh` and the `make` targets themselves detect your GPU's `SM`
@@ -264,20 +315,28 @@ GPUs (or flags) between sessions forces the recompile automatically.
 Building the kernel needs the CUDA compiler, `nvcc`. Confirm it is on `PATH`:
 
 ```bash
-nvcc --version || ls /usr/local/cuda*/bin/nvcc
+command -v nvcc && nvcc --version
 ```
 
 On CANFAR CUDA images `nvcc` is often installed under `/usr/local/cuda/bin` but
-not on `PATH`. If so, either add it (persist it in `~/.bashrc`):
+not on `PATH`. If `command -v nvcc` prints a path such as `/usr/bin/nvcc`, do
+not pass `NVCC=` at all; just run `make build-kernel`. If `nvcc` is not on
+`PATH`, locate the real compiler path first:
 
 ```bash
-export PATH=/usr/local/cuda/bin:$PATH
+find /usr/local -maxdepth 4 -path '*/bin/nvcc' -type f 2>/dev/null
+```
+
+Then either add that directory to `PATH` (persist it in `~/.bashrc`):
+
+```bash
+export PATH=/path/to/cuda/bin:$PATH
 ```
 
 or point the build at it directly --- `cuda/Makefile` honours `NVCC=`:
 
 ```bash
-make build-kernel NVCC=/usr/local/cuda/bin/nvcc
+make build-kernel NVCC=/path/to/cuda/bin/nvcc
 ```
 
 If `nvcc` is absent entirely, use a CANFAR image that ships the CUDA *toolkit*
@@ -300,7 +359,7 @@ This builds `cuda/libfstatistic.so` and stages a copy to:
 ~/.cache/pilot_proxy/libfstatistic.so
 ```
 
-Validate by loading through Python:
+Validate the kernel load and compile-time contract through Python:
 
 ```bash
 PYTHONPATH=src python - <<'PY'
@@ -310,6 +369,39 @@ print(kernel.specs.as_descriptive_dict())
 print(kernel.features.as_dict())
 print(kernel.version.as_string())
 PY
+```
+
+This output describes the CUDA kernel contract, not the full receiver frame
+layout. `detector_window_samples=128` is `K`: the row length and the number of
+coefficients in each of the three packed weight-term vectors (target, lower
+reference, upper reference). It is **not** the full frame length.
+
+The receiver profile supplies `frame_size_samples`. The default profiles use
+`frame_size_samples=16384`, so:
+
+```text
+windows_per_stream = frame_size_samples / detector_window_samples
+                   = 16384 / 128
+                   = 128
+
+detector_rows_per_frame = num_input_streams * num_selected_channels * windows_per_stream
+```
+
+For the CHIME profile with one selected coarse channel, this is:
+
+```text
+2048 feed-pol streams * 1 selected channel * 128 windows_per_stream = 262144 rows
+```
+
+So one CHIME frame is packed as `(262144, 128)`, and a batched chunk is packed
+as `(frames_in_chunk, 262144, 128)`. The kernel sums target/reference powers
+over all detector rows before forming one F-statistic per frame/block. To check
+the derived row count for a profile:
+
+```bash
+pilot-proxy check-layout \
+    --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
+    --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
 Do not execute the shared library directly.
@@ -353,8 +445,8 @@ sequences, order-safety internals, and post-processing (`validate-products`,
 
 ## Standalone synthetic/testbench workflow
 
-The standalone path is unchanged. It still uses two Python interpreters when GNU
-Radio is installed in the system Python:
+The standalone path uses two Python interpreters when GNU Radio is installed in
+the system Python:
 
 - GNU Radio Python for clean ATSC generation and GNU Radio AWGN;
 - CUDA Python for CuPy and the CUDA F-statistic library.
@@ -368,8 +460,15 @@ PYTHONNOUSERSITE=1 PYTHONPATH=src /usr/bin/python3   -m pilot_proxy.testbench.ge
 Audit the clean waveform:
 
 ```bash
-PYTHONPATH=src python   -m pilot_proxy.testbench.audit_atsc_signal   --input-iq generated/atsc/atsc_8vsb_complex64.cfile
+PYTHONPATH=src python   -m pilot_proxy.testbench.audit_atsc_signal   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --fail-on-quality
 ```
+
+This writes `generated/atsc/atsc_waveform_audit.json` and prints a five-check
+quality summary. The checks quantify whether the GNU Radio waveform is usable:
+pilot frequency error, pilot level relative to the data shelf, occupied
+bandwidth, shelf flatness, and channel-edge rolloff. A healthy generated
+waveform prints `quality_passed=True (5/5)` plus per-check margins; with
+`--fail-on-quality`, the command exits non-zero if any check fails.
 
 Pack detector input:
 
@@ -382,6 +481,12 @@ Run a small SNR evaluation:
 ```bash
 PYTHONPATH=src python   -m pilot_proxy.testbench.evaluate_snr   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --physical-channel 14   --frame-size-samples 16384   --num-input-streams 1   --requested-snr-shelf-db -26   --noise-trials 10
 ```
+
+This writes `generated/dtv_snr_eval/dtv_snr_summary.csv`. The main accuracy
+columns are `snr_error_db_mean` and `snr_error_db_std`, where error means
+estimated shelf SNR minus injected/measured truth. `cpu_gpu_abs_diff_max` should
+be zero for the packed fixed-point CUDA path. Ten trials are a quick smoke test;
+increase `--noise-trials` for tighter uncertainty.
 
 ---
 

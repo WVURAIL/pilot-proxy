@@ -85,6 +85,17 @@ $(error no GPU detected (nvidia-smi absent or predates the compute_cap query); p
 endif
 endif
 
+# Fail before the recipe if the requested CUDA compiler is not executable. This
+# catches stale hard-coded paths such as /usr/local/cuda/bin/nvcc when nvcc is
+# actually installed elsewhere on PATH.
+NVCC_REQUIRED_GOALS := $(SM_REQUIRED_GOALS)
+NVCC_RESOLVED := $(shell command -v "$(NVCC)" 2>/dev/null)
+ifeq ($(strip $(NVCC_RESOLVED)),)
+ifneq ($(filter $(NVCC_REQUIRED_GOALS),$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)),)
+$(error CUDA compiler not found: NVCC=$(NVCC). Run 'command -v nvcc' and either leave NVCC unset or pass NVCC=/absolute/path/to/nvcc)
+endif
+endif
+
 # The arch and CONFIG_DEFS live only in recipe flags, invisible to make's
 # timestamp check, so changing them used to reuse stale objects silently.
 # Encode them in a stamp filename: switching any knob invalidates the old

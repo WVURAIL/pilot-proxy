@@ -74,7 +74,8 @@ generate-atsc:
 
 audit-atsc:
 	PYTHONPATH=src $(PYTHON) -m pilot_proxy.testbench.audit_atsc_signal \
-	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile
+	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
+	    --fail-on-quality
 
 quantize:
 	PYTHONPATH=src $(PYTHON) -m pilot_proxy.testbench.quantize \
