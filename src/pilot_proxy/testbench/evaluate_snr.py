@@ -948,6 +948,7 @@ def _evaluate_one_trial(
         "p_ref_lower_u64": int(gpu["p_ref_lower_u64"]),
         "p_ref_upper_u64": int(gpu["p_ref_upper_u64"]),
         "p_ref_sum_u64": int(gpu["p_ref_sum_u64"]),
+        "positive_excess": int(gpu["positive_excess"]),
         "diagnostic_raw_float32": float(gpu["diagnostic_raw_float32"]),
         "diagnostic_level_db_float32": float(gpu["diagnostic_level_db_float32"]),
         "cpu_float_fstat_raw": float(cpu_float_fstat),
@@ -1734,9 +1735,19 @@ def run(args: argparse.Namespace) -> int:
                 "channel_gain_db": float(args.channel_gain_db),
                 "channel_phase_deg": float(args.channel_phase_deg),
             },
-            "kernel_version": kernel.version.as_string(),
-            "kernel_specs": kernel.specs.as_descriptive_dict(),
-            "cuda_device": cp.cuda.runtime.getDeviceProperties(0)["name"].decode(),
+            "kernel_version": (
+                kernel.version.as_string() if kernel is not None
+                else "cpu-reference"
+            ),
+            "kernel_specs": (
+                kernel.specs.as_descriptive_dict() if kernel is not None
+                else None
+            ),
+            "cuda_device": (
+                cp.cuda.runtime.getDeviceProperties(0)["name"].decode()
+                if kernel is not None
+                else None
+            ),
             "conversion_metadata": conversion_metadata,
         },
         "csv_columns": {
