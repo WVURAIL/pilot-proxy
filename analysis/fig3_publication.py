@@ -141,7 +141,7 @@ if pex:
                     markerfacecolor="none", alpha=0.85,
                     label=f"pos-excess, {lbl}")
 ax.axvline(-32.0, color="0.35", ls="--", lw=0.9)
-ax.text(-32.05, 0.03, "science threshold $-32$ dB", rotation=90, fontsize=8,
+ax.text(-32.05, 0.03, "design benchmark $-32$ dB", rotation=90, fontsize=8,
         va="bottom", ha="right", color="0.35")
 for lev in (0.5, 0.9):
     ax.axhline(lev, color="0.8", ls=":", lw=0.8)
@@ -154,11 +154,15 @@ if v and np.isfinite(v["p90"]):
 ax.set_xlabel("requested shelf SNR [dB]")
 ax.set_ylabel(r"detection probability $P_d$")
 ax.set_title(f"Synthetic detection curves, exact-integer CPU reference "
-             f"({label}; Wilson 95%)", fontsize=10.5)
+             f"({label}; Wilson 95\\%)", fontsize=10.5)
 ax.set_ylim(-0.02, 1.04)
 ax.legend(fontsize=7.5, loc="upper left", ncol=2 if pex else 1)
 ax.grid(color="0.92", lw=0.6)
 ax.set_axisbelow(True)
+ax.text(0.99, 0.015,
+        "provisional: 4-stream (512-row) trials --- deployment-scale pending",
+        transform=ax.transAxes, ha="right", va="bottom",
+        fontsize=7, color="0.45", style="italic")
 fig.tight_layout()
 fig.savefig(OUT / "fig3_detection_curves.png", dpi=300, bbox_inches="tight")
 fig.savefig(OUT / "fig3_detection_curves.pdf", bbox_inches="tight")

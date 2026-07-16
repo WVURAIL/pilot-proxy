@@ -54,11 +54,27 @@ def setup_matplotlib(*, force_agg: bool = True):
         }
     )
     if use_tex:
-        # Match the journal build (mnras/rasti classes load newtxtext/newtxmath),
-        # so figure text and math render in the same Times family as the paper.
-        matplotlib.rcParams["text.latex.preamble"] = (
-            r"\usepackage{amsmath}\usepackage{newtxtext,newtxmath}"
-        )
+        # Match the journal build (mnras/rasti classes load newtxtext/newtxmath)
+        # when the newtx fonts are installed; otherwise fall back to Computer
+        # Modern, which matches the article-class draft build. An unconditional
+        # newtx preamble crashes savefig on hosts without newtxtext.sty.
+        import subprocess
+
+        try:
+            has_newtx = (
+                subprocess.run(
+                    ["kpsewhich", "newtxtext.sty"],
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
+                != ""
+            )
+        except OSError:
+            has_newtx = False
+        preamble = r"\usepackage{amsmath}"
+        if has_newtx:
+            preamble += r"\usepackage{newtxtext,newtxmath}"
+        matplotlib.rcParams["text.latex.preamble"] = preamble
 
     import matplotlib.pyplot as plt
 
