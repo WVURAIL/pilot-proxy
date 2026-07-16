@@ -54,7 +54,11 @@ def setup_matplotlib(*, force_agg: bool = True):
         }
     )
     if use_tex:
-        matplotlib.rcParams["text.latex.preamble"] = r"\usepackage{amsmath}"
+        # Match the journal build (mnras/rasti classes load newtxtext/newtxmath),
+        # so figure text and math render in the same Times family as the paper.
+        matplotlib.rcParams["text.latex.preamble"] = (
+            r"\usepackage{amsmath}\usepackage{newtxtext,newtxmath}"
+        )
 
     import matplotlib.pyplot as plt
 
