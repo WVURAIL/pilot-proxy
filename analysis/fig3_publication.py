@@ -120,15 +120,7 @@ if pex is None:
 
 # ---- figure -------------------------------------------------------------------
 fig, ax = plt.subplots(figsize=(7.6, 5.0))
-for off, ro in sorted(thr.items()):
-    snr = np.array([x[0] for x in ro])
-    pd = np.array([x[1] for x in ro])
-    lo = np.array([x[2] for x in ro])
-    hi = np.array([x[3] for x in ro])
-    lbl = "0 Hz" if off == 0 else f"{off/1000:+.0f} kHz"
-    ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "-",
-                ms=4.5, lw=1.3, capsize=2, color=COLORS[off],
-                label=f"threshold, {lbl}")
+# Primary: the deployed positive-excess rule (operational cleaning).
 if pex:
     for off, ro in sorted(pex.items()):
         snr = np.array([x[0] for x in ro])
@@ -136,20 +128,38 @@ if pex:
         lo = np.array([x[2] for x in ro])
         hi = np.array([x[3] for x in ro])
         lbl = "0 Hz" if off == 0 else f"{off/1000:+.0f} kHz"
-        ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "--",
-                    ms=4.5, lw=1.0, capsize=2, color=COLORS[off],
-                    markerfacecolor="none", alpha=0.85,
-                    label=f"pos-excess, {lbl}")
-ax.axvline(-32.0, color="0.35", ls="--", lw=0.9)
-ax.text(-32.05, 0.03, "design benchmark $-32$ dB", rotation=90, fontsize=8,
-        va="bottom", ha="right", color="0.35")
+        ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "-",
+                    ms=4.5, lw=1.4, capsize=2, color=COLORS[off],
+                    label=f"pos-excess (deployed), {lbl}")
+# Secondary: calibration-free fixed-threshold backup mode at the recorded
+# reference level (a testbench convention, not a derived requirement).
+for off, ro in sorted(thr.items()):
+    snr = np.array([x[0] for x in ro])
+    pd = np.array([x[1] for x in ro])
+    lo = np.array([x[2] for x in ro])
+    hi = np.array([x[3] for x in ro])
+    lbl = "0 Hz" if off == 0 else f"{off/1000:+.0f} kHz"
+    ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "--",
+                ms=4.5, lw=1.0, capsize=2, color=COLORS[off],
+                markerfacecolor="none", alpha=0.8,
+                label=f"fixed-$\\tau$ backup, {lbl}")
+ax.axvline(-32.0, color="0.55", ls=":", lw=0.9)
+ax.text(-32.05, 0.03, "backup-mode reference level $-32$ dB (recorded)",
+        rotation=90, fontsize=7.5, va="bottom", ha="right", color="0.45")
 for lev in (0.5, 0.9):
     ax.axhline(lev, color="0.8", ls=":", lw=0.8)
+vp = v_pex.get(0.0) if v_pex else None
+if vp and np.isfinite(vp["p90"]):
+    ax.annotate(
+        f"deployed rule: $P_d$=0.9 at $\\approx${vp['p90']:.1f} dB",
+        xy=(vp["p90"], 0.9), xytext=(-38.3, 0.70), fontsize=8.5,
+        arrowprops=dict(arrowstyle="->", lw=0.8, color="0.4"))
 v = v_thr.get(0.0)
 if v and np.isfinite(v["p90"]):
     ax.annotate(
-        f"$P_d$=0.5 at $\\approx${v['p50']:.1f} dB\n$P_d$=0.9 at $\\approx${v['p90']:.1f} dB",
-        xy=(v["p90"], 0.9), xytext=(-38, 0.72), fontsize=8.5,
+        f"backup mode: $P_d$=0.5 at $\\approx${v['p50']:.1f} dB\n"
+        f"$P_d$=0.9 at $\\approx${v['p90']:.1f} dB",
+        xy=(v["p90"], 0.9), xytext=(-30.3, 0.55), fontsize=8.5,
         arrowprops=dict(arrowstyle="->", lw=0.8, color="0.4"))
 ax.set_xlabel("requested shelf SNR [dB]")
 ax.set_ylabel(r"detection probability $P_d$")
