@@ -50,7 +50,9 @@ for j, ch in enumerate(chans):
         bins = np.linspace(-SPAN, SPAN, 600)
     cnt, edges = np.histogram(x, bins=bins, density=True)
     mids = 0.5 * (edges[:-1] + edges[1:])
-    ax.semilogy(mids, np.maximum(cnt, 1e-6), color=INK, lw=0.7,
+    # no clip floor: empty bins break the trace instead of drawing a shelf
+    floor1 = 1.0 / (max(x.size, 1) * float(edges[1] - edges[0]))
+    ax.semilogy(mids, np.where(cnt > 0, cnt, np.nan), color=INK, lw=0.7,
                 drawstyle="steps-mid")
     ax.axvline(0.0, color="0.55", lw=0.7)
     if trusted:
@@ -69,7 +71,7 @@ for j, ch in enumerate(chans):
     ax.set_title(f"ch{ch} (fid {s['freq_id']})", fontsize=7.5, color=tcol,
                  pad=2)
     ax.tick_params(labelsize=5.5)
-    ax.set_ylim(bottom=1e-5)
+    ax.set_ylim(bottom=0.5 * floor1)   # half a single-frame density
     ax.grid(color="0.94", lw=0.35)
     ax.set_axisbelow(True)
 for j in range(len(chans), 24):

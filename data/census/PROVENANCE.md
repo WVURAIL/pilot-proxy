@@ -23,7 +23,9 @@ Derivation (`census_from_xlsx.py`, deterministic; regenerate with
   9 analog (no ATSC pilot), 4 ATSC 3.0 (OFDM; no 8-VSB pilot tone).
 - "Physical Ch(s)" parsing: every integer token in 14..36 becomes one row;
   multi-channel entries expand. One on-air row (CH5643-DT) carried no UHF
-  token and is excluded. <FILL: confirm VHF-only or note reason.>
+  token and is excluded: confirmed VHF-only. VHF allocations (channels
+  2-13, 54-216 MHz) lie entirely below CHIME's 400-800 MHz band, so no
+  VHF pilot can appear in-band; the census scope is UHF by construction.
 - Channel-sharing partners (same rf_channel at the same site) emit one
   physical carrier and are merged into single emitter rows (4 merges;
   494 -> 490 emitter-channel rows: 93 primary, 397 non-primary).
