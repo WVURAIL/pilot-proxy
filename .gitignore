@@ -55,3 +55,6 @@ data/*
 !data/census/
 !data/census/**
 results/
+
+!data/provenance/
+!data/provenance/**
