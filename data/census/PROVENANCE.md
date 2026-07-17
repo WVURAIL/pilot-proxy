@@ -1,9 +1,20 @@
 # Transmitter census provenance
 
 Source: FCC LMS and ISED station data, compiled as
-`TV_Stations_UHF_within500mi_DRAO.xlsx`. Retrieved <FILL: date>.
+`TV_Stations_UHF_within500mi_DRAO.xlsx`. Retrieved 2026-06-09.
 Query criterion: UHF ATSC television stations within 500 statute miles of
-DRAO (49.3208 N, 119.6239 W). <FILL: any additional query parameters.>
+DRAO (49.3208 N, 119.6239 W). Collection method: listing collection only
+(all stations in radius; over-the-air filter; transmitter-class
+identification for offset-tolerance context). No propagation model was
+applied by this census.
+
+Field strengths (detectability_db, 43 rows): RabbitEars Signal Search
+Map study, 2026-06-09 12:15 ET, shareable id 2738863, 120-statute-mile
+search radius, receive height set to its maximum (99,999,999 ft AGL),
+which effectively removes terrain blocking; values are therefore
+optimistic/upper-bound estimates. Rows beyond 120 miles carry no field
+strength and rank by distance. The RabbitEars result-list printout is
+archived alongside this file.
 
 Derivation (`census_from_xlsx.py`, deterministic; regenerate with
 `python census_from_xlsx.py TV_Stations_UHF_within500mi_DRAO.xlsx census.csv`):
@@ -16,8 +27,9 @@ Derivation (`census_from_xlsx.py`, deterministic; regenerate with
 - Channel-sharing partners (same rf_channel at the same site) emit one
   physical carrier and are merged into single emitter rows (4 merges;
   494 -> 490 emitter-channel rows: 93 primary, 397 non-primary).
-- detectability_db = modeled Field Strength (dBuV/m) where available
-  (43 rows); association ranking falls back to distance otherwise.
+- detectability_db = RabbitEars Signal Search field strength (dBuV/m)
+  where available (43 rows, within the 120-mile study radius);
+  association ranking falls back to distance otherwise.
 - Distances converted miles -> km; bearings, CHIME channel indices, and
   the source sheet's Frequency Tolerance carried through. Note the
   regulatory asymmetry preserved from the source: every on-air
