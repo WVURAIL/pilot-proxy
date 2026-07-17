@@ -17,6 +17,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 DRAO_LON_H = -119.6175 / 15.0
 C_LOW, C_CORE, C_HIGH = "#D55E00", "0.55", "#009E73"
@@ -30,7 +31,7 @@ SHOW = [32, 31, 35, 21]
 
 def analyze(ch):
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
@@ -72,19 +73,42 @@ def analyze(ch):
     p_low = len(units_low) / len(all_units)
     p_low_given_high = (len(units_low & units_high) / len(units_high)
                         if units_high else float("nan"))
-    # diurnal profiles of tail rates
-    tf = t0[fui]
-    hours = ((tf / 3600.0 + DRAO_LON_H) % 24.0).astype(int)
+    # diurnal profiles of tail rates, with hourly denominators and
+    # per-event (unit) block-bootstrap 68% intervals: frames within a
+    # capture unit are not independent, so resample whole units.
+    n_u = np.bincount(fui[ok], minlength=t0.size)
+    lo_u = np.bincount(fui[low], minlength=t0.size)
+    hi_u = np.bincount(fui[high], minlength=t0.size)
+    ok_u = np.isfinite(t0) & (t0 > 1e9) & (n_u > 0)
+    hours_u = np.full(t0.size, -1)
+    hours_u[ok_u] = ((t0[ok_u] / 3600.0 + DRAO_LON_H) % 24.0).astype(int)
+    rng = np.random.default_rng(23)
     prof_low = np.full(24, np.nan)
     prof_high = np.full(24, np.nan)
+    band_low = np.full((24, 2), np.nan)
+    band_high = np.full((24, 2), np.nan)
+    denom = np.zeros(24)
     for h in range(24):
-        selh = ok & (hours == h)
-        if selh.sum() > 100:
-            prof_low[h] = (low & selh).sum() / selh.sum()
-            prof_high[h] = (high & selh).sum() / selh.sum()
+        us = np.nonzero(hours_u == h)[0]
+        nh = n_u[us].sum()
+        denom[h] = nh
+        if nh <= 100:
+            continue
+        prof_low[h] = lo_u[us].sum() / nh
+        prof_high[h] = hi_u[us].sum() / nh
+        U = us.size
+        bl, bh = np.empty(300), np.empty(300)
+        for b in range(300):
+            pick = us[rng.integers(0, U, U)]
+            nb = max(n_u[pick].sum(), 1)
+            bl[b] = lo_u[pick].sum() / nb
+            bh[b] = hi_u[pick].sum() / nb
+        band_low[h] = np.percentile(bl, [16, 84])
+        band_high[h] = np.percentile(bh, [16, 84])
     return dict(res=res, nt=nt, nr=nr, low=low, core=core, high=high,
                 p_low=p_low, p_low_given_high=p_low_given_high,
-                prof_low=prof_low, prof_high=prof_high)
+                prof_low=prof_low, prof_high=prof_high,
+                band_low=band_low, band_high=band_high, denom=denom)
 
 
 print(f"{'ch':>3} {'class':>5} {'n':>6} {'target/base':>12} {'refs/base':>10}")
@@ -100,47 +124,78 @@ for ch in SHOW:
           f"(enhancement x{a['p_low_given_high']/max(a['p_low'],1e-9):.1f})")
 
 # ---- figure ------------------------------------------------------------------
-fig, axes = plt.subplots(1, 2, figsize=(11.2, 4.5))
-ax = axes[0]
+from matplotlib.colors import LogNorm
+from matplotlib.patches import Patch
+from matplotlib.lines import Line2D
+
+fig = plt.figure(figsize=(11.2, 5.0))
+gs = fig.add_gridspec(2, 2, width_ratios=[1.0, 1.08],
+                      height_ratios=[2.6, 1.0], hspace=0.12, wspace=0.24)
+ax = fig.add_subplot(gs[:, 0])
 a = results[32]
-sub = {}
+sel = a["core"]
+x_c = 10 * np.log10(a["nt"][sel])
+y_c = 10 * np.log10(a["nr"][sel])
+H, ex, ey = np.histogram2d(x_c, y_c, bins=140,
+                           range=[[-6, 14], [-6, 14]])
+ax.pcolormesh(ex, ey, H.T, norm=LogNorm(vmin=0.8), cmap="Greys",
+              rasterized=True, zorder=0)
+cx = 0.5 * (ex[:-1] + ex[1:])
+cy = 0.5 * (ey[:-1] + ey[1:])
+ax.contour(cx, cy, H.T, levels=[10, 100, 1000], colors="0.25",
+           linewidths=0.6, zorder=4)
 rng = np.random.default_rng(7)
-for cls, c, m in (("core", C_CORE, "."), ("high", C_HIGH, "^"),
-                  ("low", C_LOW, "v")):
+for cls, c, m in (("high", C_HIGH, "^"), ("low", C_LOW, "v")):
     sel = a[cls]
     idx = np.flatnonzero(sel)
     if idx.size > 4000:
         idx = rng.choice(idx, 4000, replace=False)
     ax.plot(10 * np.log10(a["nt"][idx]), 10 * np.log10(a["nr"][idx]),
-            m, ms=2.5 if cls == "core" else 3.5, color=c, alpha=0.35,
-            mew=0, label=f"{cls} tail" if cls != "core" else "core")
+            m, ms=3.5, color=c, alpha=0.35, mew=0, rasterized=True)
 ax.axhline(0, color="0.6", lw=0.7)
 ax.axvline(0, color="0.6", lw=0.7)
 ax.set_xlabel("target power vs unit baseline [dB]")
 ax.set_ylabel("reference power vs unit baseline [dB]")
 ax.set_title("(a) ch32: what moved, target or references?", fontsize=10)
-ax.legend(fontsize=8, loc="upper left")
+ax.legend(handles=[
+    Patch(fc="0.55", label="core (log density + contours)"),
+    Line2D([], [], marker="^", ls="", color=C_HIGH, label="high tail"),
+    Line2D([], [], marker="v", ls="", color=C_LOW, label="low tail")],
+    fontsize=8, loc="upper left")
 ax.grid(color="0.93", lw=0.5)
 ax.set_axisbelow(True)
 ax.set_xlim(-6, 14)
 ax.set_ylim(-6, 14)
 
-ax = axes[1]
+axb = fig.add_subplot(gs[0, 1])
+axd = fig.add_subplot(gs[1, 1], sharex=axb)
 for ch, c in ((32, "#D55E00"), (31, "#7B4FA6"), (35, "#00795A")):
     a = results[ch]
-    ax.plot(range(24), 100 * a["prof_low"], "-", color=c, lw=1.5,
-            label=f"ch{ch} low tail")
-    ax.plot(range(24), 100 * a["prof_high"], "--", color=c, lw=1.1,
-            label=f"ch{ch} high tail")
-ax.set_xlabel("local solar hour at DRAO")
-ax.set_ylabel("tail rate [% of frames]")
-ax.set_title("(b) both tails share diurnal structure "
-             "(solid: low; dashed: high)", fontsize=10)
-ax.set_xticks(range(0, 24, 3))
-ax.legend(fontsize=7, ncol=3)
-ax.grid(color="0.93", lw=0.5)
-ax.set_axisbelow(True)
+    axb.plot(range(24), 100 * a["prof_low"], "-", color=c, lw=1.5,
+             label=f"ch{ch} low tail")
+    axb.fill_between(range(24), 100 * a["band_low"][:, 0],
+                     100 * a["band_low"][:, 1], color=c, alpha=0.13, lw=0)
+    axb.plot(range(24), 100 * a["prof_high"], "--", color=c, lw=1.1,
+             label=f"ch{ch} high tail")
+    axb.fill_between(range(24), 100 * a["band_high"][:, 0],
+                     100 * a["band_high"][:, 1], color=c, alpha=0.13, lw=0)
+    axd.plot(range(24), a["denom"] / 1e3, "-", color=c, lw=1.0)
+axb.set_ylabel(f"tail rate [{PCT} of frames]")
+axb.set_title("(b) both tails share diurnal structure\n"
+              f"(solid: low; dashed: high; 68{PCT} per-event intervals)",
+              fontsize=10)
+axb.tick_params(labelbottom=False)
+ylo, yhi = axb.get_ylim()
+axb.set_ylim(ylo - 0.30 * (yhi - ylo), yhi)
+axb.legend(fontsize=6.5, ncol=3, loc="lower center")
+axb.grid(color="0.93", lw=0.5)
+axb.set_axisbelow(True)
+axd.set_xlabel("local solar hour at DRAO")
+axd.set_ylabel(r"frames [$10^3$]")
+axd.set_xticks(range(0, 24, 3))
+axd.grid(color="0.93", lw=0.5)
+axd.set_axisbelow(True)
 fig.tight_layout()
 fig.savefig(OUT / "fig_tail_decomposition.png", dpi=300, bbox_inches="tight")
-fig.savefig(OUT / "fig_tail_decomposition.pdf", bbox_inches="tight")
+fig.savefig(OUT / "fig_tail_decomposition.pdf", dpi=300, bbox_inches="tight")
 print("wrote fig_tail_decomposition")

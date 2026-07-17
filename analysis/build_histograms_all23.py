@@ -16,6 +16,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 INK, C_SUP, C_HAT, C_TAIL = "0.3", "#D55E00", "#0072B2", "0.75"
 SUPPRESSED = {14, 21, 25, 28, 36}
@@ -36,7 +37,7 @@ for j, ch in enumerate(chans):
         f = 2.0 * pt / pr
     fv = f[valid & np.isfinite(f)]
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     gap = 1e3 * (mu_hat - mu0) / mu0
     trusted = s["zero_point_trusted"] == "1"
@@ -62,7 +63,7 @@ for j, ch in enumerate(chans):
             f"$\\Delta$={gap:+.1f}" + ("" if trusted else " (untrusted)"),
             transform=ax.transAxes, fontsize=6.5,
             color=C_SUP if ch in SUPPRESSED else "black")
-    ax.text(0.03, 0.80, f"low {100*low:.1f}% / high {100*high:.1f}%",
+    ax.text(0.03, 0.80, f"low {100*low:.1f}{PCT} / high {100*high:.1f}{PCT}",
             transform=ax.transAxes, fontsize=6)
     tcol = C_SUP if ch in SUPPRESSED else "black"
     ax.set_title(f"ch{ch} (fid {s['freq_id']})", fontsize=7.5, color=tcol,

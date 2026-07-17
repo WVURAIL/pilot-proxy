@@ -18,6 +18,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 
 z = np.load(_paths.PERFRAME)
@@ -37,11 +38,12 @@ month_cnt = np.zeros((len(chans), 12))       # frames per month (all chans)
 month_hit = np.zeros((len(chans), 12))       # hi frames per month
 depth = {}
 qtr = {}                                     # ch -> {(yr,q): [hi, n]}
+qtr_units = {}                               # ch -> {(yr,q): [(hi_u, n_u)]}
 ym = {}                                      # ch -> {(yr,m): [hi, n]}
 years_seen = {}                              # yr -> [hi, n] episodic only
 for i, ch in enumerate(chans):
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
@@ -86,6 +88,16 @@ for i, ch in enumerate(chans):
                 ymd[(int(y), m)] = [int((hi & sel).sum()), n]
     qtr[ch] = qd
     ym[ch] = ymd
+    # per-unit (event) counts per quarter, for block-bootstrap intervals
+    n_u = np.bincount(fui[ok], minlength=t0.size)
+    h_u = np.bincount(fui[hi], minlength=t0.size)
+    qu = {}
+    for j in np.nonzero(fin_u)[0]:
+        if n_u[j] == 0:
+            continue
+        qu.setdefault((int(yr_u[j]), int(mo_u[j]) // 3), []).append(
+            (int(h_u[j]), int(n_u[j])))
+    qtr_units[ch] = qu
     if episodic[ch]:
         for y in np.unique(years[years > 0]):
             sel = ok & (years == y)
@@ -188,37 +200,95 @@ fig.savefig(OUT / "fig_seasonal_propagation.png", dpi=300,
 fig.savefig(OUT / "fig_seasonal_propagation.pdf", bbox_inches="tight")
 
 # ---------------- figure 2: secular quarterly time series --------------------
-fig2, ax = plt.subplots(figsize=(9.2, 4.4))
+# Lines break across quarters with no (or <=200-frame) sampled exposure;
+# intervals are 68% per-event block bootstraps; the strip shows exposure.
+fig2 = plt.figure(figsize=(9.2, 5.6))
+gs2 = fig2.add_gridspec(2, 1, height_ratios=[3.0, 1.0], hspace=0.12)
+ax = fig2.add_subplot(gs2[0])
+axe = fig2.add_subplot(gs2[1], sharex=ax)
 all_q = sorted({k for ch in epi_chs for k in qtr[ch]})
+y0, q0 = all_q[0]
+y1, q1 = all_q[-1]
+grid = []
+gy, gq = y0, q0
+while (gy, gq) <= (y1, q1):
+    grid.append((gy, gq))
+    gq += 1
+    if gq == 4:
+        gq, gy = 0, gy + 1
 
 
 def qx(k):
     return k[0] + (k[1] + 0.5) / 4.0
 
 
+xs_grid = np.array([qx(k) for k in grid])
+
+
+def boot_ci(pairs, n_boot=300, seed=31):
+    if len(pairs) < 2:
+        return (float("nan"), float("nan"))
+    h = np.array([u[0] for u in pairs], dtype=float)
+    n = np.array([u[1] for u in pairs], dtype=float)
+    rng2 = np.random.default_rng(seed)
+    U = len(pairs)
+    r = np.empty(n_boot)
+    for b in range(n_boot):
+        pick = rng2.integers(0, U, U)
+        r[b] = h[pick].sum() / max(n[pick].sum(), 1.0)
+    lo, hi_ = np.percentile(r, [16, 84])
+    return (float(lo), float(hi_))
+
+
+def series(qd, qu, floor):
+    ys = np.full(len(grid), np.nan)
+    e_lo = np.zeros(len(grid))
+    e_hi = np.zeros(len(grid))
+    for i, k in enumerate(grid):
+        hn = qd.get(k)
+        if hn and hn[1] > floor:
+            rate = hn[0] / hn[1]
+            ys[i] = 100 * rate
+            lo, hi_ = boot_ci(qu.get(k, []))
+            if np.isfinite(lo):
+                e_lo[i] = 100 * max(rate - lo, 0.0)
+                e_hi[i] = 100 * max(hi_ - rate, 0.0)
+    return ys, e_lo, e_hi
+
+
 for ch in chans:
     if ch not in SHOW:
         continue
-    ks = sorted(qtr[ch])
-    xs = [qx(k) for k in ks if qtr[ch][k][1] > 200]
-    ys = [100 * qtr[ch][k][0] / qtr[ch][k][1] for k in ks
-          if qtr[ch][k][1] > 200]
-    ax.plot(xs, ys, "-o", ms=3, lw=1.1, color=SHOW[ch], label=f"ch{ch}",
-            alpha=0.85)
-agg_x, agg_y = [], []
-for k in all_q:
-    h = sum(qtr[ch].get(k, [0, 0])[0] for ch in epi_chs)
-    n = sum(qtr[ch].get(k, [0, 0])[1] for ch in epi_chs)
-    if n > 500:
-        agg_x.append(qx(k))
-        agg_y.append(100 * h / n)
-ax.plot(agg_x, agg_y, "k-", lw=2.4, label="episodic channels", zorder=5)
-ax.set_xlabel("year")
-ax.set_ylabel("high-tail (detection) rate [% of frames]")
-ax.set_title("Quarterly detection rate over the archive span", fontsize=10.5)
+    ys, e_lo, e_hi = series(qtr[ch], qtr_units[ch], 200)
+    ax.errorbar(xs_grid, ys, yerr=[e_lo, e_hi], fmt="-o", ms=3, lw=1.1,
+                color=SHOW[ch], label=f"ch{ch}", alpha=0.85, capsize=1.5,
+                elinewidth=0.8)
+agg_qd, agg_qu = {}, {}
+for ch in epi_chs:
+    for k, v in qtr[ch].items():
+        e = agg_qd.setdefault(k, [0, 0])
+        e[0] += v[0]
+        e[1] += v[1]
+    for k, v in qtr_units[ch].items():
+        agg_qu.setdefault(k, []).extend(v)
+ys, e_lo, e_hi = series(agg_qd, agg_qu, 500)
+ax.errorbar(xs_grid, ys, yerr=[e_lo, e_hi], fmt="-", color="k", lw=2.4,
+            label="episodic channels", zorder=5, capsize=0, elinewidth=1.0)
+ax.set_ylabel(f"high-tail (detection) rate [{PCT} of frames]")
+ax.set_title("Quarterly per-frame detection rates within sampled exposure "
+             f"(68{PCT} per-event intervals)", fontsize=10.5)
+ax.tick_params(labelbottom=False)
 ax.legend(fontsize=8, ncol=3)
 ax.grid(color="0.92", lw=0.6)
 ax.set_axisbelow(True)
+expo = np.array([agg_qd.get(k, [0, 0])[1] for k in grid], dtype=float)
+axe.bar(xs_grid, np.maximum(expo, 0.5), width=0.22, color="0.8", zorder=2)
+axe.set_yscale("log")
+axe.set_ylim(bottom=100)
+axe.set_ylabel("frames")
+axe.set_xlabel("year")
+axe.grid(color="0.92", lw=0.6, axis="y", which="both")
+axe.set_axisbelow(True)
 fig2.tight_layout()
 fig2.savefig(OUT / "fig_secular_rates.png", dpi=300, bbox_inches="tight")
 fig2.savefig(OUT / "fig_secular_rates.pdf", bbox_inches="tight")

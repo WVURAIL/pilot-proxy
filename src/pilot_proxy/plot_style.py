@@ -73,7 +73,11 @@ def setup_matplotlib(*, force_agg: bool = True):
             has_newtx = False
         preamble = r"\usepackage{amsmath}"
         if has_newtx:
+            # newtxmath supplies the AMS symbol set; loading amssymb on top
+            # of it clashes (\Bbbk etc. already defined).
             preamble += r"\usepackage{newtxtext,newtxmath}"
+        else:
+            preamble += r"\usepackage{amssymb}"
         matplotlib.rcParams["text.latex.preamble"] = preamble
 
     import matplotlib.pyplot as plt

@@ -19,6 +19,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 INK, C_SUP = "0.3", "#D55E00"
 KEPT_C, MASK_C, HAT_C = "#0072B2", "#D55E00", "#0072B2"
@@ -60,7 +61,7 @@ for j, ch in enumerate(chans):
         f = 2.0 * pt / pr
     fv = f[valid & np.isfinite(f)]
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     trusted = s["zero_point_trusted"] == "1"
     x = 1e3 * (fv / mu0 - 1.0)          # pilot excess, tau at 0
@@ -89,14 +90,14 @@ for j, ch in enumerate(chans):
         # leak at tau = mu_hat: threshold sits AT the measured core
         leak_hat_f, leak_hat_s = leak_estimate(x, c, c)
         ax.text(0.03, 0.80,
-                f"sub-$\\tau$ signal {100*leak_mu0_f:.1f}% of frames "
-                f"({100*leak_mu0_s:.0f}% of tail)",
+                f"sub-$\\tau$ signal {100*leak_mu0_f:.1f}{PCT} of frames "
+                f"({100*leak_mu0_s:.0f}{PCT} of tail)",
                 transform=ax.transAxes, fontsize=5.8)
     else:
         leak_mu0_f = leak_mu0_s = leak_hat_f = leak_hat_s = float("nan")
         ax.text(0.03, 0.80, "core untrusted", transform=ax.transAxes,
                 fontsize=6, color="0.4")
-    ax.text(0.03, 0.90, f"kept {100*kept_frac:.1f}%",
+    ax.text(0.03, 0.90, f"kept {100*kept_frac:.1f}{PCT}",
             transform=ax.transAxes, fontsize=6.2)
     tcol = C_SUP if ch in SUPPRESSED else "black"
     ax.set_title(f"ch{ch} (fid {s['freq_id']})", fontsize=7.5, color=tcol,

@@ -53,6 +53,32 @@ def core_zero(f, mu0):
     return mu_hat, err, window_frac, low_frac, high_frac
 
 
+def block_err(fv, fui_v, mu_hat, mu0, n_boot=400, seed=11):
+    """Per-event (unit) block-bootstrap error on the core-window mean.
+
+    Frames within a capture unit share conditions, so the naive SEM
+    understates the zero-point uncertainty; resampling whole units is the
+    honest interval."""
+    win = 6e-3 * mu0
+    sel = np.abs(fv - mu_hat) <= win
+    fw, uw = fv[sel], fui_v[sel]
+    if fw.size < 2:
+        return float("nan")
+    order = np.argsort(uw, kind="stable")
+    fw_s, uw_s = fw[order], uw[order]
+    units, starts = np.unique(uw_s, return_index=True)
+    if units.size < 2:
+        return float("nan")
+    sums = np.add.reduceat(fw_s, starts)
+    cnts = np.diff(np.append(starts, fw_s.size))
+    rng = np.random.default_rng(seed)
+    means = np.empty(n_boot)
+    for b in range(n_boot):
+        pick = rng.integers(0, units.size, units.size)
+        means[b] = sums[pick].sum() / max(cnts[pick].sum(), 1)
+    return float(np.std(means, ddof=1))
+
+
 rows = []
 frames_by_class_hour = {}
 for ch in chans:
@@ -65,8 +91,11 @@ for ch in chans:
     mu0, tns, rnss, fid, pilot, center = z[f"ch{ch}_scalars"]
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
-    fv = f[valid & np.isfinite(f)]
+    okf = valid & np.isfinite(f)
+    fv = f[okf]
+    fui_v = fui[okf]
     mu_hat, mu_err, window_frac, low_frac, high_frac = core_zero(fv, mu0)
+    mu_err_blk = block_err(fv, fui_v, mu_hat, mu0)
     mf_now = float(rej[valid].mean())
     # distrust the empirical zero point when the H0 core is not identifiable
     signal_dom = (mf_now > 0.9 or window_frac < 0.15
@@ -87,6 +116,7 @@ for ch in chans:
     rows.append(dict(
         ch=ch, fid=int(fid), n_valid=int(fv.size),
         mu0=float(mu0), mu_hat=mu_hat, mu_err=mu_err,
+        mu_err_blk=mu_err_blk,
         gap_1e3=1e3 * (mu_hat - mu0) / mu0,
         window_frac=window_frac, low_frac=low_frac, high_frac=high_frac,
         signal_dominated=signal_dom,
@@ -107,12 +137,12 @@ total = len(rows) * COARSE_MHZ
 
 with open(OUT / "empirical_zero_points.csv", "w", newline="") as fh:
     w = csv.writer(fh)
-    w.writerow(["atsc_channel", "freq_id", "n_valid", "mu0_manifest",
+    w.writerow(["atsc_channel", "freq_id", "n_valid", "mu0_analytic",
                 "mu0_empirical", "mu0_empirical_err", "gap_1e3",
                 "core_window_frac", "low_tail_frac", "high_tail_frac",
                 "zero_point_trusted",
-                "mask_frac_manifest_tau", "mask_frac_empirical_tau",
-                "kept_frac_2sided_veto"])
+                "mask_frac_analytic_tau", "mask_frac_empirical_tau",
+                "kept_frac_2sided_veto", "mu0_empirical_err_block"])
     for r in rows:
         w.writerow([r["ch"], r["fid"], r["n_valid"], f"{r['mu0']:.6f}",
                     f"{r['mu_hat']:.6f}", f"{r['mu_err']:.6f}",
@@ -121,7 +151,8 @@ with open(OUT / "empirical_zero_points.csv", "w", newline="") as fh:
                     int(not r["signal_dominated"]),
                     f"{r['mask_frac_manifest']:.4f}",
                     f"{r['mask_frac_empirical']:.4f}",
-                    f"{r['kept_2sided']:.4f}"])
+                    f"{r['kept_2sided']:.4f}",
+                    f"{r['mu_err_blk']:.6f}"])
 
 print(f"{'ch':>3} {'n':>6} {'mu0':>8} {'mu_hat':>8} {'gap(1e-3)':>9} "
       f"{'mf@mu0':>7} {'mf@hat':>7} {'low%':>6} {'high%':>6} {'trust':>5}")
@@ -144,21 +175,27 @@ for r in rows:
     c = (C_SUP if r["ch"] in SUPPRESSED else
          C_ELE if r["signal_dominated"] or r["gap_1e3"] > 3 else C_NOM)
     g = r["gap_1e3"]
-    if abs(g) > YLIM:
-        ax1.annotate(f"ch{r['ch']}: ${g:+.0f}$" if abs(g) < 1e3 else
-                     f"ch{r['ch']}: untrusted",
+    if r["signal_dominated"]:
+        # no identifiable H0 core: the empirical gap is not a calibration
+        ax1.annotate(f"ch{r['ch']}: no null core",
                      xy=(r["ch"], YLIM * 0.95), xytext=(r["ch"], YLIM * 0.62),
                      ha="center", fontsize=7, color=c,
                      arrowprops=dict(arrowstyle="->", color=c, lw=1))
         continue
-    ax1.errorbar(r["ch"], g, yerr=1e3 * r["mu_err"] / r["mu0"],
-                 fmt="o", ms=4.5, color=c, capsize=2, lw=1,
-                 alpha=0.4 if r["signal_dominated"] else 1.0)
+    if abs(g) > YLIM:
+        ax1.annotate(f"ch{r['ch']}: ${g:+.0f}$",
+                     xy=(r["ch"], YLIM * 0.95), xytext=(r["ch"], YLIM * 0.62),
+                     ha="center", fontsize=7, color=c,
+                     arrowprops=dict(arrowstyle="->", color=c, lw=1))
+        continue
+    yerr = r["mu_err_blk"] if np.isfinite(r["mu_err_blk"]) else r["mu_err"]
+    ax1.errorbar(r["ch"], g, yerr=1e3 * yerr / r["mu0"],
+                 fmt="o", ms=4.5, color=c, capsize=2, lw=1)
 ax1.axhline(0, color="0.4", lw=0.8)
 ax1.set_ylim(-YLIM, YLIM)
 ax1.set_ylabel(r"$(\hat{\mu}_0-\mu_0)/\mu_0\ [10^{-3}]$")
-ax1.set_title("Measured vs manifest zero point (mode-anchored H0 core, "
-              "full depth)", fontsize=10)
+ax1.set_title("Measured vs analytic zero point (mode-anchored H0 core, "
+              "full depth; per-event block-bootstrap errors)", fontsize=10)
 ax1.grid(axis="y", color="0.92", lw=0.6)
 ax1.set_axisbelow(True)
 w = 0.36
@@ -169,7 +206,7 @@ for r in rows:
             alpha=0.45)
     ax2.bar(r["ch"] + w / 2, r["mask_frac_empirical"], width=w, color=c)
 ax2.axhline(0.5, color="0.25", ls="--", lw=0.9)
-ax2.set_ylabel(r"mask fraction (left: $\tau=\mu_0$; right: $\tau=\hat{\mu}_0$)")
+ax2.set_ylabel(r"mask fraction (light: $\tau=\mu_0$; dark: $\tau=\hat{\mu}_0$)")
 ax2.set_xlabel("ATSC physical channel")
 ax2.set_xticks([r["ch"] for r in rows])
 ax2.tick_params(axis="x", labelsize=8)
@@ -178,10 +215,11 @@ ax2.set_axisbelow(True)
 from matplotlib.lines import Line2D
 ax1.legend(handles=[
     Line2D([], [], marker="o", ls="", color=C_SUP, label="suppressed family"),
-    Line2D([], [], marker="o", ls="", color=C_ELE,
-           label="signal-elevated / dominated"),
+    Line2D([], [], marker="o", ls="", color=C_ELE, label="signal-elevated"),
+    Line2D([], [], marker="o", ls="", mfc="none", color=C_ELE,
+           label="no null-core calibration (arrows)"),
     Line2D([], [], marker="o", ls="", color=C_NOM, label="nominal")],
-    fontsize=7.5, loc="lower left")
+    fontsize=7.5, loc="upper left")
 fig.savefig(OUT / "fig_empirical_zero_points.png", dpi=300,
             bbox_inches="tight")
 fig.savefig(OUT / "fig_empirical_zero_points.pdf", bbox_inches="tight")

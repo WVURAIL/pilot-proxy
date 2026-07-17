@@ -34,7 +34,7 @@ rows = []
 worst_bits = 0
 for ch in chans:
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     trusted = s["zero_point_trusted"] == "1"
     scal = PF[f"ch{ch}_scalars"]          # [mu0, tns, rnss, fid, ...]

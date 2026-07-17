@@ -11,6 +11,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 C_H0, C_SIG, C_REF = "0.35", "#009E73", "#D55E00"
 C_TAU, C_BAND = "#0072B2", "#7B4FA6"
@@ -38,7 +39,7 @@ ax1.text(-1.88, 2.2e-4, r'"aggressive" $\tau$ $-2\sigma$', color=C_TAU,
 ax1.axvline(-3.5, color=C_BAND, lw=1.2, ls="-.")
 ax1.text(-3.38, 2.2e-4, "band floor", color=C_BAND, fontsize=8.5,
          rotation=90, va="bottom")
-ax1.annotate("kept at $-2\\sigma$:\nclean 2.3%\nref-leak $\\approx$ all of it",
+ax1.annotate(f"kept at $-2\\sigma$:\nclean 2.3{PCT}\nref-leak $\\approx$ all of it",
              xy=(-4.6, 3e-3), fontsize=8, color=C_REF, ha="center")
 ax1.set_xlabel(r"$(F-\hat{\mu}_0)/\sigma_{\rm core}$")
 ax1.set_ylabel("probability density (log)")
@@ -70,7 +71,8 @@ ax2.set_axisbelow(True)
 ax2t = ax2.twiny()  # no second scale -- annotate bandwidth cost as ticks
 ax2t.set_xlim(0, 3)
 ax2t.set_xticks([0, 1, 1.65, 2.33, 3])
-ax2t.set_xticklabels(["keep 50%", "16%", "5%", "1%", "0.1%"], fontsize=7)
+ax2t.set_xticklabels([f"keep 50{PCT}", f"16{PCT}", f"5{PCT}", f"1{PCT}",
+                      f"0.1{PCT}"], fontsize=7)
 ax2t.set_xlabel("bandwidth kept (pure H0)", fontsize=8)
 fig.suptitle("Schematic: one-sided depth vs kept-data composition "
              "(populations illustrative, scaled from ch31/32-like tails)",

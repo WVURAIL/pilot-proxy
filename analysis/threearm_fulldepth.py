@@ -26,6 +26,7 @@ import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 
 plt = setup_matplotlib()
+PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 COARSE_MHZ = 0.390625
 PW = np.load(_paths.POWER)
@@ -34,11 +35,37 @@ study = {int(r["atsc_channel"]): r for r in
          csv.DictReader(open(OUT / "empirical_zero_points.csv"))}
 chans = sorted(study)
 
+
+def boot_p999(vals, units, n_boot=300, q=0.999, seed=5):
+    """68% per-event block-bootstrap interval on the p99.9 of vals.
+
+    Frames cluster within capture units; resample whole units via
+    multiplicity weights on the sorted values (weighted percentile)."""
+    if vals.size < 100:
+        return (float("nan"), float("nan"))
+    order = np.argsort(vals)
+    v = vals[order]
+    uu, uinv = np.unique(units[order], return_inverse=True)
+    U = uu.size
+    if U < 2:
+        return (float("nan"), float("nan"))
+    rng = np.random.default_rng(seed)
+    out = np.empty(n_boot)
+    for b in range(n_boot):
+        m = np.bincount(rng.integers(0, U, U), minlength=U)
+        cw = np.cumsum(m[uinv])
+        if cw[-1] == 0:
+            out[b] = np.nan
+            continue
+        out[b] = v[min(np.searchsorted(cw, q * cw[-1]), v.size - 1)]
+    lo, hi = np.nanpercentile(out, [16, 84])
+    return (float(lo), float(hi))
+
 rows = []
 ccdf_data = {}
 for ch in chans:
     s = study[ch]
-    mu0 = float(s["mu0_manifest"])
+    mu0 = float(s["mu0_analytic"])
     mu_hat = float(s["mu0_empirical"])
     trusted = s["zero_point_trusted"] == "1"
     pt = PF[f"ch{ch}_p_target_u64"].astype(np.float64)
@@ -91,12 +118,16 @@ for ch in chans:
               if keep_b.sum() > 100 else (np.nan, np.nan))
     q_kept = (np.percentile(pn_db[keep_f], [50, 99.9])
               if keep_f.sum() > 100 else (np.nan, np.nan))
+    b_lo, b_hi = boot_p999(pn_db[keep_b], fui[keep_b])
+    k_lo, k_hi = boot_p999(pn_db[keep_f], fui[keep_f])
     rows.append(dict(
         ch=ch, fid=int(float(s["freq_id"])), n=nv, trusted=int(trusted),
         kc_an=kc_an, kc=kc, kb=kb, kf=kf, inc=inc, sig_pct=100 * sig,
         thr_db=10 * np.log10(thr), n_fallback_units=n_fallback,
         band_p50_db=q_band[0], band_p999_db=q_band[1],
-        kept_p50_db=q_kept[0], kept_p999_db=q_kept[1]))
+        kept_p50_db=q_kept[0], kept_p999_db=q_kept[1],
+        band_p999_lo=b_lo, band_p999_hi=b_hi,
+        kept_p999_lo=k_lo, kept_p999_hi=k_hi))
     ccdf_data[ch] = dict(pn_db=pn_db[keep_b], thr_db=10 * np.log10(thr))
 
 L1 = sum(r["kc_an"] for r in rows) * COARSE_MHZ
@@ -112,7 +143,8 @@ with open(OUT / "threearm_fulldepth.csv", "w", newline="") as fh:
                 "kept_band", "kept_final", "veto_incremental_frac",
                 "veto_sigma_pct", "veto_thr_db", "units_fallback_baseline",
                 "band_p50_db", "band_p999_db", "kept_p50_db",
-                "kept_p999_db"])
+                "kept_p999_db", "band_p999_lo68", "band_p999_hi68",
+                "kept_p999_lo68", "kept_p999_hi68"])
     for r in rows:
         w.writerow([r["ch"], r["fid"], r["n"], r["trusted"],
                     f"{r['kc_an']:.4f}", f"{r['kc']:.4f}", f"{r['kb']:.4f}",
@@ -120,7 +152,9 @@ with open(OUT / "threearm_fulldepth.csv", "w", newline="") as fh:
                     f"{r['sig_pct']:.2f}", f"{r['thr_db']:.3f}",
                     r["n_fallback_units"],
                     f"{r['band_p50_db']:.3f}", f"{r['band_p999_db']:.3f}",
-                    f"{r['kept_p50_db']:.3f}", f"{r['kept_p999_db']:.3f}"])
+                    f"{r['kept_p50_db']:.3f}", f"{r['kept_p999_db']:.3f}",
+                    f"{r['band_p999_lo']:.3f}", f"{r['band_p999_hi']:.3f}",
+                    f"{r['kept_p999_lo']:.3f}", f"{r['kept_p999_hi']:.3f}"])
 
 hdr = (f"{'ch':>3} {'tr':>2} {'keep_an':>8} {'keep_hat':>8} {'band':>6} "
        f"{'final':>6} {'veto%':>6} {'sig%':>5} {'thr_dB':>7} "
@@ -138,10 +172,14 @@ print(f"  + band floor                : {L3:.3f}")
 print(f"  + common-mode power veto    : {L4:.3f}")
 
 # ---------------- figure -------------------------------------------------------
+# Panel (a) channels span the observed classes: quiet cores (15, 20, 26),
+# heavy episodic tails (31, 32), and one calibration-refused channel (24).
 SHOWA = {15: "#0072B2", 31: "#7B4FA6", 32: "#D55E00", 24: "#A85C85",
          26: "#009E73", 20: "#E69F00"}
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.4, 4.5),
-                               gridspec_kw={"width_ratios": [1, 1.35]})
+fig = plt.figure(figsize=(11.4, 4.9))
+gs = fig.add_gridspec(2, 2, width_ratios=[1.0, 1.35],
+                      height_ratios=[2.6, 1.0], hspace=0.12, wspace=0.20)
+ax1 = fig.add_subplot(gs[:, 0])
 for ch, c in SHOWA.items():
     d = ccdf_data[ch]["pn_db"]
     if d.size < 100:
@@ -163,30 +201,40 @@ ax1.legend(fontsize=7.5, ncol=2)
 ax1.grid(color="0.92", lw=0.6, which="both")
 ax1.set_axisbelow(True)
 
+ax2 = fig.add_subplot(gs[0, 1])
+ax3 = fig.add_subplot(gs[1, 1], sharex=ax2)
 x = np.arange(len(rows))
 b999 = np.array([r["band_p999_db"] for r in rows])
 k999 = np.array([r["kept_p999_db"] for r in rows])
+b_err = np.array([[r["band_p999_db"] - r["band_p999_lo"] for r in rows],
+                  [r["band_p999_hi"] - r["band_p999_db"] for r in rows]])
+k_err = np.array([[r["kept_p999_db"] - r["kept_p999_lo"] for r in rows],
+                  [r["kept_p999_hi"] - r["kept_p999_db"] for r in rows]])
+b_err = np.nan_to_num(np.clip(b_err, 0, None))
+k_err = np.nan_to_num(np.clip(k_err, 0, None))
 inc = np.array([100 * r["inc"] for r in rows])
 for xi, b, k in zip(x, b999, k999):
     ax2.plot([xi, xi], [k, b], "-", color="0.75", lw=1.4, zorder=1)
-ax2.plot(x, b999, "o", ms=5, color="#D55E00", label="before veto (band only)")
-ax2.plot(x, k999, "o", ms=5, color="#0072B2", label="after veto (kept)")
-ax2.set_xticks(x)
-ax2.set_xticklabels([str(r["ch"]) for r in rows], fontsize=7)
-ax2.set_xlabel("ATSC channel")
-ax2.set_ylabel("p99.9 of kept-frame power vs baseline [dB]")
-ax2.set_title("(b) veto clips the residual power tail of the kept data",
-              fontsize=10)
-axb = ax2.twinx()
-axb.bar(x, inc, width=0.55, color="0.85", zorder=0)
-axb.set_ylabel("frames vetoed within the band [%]", color="0.45")
-axb.tick_params(axis="y", colors="0.45")
-axb.set_ylim(0, max(8.0, 1.15 * inc.max()))
-ax2.set_zorder(axb.get_zorder() + 1)
-ax2.patch.set_visible(False)
+ax2.errorbar(x, b999, yerr=b_err, fmt="o", ms=5, color="#D55E00",
+             capsize=1.5, elinewidth=0.8, lw=0,
+             label="before veto (band only)")
+ax2.errorbar(x, k999, yerr=k_err, fmt="o", ms=5, color="#0072B2",
+             capsize=1.5, elinewidth=0.8, lw=0, label="after veto (kept)")
+ax2.set_ylabel("p99.9 kept-frame power\nvs baseline [dB]")
+ax2.set_title("(b) veto clips the residual power tail of the kept data\n"
+              f"(68{PCT} per-event block-bootstrap intervals)", fontsize=10)
+ax2.tick_params(labelbottom=False)
 ax2.legend(fontsize=8, loc="upper right")
 ax2.grid(color="0.92", lw=0.6)
 ax2.set_axisbelow(True)
+ax3.bar(x, inc, width=0.55, color="0.8")
+ax3.set_xticks(x)
+ax3.set_xticklabels([str(r["ch"]) for r in rows], fontsize=7)
+ax3.set_xlabel("ATSC channel")
+ax3.set_ylabel(f"vetoed [{PCT}]")
+ax3.set_ylim(0, max(8.0, 1.15 * np.nanmax(inc)))
+ax3.grid(color="0.92", lw=0.6, axis="y")
+ax3.set_axisbelow(True)
 fig.tight_layout()
 fig.savefig(OUT / "fig_threearm_veto.png", dpi=300, bbox_inches="tight")
 fig.savefig(OUT / "fig_threearm_veto.pdf", bbox_inches="tight")
