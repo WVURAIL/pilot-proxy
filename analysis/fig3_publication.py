@@ -148,7 +148,7 @@ for lev in (0.5, 0.9):
 v = v_thr.get(0.0)
 if v and np.isfinite(v["p90"]):
     ax.annotate(
-        f"$P_d$=0.5 at {v['p50']:.2f} dB\n$P_d$=0.9 at {v['p90']:.2f} dB",
+        f"$P_d$=0.5 at $\\approx${v['p50']:.1f} dB\n$P_d$=0.9 at $\\approx${v['p90']:.1f} dB",
         xy=(v["p90"], 0.9), xytext=(-38, 0.72), fontsize=8.5,
         arrowprops=dict(arrowstyle="->", lw=0.8, color="0.4"))
 ax.set_xlabel("requested shelf SNR [dB]")
