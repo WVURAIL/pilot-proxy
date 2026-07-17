@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Full 23-channel spectra grids from all_spectra.npz (full-depth per-pilot
 accumulations), with the detector cells (target, skipped guards, references)
-shaded from the shipped weight-bank manifest."""
+shaded from the shipped weight-bank manifest. Before-mask and after-mask
+spectra are written as separate figures (suffix _before / _after) with
+shared per-channel y-limits so the pair can be compared at the same
+scale."""
 import csv
 import sys
 from pathlib import Path
@@ -64,7 +67,7 @@ k = np.arange(NFFT)
 f_bb = np.where(k < NFFT // 2, k, k - NFFT).astype(np.float64) * (SR / NFFT)
 
 
-def panel(ax, ch, span_khz, zoom):
+def panel(ax, ch, span_khz, zoom, which):
     pilot, center, fid, n_valid, n_masked = z[f"ch{ch}_meta"]
     mf = n_masked / n_valid if n_valid else float("nan")
     before = z[f"ch{ch}_before"] / max(n_valid, 1.0)
@@ -72,12 +75,21 @@ def panel(ax, ch, span_khz, zoom):
     off = (center + SENSE * f_bb - pilot) / 1e3
     s = np.argsort(off)
     o, b, a = off[s], before[s], after[s]
-    ref = np.median(b[b > 0])
+    ref = np.median(b[b > 0])           # shared dB zero for both variants
     sel = np.abs(o) <= span_khz
-    ax.plot(o[sel], 10 * np.log10(np.maximum(b[sel], ref * 1e-4) / ref),
-            color=INK, lw=0.55, label="before mask")
-    ax.plot(o[sel], 10 * np.log10(np.maximum(a[sel], ref * 1e-4) / ref),
-            color=AFTER, lw=0.55, alpha=0.85, label="after mask")
+    yb = 10 * np.log10(np.maximum(b[sel], ref * 1e-4) / ref)
+    ya = 10 * np.log10(np.maximum(a[sel], ref * 1e-4) / ref)
+    if which == "before":
+        ax.plot(o[sel], yb, color=INK, lw=0.55, label="before mask")
+    else:
+        ax.plot(o[sel], ya, color=AFTER, lw=0.55, alpha=0.9,
+                label="after mask")
+    # shared y-limits across the before/after variants so the pair of
+    # figures can be flipped between at the same scale
+    lo_y = float(min(yb.min(), ya.min()))
+    hi_y = float(max(yb.max(), ya.max()))
+    pad = 0.05 * max(hi_y - lo_y, 1.0)
+    ax.set_ylim(lo_y - pad, hi_y + pad)
     # detector cells (one fine bin wide, centred on each term / skipped bin)
     cc = cells[ch]
     h = 0.5 * FB_KHZ
@@ -114,7 +126,7 @@ def panel(ax, ch, span_khz, zoom):
     ax.set_axisbelow(True)
 
 
-for span, zoom, fname, title in (
+for span, zoom, fbase, tbase in (
         (200.0, False, "fig_spectra_all23_fullspan",
          "Integrated spectra, full coarse channel, all 23 channels "
          "(mean per valid frame, dB rel. channel median; detector cells "
@@ -123,33 +135,43 @@ for span, zoom, fname, title in (
          "Integrated spectra, $\\pm$20 kHz about the nominal pilot "
          "(target / skipped-guard / reference cells shaded, one fine bin "
          "wide; census lines as ticks)")):
-    fig, axes = plt.subplots(6, 4, figsize=(11.5, 12.6), sharex=True)
-    for j, ch in enumerate(chans):
-        panel(axes.flat[j], ch, span, zoom)
-    for j in range(len(chans), 24):
-        axes.flat[j].axis("off")
-    for ax in axes[-1, :]:
-        ax.set_xlabel("offset from pilot [kHz]", fontsize=6.5)
-    for ax in axes[:, 0]:
-        ax.set_ylabel("dB", fontsize=6.5)
-    from matplotlib.lines import Line2D
-    from matplotlib.patches import Patch
-    handles = [Line2D([], [], color=INK, label="before mask"),
-               Line2D([], [], color=AFTER, label="after mask"),
-               Line2D([], [], color=PILOT_C, ls="--", label="nominal pilot"),
-               Line2D([], [], color="0.6", ls=":", label="coarse-channel DC"),
-               Patch(facecolor=TGT_FILL, alpha=0.16, label="target cell"),
-               Patch(facecolor=GUARD_FILL, alpha=0.16,
-                     label="skipped guard"),
-               Patch(facecolor=REF_FILL, alpha=0.20,
-                     label="reference cells ($\\pm$2 bins)")]
-    if zoom:
-        handles += [Line2D([], [], color=LINE_C, marker="v", ls="",
-                           label="extracted line")]
-    fig.legend(handles=handles, loc="lower center", ncol=len(handles),
-               fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, 0.005))
-    fig.suptitle(title, fontsize=11, y=0.995)
-    fig.tight_layout(rect=(0, 0.02, 1, 0.99))
-    fig.savefig(OUT / f"{fname}.png", dpi=230, bbox_inches="tight")
-    fig.savefig(OUT / f"{fname}.pdf", bbox_inches="tight")
-    print("wrote", fname)
+    for which in ("before", "after"):
+        fig, axes = plt.subplots(6, 4, figsize=(11.5, 12.6), sharex=True)
+        for j, ch in enumerate(chans):
+            panel(axes.flat[j], ch, span, zoom, which)
+        for j in range(len(chans), 24):
+            axes.flat[j].axis("off")
+        for ax in axes[-1, :]:
+            ax.set_xlabel("offset from pilot [kHz]", fontsize=6.5)
+        for ax in axes[:, 0]:
+            ax.set_ylabel("dB", fontsize=6.5)
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Patch
+        curve = (Line2D([], [], color=INK, label="before mask")
+                 if which == "before" else
+                 Line2D([], [], color=AFTER, label="after mask"))
+        handles = [curve,
+                   Line2D([], [], color=PILOT_C, ls="--",
+                          label="nominal pilot"),
+                   Line2D([], [], color="0.6", ls=":",
+                          label="coarse-channel DC"),
+                   Patch(facecolor=TGT_FILL, alpha=0.16,
+                         label="target cell"),
+                   Patch(facecolor=GUARD_FILL, alpha=0.16,
+                         label="skipped guard"),
+                   Patch(facecolor=REF_FILL, alpha=0.20,
+                         label="reference cells ($\\pm$2 bins)")]
+        if zoom:
+            handles += [Line2D([], [], color=LINE_C, marker="v", ls="",
+                               label="extracted line")]
+        fig.legend(handles=handles, loc="lower center", ncol=len(handles),
+                   fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, 0.005))
+        variant = ("before mask" if which == "before"
+                   else "after mask (masked frames removed)")
+        fig.suptitle(f"{tbase} --- {variant}", fontsize=11, y=0.995)
+        fig.tight_layout(rect=(0, 0.02, 1, 0.99))
+        fname = f"{fbase}_{which}"
+        fig.savefig(OUT / f"{fname}.png", dpi=230, bbox_inches="tight")
+        fig.savefig(OUT / f"{fname}.pdf", bbox_inches="tight")
+        plt.close(fig)
+        print("wrote", fname)

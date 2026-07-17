@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""Positive-excess histograms about the operating threshold, all 23 channels.
+"""Valid-frame F distributions about the operating threshold, all 23
+channels. This is the merged diagnostic (it absorbed the former
+fig_f_histograms_all23, which plotted the identical variable).
 
 x = pilot excess F/mu0 - 1 (the stored product variable, 1e-3 units); the
-mask fires for x > 0. Kept region shaded blue, masked region orange. The
-sub-threshold signal leak -- the part of the elevated tail the mask KEEPS --
-is estimated by mirroring the measured H0 core's lower half and subtracting:
+mask fires for x > 0. Kept region shaded blue, masked region orange; the
+measured core mu_hat, the mu_hat +/- 12e-3 tail bounds, the gap Delta, and
+the low/high tail fractions are annotated per panel. The sub-threshold
+signal leak -- the part of the elevated tail the mask KEEPS -- is estimated
+by mirroring the measured H0 core's lower half and subtracting:
 leak = sum over (core, 0] of max(n(x) - n(2c - x), 0).
 Writes the grid figure and subthreshold_leakage.csv (leak at tau = mu0 and
-at tau = mu_hat).
+at tau = mu_hat; estimator grid fixed at BINW independent of display bins).
 """
 import csv
 import sys
@@ -22,10 +26,11 @@ plt = setup_matplotlib()
 PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 INK, C_SUP = "0.3", "#D55E00"
-KEPT_C, MASK_C, HAT_C = "#0072B2", "#D55E00", "#0072B2"
+KEPT_C, MASK_C, HAT_C, C_TAIL = "#0072B2", "#D55E00", "#0072B2", "0.75"
 SUPPRESSED = {14, 21, 25, 28, 36}
 SPAN = 60.0
-BINW = 0.4                      # 1e-3 units
+BINW = 0.4                      # 1e-3 units (leak-estimator grid)
+DISPW = 0.2                     # display bin width
 
 z = np.load(_paths.PERFRAME)
 study = {int(r["atsc_channel"]): r for r in
@@ -71,7 +76,7 @@ for j, ch in enumerate(chans):
         pad = 0.06 * (hi - lo)
         bins = np.linspace(min(lo - pad, -20), hi + pad, 320)
     else:
-        bins = np.arange(-SPAN, SPAN + BINW, BINW)
+        bins = np.arange(-SPAN, SPAN + DISPW, DISPW)
     cnt, edges = np.histogram(x, bins=bins, density=True)
     mids = 0.5 * (edges[:-1] + edges[1:])
     # no clip floor: empty bins break the trace / fills instead of a shelf
@@ -88,22 +93,29 @@ for j, ch in enumerate(chans):
                     step="mid", color=MASK_C, alpha=0.14)
     ax.axvline(0.0, color="0.15", lw=1.0)
     kept_frac = float((x <= 0).mean())
+    low, high = float(s["low_tail_frac"]), float(s["high_tail_frac"])
     if trusted:
         ax.axvline(c, color=HAT_C, ls="--", lw=0.9)
+        for tb in (c - 12.0, c + 12.0):     # tail bounds about the core
+            if abs(tb) < SPAN:
+                ax.axvline(tb, color=C_TAIL, ls=":", lw=0.7)
         leak_mu0_f, leak_mu0_s = leak_estimate(x, c, 0.0)
-        leak_hat_f, leak_hat_s = leak_estimate(x, c, 0.0) if False else (None, None)
         # leak at tau = mu_hat: threshold sits AT the measured core
         leak_hat_f, leak_hat_s = leak_estimate(x, c, c)
-        ax.text(0.03, 0.80,
+        ax.text(0.03, 0.76,
                 f"sub-$\\tau$ signal {100*leak_mu0_f:.1f}{PCT} of frames "
                 f"({100*leak_mu0_s:.0f}{PCT} of tail)",
                 transform=ax.transAxes, fontsize=5.8)
     else:
         leak_mu0_f = leak_mu0_s = leak_hat_f = leak_hat_s = float("nan")
-        ax.text(0.03, 0.80, "core untrusted", transform=ax.transAxes,
+        ax.text(0.03, 0.76, "core untrusted", transform=ax.transAxes,
                 fontsize=6, color="0.4")
-    ax.text(0.03, 0.90, f"kept {100*kept_frac:.1f}{PCT}",
-            transform=ax.transAxes, fontsize=6.2)
+    ax.text(0.03, 0.92,
+            f"$\\Delta$={c:+.1f}  kept {100*kept_frac:.1f}{PCT}",
+            transform=ax.transAxes, fontsize=6.2,
+            color=C_SUP if ch in SUPPRESSED else "black")
+    ax.text(0.03, 0.84, f"low {100*low:.1f}{PCT} / high {100*high:.1f}{PCT}",
+            transform=ax.transAxes, fontsize=6)
     tcol = C_SUP if ch in SUPPRESSED else "black"
     ax.set_title(f"ch{ch} (fid {s['freq_id']})", fontsize=7.5, color=tcol,
                  pad=2)
@@ -134,13 +146,15 @@ from matplotlib.patches import Patch
 fig.legend(handles=[
     Line2D([], [], color="0.15", lw=1.2, label=r"threshold $\tau=\mu_0$ (excess 0)"),
     Line2D([], [], color=HAT_C, ls="--", label=r"measured core $\hat{\mu}_0$"),
+    Line2D([], [], color=C_TAIL, ls=":",
+           label=r"$\hat{\mu}_0\pm12\times10^{-3}$ tail bounds"),
     Patch(facecolor=KEPT_C, alpha=0.18, label="kept (science data)"),
     Patch(facecolor=MASK_C, alpha=0.14, label="masked"),
-], loc="lower center", ncol=4, fontsize=8, frameon=False,
+], loc="lower center", ncol=5, fontsize=8, frameon=False,
     bbox_to_anchor=(0.5, 0.005))
-fig.suptitle("Positive excess about the operating threshold "
-             "(kept vs masked; sub-threshold signal leak from mirrored-core "
-             "estimate)", fontsize=11, y=0.995)
+fig.suptitle("Valid-frame F distributions about the operating threshold, "
+             "all 23 channels (kept vs masked; sub-threshold signal leak "
+             "from mirrored-core estimate)", fontsize=11, y=0.995)
 fig.tight_layout(rect=(0, 0.02, 1, 0.99))
 fig.savefig(OUT / "fig_excess_threshold_all23.png", dpi=230,
             bbox_inches="tight")
