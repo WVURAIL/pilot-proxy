@@ -290,6 +290,27 @@ def audit_atsc_iq(
     )
     measured_pilot_below_data_db = -float(pilot_to_data_power_db)
 
+    # Direct integration (additive v1 fields, 2026-07): no shelf model.
+    # Total in-allocation power decomposes as pilot line + everything else;
+    # the shelf continues underneath the pilot window, so the direct data
+    # power adds the baseline back (equivalently: band total minus the
+    # baseline-corrected pilot power). This is the estimator-independent
+    # integrated pilot-to-data ratio the shelf extrapolation approximates.
+    band_power_integrated = float(np.sum(psd[band_mask]) * df)
+    data_power_direct = max(0.0, band_power_integrated - measured_pilot_power)
+    measured_pilot_below_data_direct_db = -float(
+        _positive_to_db(measured_pilot_power / data_power_direct)
+        if data_power_direct > 0.0
+        else float("nan")
+    )
+    # Mean-shelf variant of the extrapolated estimator, bounding the
+    # median-vs-mean convention sensitivity alongside the direct integral.
+    measured_pilot_below_data_mean_shelf_db = -float(
+        _positive_to_db(
+            measured_pilot_power / (shelf_psd_mean * float(channel_width_hz))
+        )
+    )
+
     lower_edge = band_mask & (freqs < band_lower_hz + float(edge_exclusion_hz))
     upper_edge = band_mask & (freqs > band_upper_hz - float(edge_exclusion_hz))
     edge_psd = psd[lower_edge | upper_edge]
@@ -326,6 +347,12 @@ def audit_atsc_iq(
         "edge_exclusion_hz": float(edge_exclusion_hz),
         "shelf_psd_median": float(shelf_psd_median),
         "shelf_psd_mean": float(shelf_psd_mean),
+        "band_power_integrated": float(band_power_integrated),
+        "data_power_direct_integration": float(data_power_direct),
+        "measured_pilot_below_data_direct_db": float(
+            measured_pilot_below_data_direct_db),
+        "measured_pilot_below_data_mean_shelf_db": float(
+            measured_pilot_below_data_mean_shelf_db),
     }
     min_bw = (
         float(min_occupied_bandwidth_hz)
@@ -457,6 +484,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"measured_pilot_frequency_hz={audit['measured_pilot_frequency_hz']:.9g}")
     print(f"measured_pilot_to_data_power_db={audit['measured_pilot_to_data_power_db']:.3f}")
     print(f"measured_pilot_below_data_db={audit['measured_pilot_below_data_db']:.3f}")
+    print("measured_pilot_below_data_direct_db="
+          f"{audit['measured_pilot_below_data_direct_db']:.3f}")
     print(f"occupied_bandwidth_hz={audit['occupied_bandwidth_hz']:.9g}")
     print(f"shelf_flatness_db={audit['shelf_flatness_db']:.3f}")
     print(f"edge_rolloff_check_db={audit['edge_rolloff_check_db']:.3f}")

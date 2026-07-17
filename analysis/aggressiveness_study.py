@@ -81,8 +81,11 @@ ax1.plot(KS, rec_bk, color=C_C, lw=1.6,
 ax1.plot(KS, h0_curve, color="0.5", ls="--", lw=1.0,
          label="pure-H0 expectation")
 ax1.axvline(0.0, color="0.55", lw=0.8, ls=":")
-ax1.text(0.03, 0.03, "ceiling above core\n($k<0$)", transform=ax1.transAxes,
-         fontsize=7.5, color="0.35", va="bottom")
+ax1.text(0.03, 0.03, "ceiling above core\n($k<0$; not adopted)",
+         transform=ax1.transAxes, fontsize=7.5, color="0.35", va="bottom")
+ax1.annotate("adopted ceiling ($k{=}0$)", xy=(0.0, 0.62), xycoords=("data", "axes fraction"),
+             xytext=(14, 0), textcoords="offset points", fontsize=7.5,
+             color="0.25", rotation=90, va="center")
 ax1.text(0.45, 0.03, "one-sided cut below core", transform=ax1.transAxes,
          fontsize=7.5, color="0.35", va="bottom")
 ax1.set_xlabel(r"threshold offset below measured core  $k$  "
@@ -95,7 +98,7 @@ ax1.grid(color="0.92", lw=0.5)
 ax1.set_axisbelow(True)
 
 SHOW = [(32, "ch32 (heavy low tail)"), (31, "ch31"), (35, "ch35"),
-        (21, "ch21 (corrected)"), (34, "ch34 (clean)")]
+        (21, "ch21 (corrected)"), (34, "ch34")]
 for (ch, lbl), col in zip(SHOW, ("#D55E00", "#7B4FA6", "#00795A",
                                  "#0072B2", "0.35")):
     if ch not in per:
@@ -105,7 +108,7 @@ for (ch, lbl), col in zip(SHOW, ("#D55E00", "#7B4FA6", "#00795A",
 ax2.axvline(0.0, color="0.55", lw=0.8, ls=":")
 ax2.set_xlabel(r"threshold offset below measured core  $k$  "
                r"[$\sigma_{\rm core}$]  (negative: ceiling above core)")
-ax2.set_ylabel(f"contamination fraction of kept data [{PCT}]")
+ax2.set_ylabel(f"non-null excess among retained frames [{PCT}]")
 ax2.set_title("(b) solid: one-sided keep;  dashed: band-keep", fontsize=10)
 ax2.legend(fontsize=7.5)
 ax2.grid(color="0.92", lw=0.5)
