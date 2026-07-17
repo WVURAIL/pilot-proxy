@@ -8,7 +8,8 @@ DRAO (49.3208 N, 119.6239 W). Collection method: listing collection only
 identification for offset-tolerance context). No propagation model was
 applied by this census.
 
-Field strengths (detectability_db, 43 rows): RabbitEars Signal Search
+Field strengths (detectability_db, 42 merged rows; 43 values before the
+channel-sharing merge, one merge collapsing two): RabbitEars Signal Search
 Map study, 2026-06-09 12:15 ET, shareable id 2738863, 120-statute-mile
 search radius, receive height set to its maximum (99,999,999 ft AGL),
 which effectively removes terrain blocking; values are therefore
@@ -30,8 +31,9 @@ Derivation (`census_from_xlsx.py`, deterministic; regenerate with
   physical carrier and are merged into single emitter rows (4 merges;
   494 -> 490 emitter-channel rows: 93 primary, 397 non-primary).
 - detectability_db = RabbitEars Signal Search field strength (dBuV/m)
-  where available (43 rows, within the 120-mile study radius);
-  association ranking falls back to distance otherwise.
+  where available (42 merged rows within the 120-mile study radius; 43
+  pre-merge values); association ranking falls back to distance
+  otherwise.
 - Distances converted miles -> km; bearings, CHIME channel indices, and
   the source sheet's Frequency Tolerance carried through. Note the
   regulatory asymmetry preserved from the source: every on-air

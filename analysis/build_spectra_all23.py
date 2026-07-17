@@ -11,14 +11,27 @@ between at the same scale:
   instrument_removed before-mask with the identified instrumental tones and
                      the coarse-channel DC spur notched to the local
                      running-median background
-  after              after-mask mean spectrum, same notching applied
+  after              mean spectrum after the ORIGINAL ANALYTIC
+                     POSITIVE-EXCESS production mask (the masking recorded
+                     in the archived products; NOT the candidate three-arm
+                     rule), same notching applied
 
-Instrumental tones: five narrow lines sit at rational fractions of the
-coarse sample rate in baseband (+/- SR/5, SR/3, 2SR/5) to within half a
-23.84 Hz spectral bin, are frame-mask invariant (<0.3 dB change), and
-appear in one channel each -- receiver clock-fraction spurs, not sky
-emission. The one unidentified line (ch17, +157.29 kHz baseband, 6.1 dB)
-is retained. The full inventory is written to instrument_tones.csv.
+Notching is COSMETIC: it is applied only to these supplementary plotting
+copies. Every detector and mask result in the paper uses unnotched data.
+
+Tone search domain: outside +/-10 kHz of the nominal pilot (which covers
+the +/-7.63 kHz detector-cell support plus a 7.63--10 kHz buffer that is
+also excluded) and outside +/-100 Hz of the coarse-channel DC. Five of
+the six lines found sit within 9.5 Hz (< half a 23.84 Hz spectral bin)
+of rational fractions of the coarse sample rate (+/- SR/5, SR/3, 2SR/5)
+in baseband and appear in one channel each -- consistent with
+instrumental / digital-processing spurs, pending operations
+confirmation. The nearest line is 73.6 kHz from detector-cell support.
+The unidentified ch17 line (+157.29 kHz baseband) is retained. The
+prominence columns in instrument_tones.csv are each measured against
+that spectrum's own local running-median background, so the
+before/after difference is a prominence change under the analytic mask,
+not an absolute-amplitude change.
 """
 import csv
 import sys
@@ -43,12 +56,15 @@ FB_KHZ = 3051.7578125 / 1e3               # fine-bin (cell) width
 VARIANTS = ("before", "instrument_removed", "after")
 VCOLOR = {"before": INK, "instrument_removed": INSTR_C, "after": AFTER}
 VLABEL = {"before": "before mask",
-          "instrument_removed": "before mask, instr.\\ tones removed",
-          "after": "after mask, instr.\\ tones removed"}
+          "instrument_removed": "before mask, instr.\\ tones notched",
+          "after": "after analytic pos.-excess mask, instr.\\ tones notched"}
 VTITLE = {"before": "before mask (raw)",
           "instrument_removed": "before mask, instrumental tones $+$ DC "
-                                "notched to local background",
-          "after": "after mask, instrumental tones $+$ DC notched"}
+                                "notched to local background (plotting "
+                                "copies only)",
+          "after": "after the original analytic positive-excess mask "
+                   "(not the candidate three-arm rule), instrumental "
+                   "tones $+$ DC notched"}
 
 # instrumental-tone detection / identification / notching parameters
 INSTR_FRACS = {"SR/5": SR / 5, "SR/3": SR / 3, "2SR/5": 2 * SR / 5}
@@ -156,12 +172,13 @@ for ch in chans:
                 "atsc_channel": ch, "freq_id": int(fid),
                 "f_bb_hz": f"{fb[p]:.1f}",
                 "offset_from_pilot_khz": f"{o[p]:.2f}",
-                "db_above_background_before": f"{exc_b[p]:.1f}",
-                "db_above_background_after": f"{exc_a[p]:.1f}",
+                "prominence_db_before": f"{exc_b[p]:.1f}",
+                "prominence_db_after_analytic_mask": f"{exc_a[p]:.1f}",
                 "width_bins": int(len(grp)),
                 "identification": (ident.replace("$", "")
                                    if ident else "unidentified"),
-                "action": "removed" if removed else "retained"})
+                "action": ("notched_in_supplement_only" if removed
+                           else "retained")})
     data[ch] = {
         "meta": (pilot, center, fid, mf),
         "o": o,
@@ -175,10 +192,10 @@ with open(OUT / "instrument_tones.csv", "w", newline="") as fh:
     w = csv.DictWriter(fh, fieldnames=list(tone_rows[0].keys()))
     w.writeheader()
     w.writerows(tone_rows)
-n_rm = sum(r["action"] == "removed" for r in tone_rows)
+n_rm = sum(r["action"] == "notched_in_supplement_only" for r in tone_rows)
 print(f"wrote instrument_tones.csv: {len(tone_rows)} tones "
-      f"({n_rm} removed, {len(tone_rows) - n_rm} retained) "
-      f"+ DC notch on all channels")
+      f"({n_rm} notched in supplement only, {len(tone_rows) - n_rm} "
+      f"retained) + DC notch on all channels (plotting copies only)")
 
 
 def panel(ax, ch, span_khz, zoom, which):
@@ -248,7 +265,7 @@ for span, zoom, fbase, tbase in (
         (20.0, True, "fig_spectra_all23_pilot_zoom",
          "Integrated spectra, $\\pm$20 kHz about the nominal pilot "
          "(target / skipped-guard / reference cells shaded, one fine bin "
-         "wide; census lines as ticks)")):
+         "wide; extracted spectral lines as ticks)")):
     for which in VARIANTS:
         fig, axes = plt.subplots(6, 4, figsize=(11.5, 12.6), sharex=zoom)
         for j, ch in enumerate(chans):

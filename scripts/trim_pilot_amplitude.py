@@ -101,7 +101,8 @@ def main() -> int:
         "pilot_below_data_direct_db_before": ratio_now,
         "target_below_data_db": float(args.target_below_data_db),
         "amplitude_gain_applied": g,
-        "gain_db": DB * 2 * np.log10(g) / 2,
+        # power change of the pilot line: 20*log10(amplitude gain)
+        "gain_db": 2 * DB * np.log10(g),
     }
     text = json.dumps(report, indent=2)
     if args.output_json:
