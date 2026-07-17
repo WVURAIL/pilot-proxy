@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
 """Full 23-channel spectra grids from all_spectra.npz (full-depth per-pilot
 accumulations), with the detector cells (target, skipped guards, references)
-shaded from the shipped weight-bank manifest. Before-mask and after-mask
-spectra are written as separate figures (suffix _before / _after) with
-shared per-channel y-limits so the pair can be compared at the same
-scale."""
+shaded from the shipped weight-bank manifest.
+
+Three variants are written per view (suffix _before / _instrument_removed /
+_after), all with shared per-channel y-limits so they can be flipped
+between at the same scale:
+
+  before             raw before-mask mean spectrum
+  instrument_removed before-mask with the identified instrumental tones and
+                     the coarse-channel DC spur notched to the local
+                     running-median background
+  after              after-mask mean spectrum, same notching applied
+
+Instrumental tones: five narrow lines sit at rational fractions of the
+coarse sample rate in baseband (+/- SR/5, SR/3, 2SR/5) to within half a
+23.84 Hz spectral bin, are frame-mask invariant (<0.3 dB change), and
+appear in one channel each -- receiver clock-fraction spurs, not sky
+emission. The one unidentified line (ch17, +157.29 kHz baseband, 6.1 dB)
+is retained. The full inventory is written to instrument_tones.csv.
+"""
 import csv
 import sys
 from pathlib import Path
@@ -20,9 +35,27 @@ OUT = _paths.OUT
 B = _paths.RESULTS
 INK, AFTER, PILOT_C, LINE_C, REF_C = "0.35", "#0072B2", "#D55E00", "#009E73", "#7B4FA6"
 TGT_FILL, GUARD_FILL, REF_FILL = "#D55E00", "0.55", "#7B4FA6"
+INSTR_C = "#CC79A7"
 SUPPRESSED = {14, 21, 25, 28, 36}
 NFFT, SR, SENSE = 16384, 390625.0, -1.0
 FB_KHZ = 3051.7578125 / 1e3               # fine-bin (cell) width
+
+VARIANTS = ("before", "instrument_removed", "after")
+VCOLOR = {"before": INK, "instrument_removed": INSTR_C, "after": AFTER}
+VLABEL = {"before": "before mask",
+          "instrument_removed": "before mask, instr.\\ tones removed",
+          "after": "after mask, instr.\\ tones removed"}
+VTITLE = {"before": "before mask (raw)",
+          "instrument_removed": "before mask, instrumental tones $+$ DC "
+                                "notched to local background",
+          "after": "after mask, instrumental tones $+$ DC notched"}
+
+# instrumental-tone detection / identification / notching parameters
+INSTR_FRACS = {"SR/5": SR / 5, "SR/3": SR / 3, "2SR/5": 2 * SR / 5}
+DET_DB = 4.0            # detection threshold above running-median background
+IDENT_TOL_HZ = 30.0     # ~ half a 23.84 Hz bin, with margin
+NOTCH_PAD = 3           # extra bins notched either side of a detected group
+MED_WIN = 401           # running-median window (~9.6 kHz)
 
 z = np.load(_paths.SPECTRA)
 chans = sorted({int(k[2:].split("_")[0]) for k in z.files})
@@ -67,27 +100,109 @@ k = np.arange(NFFT)
 f_bb = np.where(k < NFFT // 2, k, k - NFFT).astype(np.float64) * (SR / NFFT)
 
 
-def panel(ax, ch, span_khz, zoom, which):
+def _running_median(p, w=MED_WIN):
+    """Circular running median (the spectrum is periodic in baseband)."""
+    from numpy.lib.stride_tricks import sliding_window_view
+    half = w // 2
+    pad = np.concatenate([p[-half:], p, p[:half]])
+    return np.median(sliding_window_view(pad, w), axis=1)
+
+
+def _notch(power, bg, groups):
+    """Replace the bins of each group (+/- NOTCH_PAD) with the background."""
+    out = power.copy()
+    for grp in groups:
+        i0 = max(int(grp[0]) - NOTCH_PAD, 0)
+        i1 = min(int(grp[-1]) + NOTCH_PAD, power.size - 1)
+        out[i0:i1 + 1] = bg[i0:i1 + 1]
+    return out
+
+
+# ---- per-channel streams: detect + document + notch instrumental tones ----
+data = {}
+tone_rows = []
+for ch in chans:
     pilot, center, fid, n_valid, n_masked = z[f"ch{ch}_meta"]
     mf = n_masked / n_valid if n_valid else float("nan")
     before = z[f"ch{ch}_before"] / max(n_valid, 1.0)
     after = z[f"ch{ch}_after"] / max(n_valid - n_masked, 1.0)
     off = (center + SENSE * f_bb - pilot) / 1e3
     s = np.argsort(off)
-    o, b, a = off[s], before[s], after[s]
-    ref = np.median(b[b > 0])           # shared dB zero for both variants
-    sel = np.abs(o) <= span_khz
-    yb = 10 * np.log10(np.maximum(b[sel], ref * 1e-4) / ref)
-    ya = 10 * np.log10(np.maximum(a[sel], ref * 1e-4) / ref)
-    if which == "before":
-        ax.plot(o[sel], yb, color=INK, lw=0.55, label="before mask")
+    o, b, a, fb = off[s], before[s], after[s], f_bb[s]
+    bg_b, bg_a = _running_median(b), _running_median(a)
+    exc_b = 10 * np.log10(np.maximum(b, 1e-30) / np.maximum(bg_b, 1e-30))
+    exc_a = 10 * np.log10(np.maximum(a, 1e-30) / np.maximum(bg_a, 1e-30))
+    # coarse-channel DC spur: grow from the DC bin while above 3 dB
+    k0 = int(np.argmin(np.abs(fb)))
+    i0 = i1 = k0
+    while i0 > max(k0 - 10, 1) and exc_b[i0 - 1] > 3.0:
+        i0 -= 1
+    while i1 < min(k0 + 10, b.size - 2) and exc_b[i1 + 1] > 3.0:
+        i1 += 1
+    kill = [np.arange(i0, i1 + 1)]
+    # narrow-tone candidates outside the detector cells and away from DC
+    cand = np.flatnonzero((exc_b > DET_DB) & (np.abs(o) > 10.0)
+                          & (np.abs(fb) > 100.0))
+    if cand.size:
+        for grp in np.split(cand, np.flatnonzero(np.diff(cand) > 3) + 1):
+            p = grp[int(np.argmax(exc_b[grp]))]
+            ident = next((("$-$" if fb[p] < 0 else "$+$") + name
+                          for name, fv in INSTR_FRACS.items()
+                          if abs(abs(fb[p]) - fv) <= IDENT_TOL_HZ), "")
+            removed = bool(ident)
+            if removed:
+                kill.append(grp)
+            tone_rows.append({
+                "atsc_channel": ch, "freq_id": int(fid),
+                "f_bb_hz": f"{fb[p]:.1f}",
+                "offset_from_pilot_khz": f"{o[p]:.2f}",
+                "db_above_background_before": f"{exc_b[p]:.1f}",
+                "db_above_background_after": f"{exc_a[p]:.1f}",
+                "width_bins": int(len(grp)),
+                "identification": (ident.replace("$", "")
+                                   if ident else "unidentified"),
+                "action": "removed" if removed else "retained"})
+    data[ch] = {
+        "meta": (pilot, center, fid, mf),
+        "o": o,
+        "before": b,
+        "instrument_removed": _notch(b, bg_b, kill),
+        "after": _notch(a, bg_a, kill),
+        "ref": np.median(b[b > 0]),     # shared dB zero for all variants
+    }
+
+with open(OUT / "instrument_tones.csv", "w", newline="") as fh:
+    w = csv.DictWriter(fh, fieldnames=list(tone_rows[0].keys()))
+    w.writeheader()
+    w.writerows(tone_rows)
+n_rm = sum(r["action"] == "removed" for r in tone_rows)
+print(f"wrote instrument_tones.csv: {len(tone_rows)} tones "
+      f"({n_rm} removed, {len(tone_rows) - n_rm} retained) "
+      f"+ DC notch on all channels")
+
+
+def panel(ax, ch, span_khz, zoom, which):
+    d = data[ch]
+    pilot, center, fid, mf = d["meta"]
+    o, ref = d["o"], d["ref"]
+    dc = (center - pilot) / 1e3
+    if span_khz is None:            # true full coarse channel (dc-centred)
+        xlo, xhi = dc - SR / 2e3, dc + SR / 2e3
     else:
-        ax.plot(o[sel], ya, color=AFTER, lw=0.55, alpha=0.9,
-                label="after mask")
-    # shared y-limits across the before/after variants so the pair of
-    # figures can be flipped between at the same scale
-    lo_y = float(min(yb.min(), ya.min()))
-    hi_y = float(max(yb.max(), ya.max()))
+        xlo, xhi = -span_khz, span_khz
+    sel = (o >= xlo) & (o <= xhi)
+
+    def dbrel(p):
+        return 10 * np.log10(np.maximum(p[sel], ref * 1e-4) / ref)
+
+    ys = {v: dbrel(d[v]) for v in VARIANTS}
+    ax.plot(o[sel], ys[which], color=VCOLOR[which], lw=0.55,
+            label=VLABEL[which])
+    ax.set_xlim(xlo, xhi)
+    # shared y-limits across all three variants so the set can be flipped
+    # between at the same scale
+    lo_y = min(float(y.min()) for y in ys.values())
+    hi_y = max(float(y.max()) for y in ys.values())
     pad = 0.05 * max(hi_y - lo_y, 1.0)
     ax.set_ylim(lo_y - pad, hi_y + pad)
     # detector cells (one fine bin wide, centred on each term / skipped bin)
@@ -96,11 +211,11 @@ def panel(ax, ch, span_khz, zoom, which):
     ax.axvspan(cc["target"] - h, cc["target"] + h, color=TGT_FILL,
                alpha=0.16, lw=0, zorder=0)
     for g in cc["guards"]:
-        if abs(g) <= span_khz:
+        if xlo <= g <= xhi:
             ax.axvspan(g - h, g + h, color=GUARD_FILL, alpha=0.16, lw=0,
                        zorder=0)
     for r_off, wrapped, side in cc["refs"]:
-        if abs(r_off) <= span_khz:
+        if xlo <= r_off <= xhi:
             ax.axvspan(r_off - h, r_off + h, color=REF_FILL, alpha=0.20,
                        lw=0, zorder=0)
         else:
@@ -110,12 +225,11 @@ def panel(ax, ch, span_khz, zoom, which):
                     transform=ax.transAxes, fontsize=5.0, color=REF_C,
                     ha="right")
     ax.axvline(0.0, color=PILOT_C, ls="--", lw=0.7)
-    dc = (center - pilot) / 1e3
-    if abs(dc) <= span_khz:
+    if xlo <= dc <= xhi:
         ax.axvline(dc, color="0.6", ls=":", lw=0.7)
     if zoom:
         for lo in lines.get(ch, []):
-            if abs(lo / 1e3) <= span_khz:
+            if xlo <= lo / 1e3 <= xhi:
                 ax.plot([lo / 1e3], [ax.get_ylim()[1]], marker="v", ms=2.6,
                         color=LINE_C, clip_on=False)
     tcol = PILOT_C if ch in SUPPRESSED else "black"
@@ -127,16 +241,16 @@ def panel(ax, ch, span_khz, zoom, which):
 
 
 for span, zoom, fbase, tbase in (
-        (200.0, False, "fig_spectra_all23_fullspan",
-         "Integrated spectra, full coarse channel, all 23 channels "
-         "(mean per valid frame, dB rel. channel median; detector cells "
-         "shaded)"),
+        (None, False, "fig_spectra_all23_fullspan",
+         "Integrated spectra, full coarse channel (dc-centred), all 23 "
+         "channels (mean per valid frame, dB rel. channel median; detector "
+         "cells shaded)"),
         (20.0, True, "fig_spectra_all23_pilot_zoom",
          "Integrated spectra, $\\pm$20 kHz about the nominal pilot "
          "(target / skipped-guard / reference cells shaded, one fine bin "
          "wide; census lines as ticks)")):
-    for which in ("before", "after"):
-        fig, axes = plt.subplots(6, 4, figsize=(11.5, 12.6), sharex=True)
+    for which in VARIANTS:
+        fig, axes = plt.subplots(6, 4, figsize=(11.5, 12.6), sharex=zoom)
         for j, ch in enumerate(chans):
             panel(axes.flat[j], ch, span, zoom, which)
         for j in range(len(chans), 24):
@@ -147,10 +261,7 @@ for span, zoom, fbase, tbase in (
             ax.set_ylabel("dB", fontsize=6.5)
         from matplotlib.lines import Line2D
         from matplotlib.patches import Patch
-        curve = (Line2D([], [], color=INK, label="before mask")
-                 if which == "before" else
-                 Line2D([], [], color=AFTER, label="after mask"))
-        handles = [curve,
+        handles = [Line2D([], [], color=VCOLOR[which], label=VLABEL[which]),
                    Line2D([], [], color=PILOT_C, ls="--",
                           label="nominal pilot"),
                    Line2D([], [], color="0.6", ls=":",
@@ -166,9 +277,7 @@ for span, zoom, fbase, tbase in (
                                label="extracted line")]
         fig.legend(handles=handles, loc="lower center", ncol=len(handles),
                    fontsize=7.5, frameon=False, bbox_to_anchor=(0.5, 0.005))
-        variant = ("before mask" if which == "before"
-                   else "after mask (masked frames removed)")
-        fig.suptitle(f"{tbase} --- {variant}", fontsize=11, y=0.995)
+        fig.suptitle(f"{tbase} --- {VTITLE[which]}", fontsize=11, y=0.995)
         fig.tight_layout(rect=(0, 0.02, 1, 0.99))
         fname = f"{fbase}_{which}"
         fig.savefig(OUT / f"{fname}.png", dpi=230, bbox_inches="tight")
