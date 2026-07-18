@@ -73,7 +73,6 @@ ax.set_axisbelow(True)
 # ---------- panels (b): manifest geometry strips ------------------------------
 CASES = ((18, "ch18 -- nominal"),
          (14, "ch14 -- DC in skipped guard"),
-         (28, "ch28 -- closest ref--DC approach (2.1 bins; shift rule never fires)"),
          (21, "ch21 -- lower reference wrapped across edge"))
 
 
@@ -119,7 +118,7 @@ axes_zoom = [fig.add_subplot(gs[1, 1]), fig.add_subplot(gs[2, 1])]
 # simpler: 4 thin strips stacked inside two axes-> instead build 4 subaxes
 for a in axes_full + axes_zoom:
     a.remove()
-sub = fig.add_gridspec(4, 2, top=0.52, bottom=0.10, hspace=0.75, wspace=0.14)
+sub = fig.add_gridspec(3, 2, top=0.52, bottom=0.10, hspace=0.75, wspace=0.14)
 for i, (ch, title) in enumerate(CASES):
     axl = fig.add_subplot(sub[i, 0])
     axr = fig.add_subplot(sub[i, 1])

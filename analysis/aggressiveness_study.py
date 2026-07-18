@@ -74,28 +74,18 @@ rec_1s = sum(p["kept_1s"] for p in per.values()) * COARSE_MHZ
 rec_bk = sum(p["kept_bk"] for p in per.values()) * COARSE_MHZ
 h0_curve = norm.cdf(-KS) * len(per) * COARSE_MHZ
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(11.0, 4.4))
-ax1.plot(KS, rec_1s, color=C_A, lw=1.6, label="one-sided keep ($F\\leq\\tau$)")
-ax1.plot(KS, rec_bk, color=C_C, lw=1.6,
-         label="band-keep ($\\tau-3\\sigma \\leq F \\leq \\tau$)")
-ax1.plot(KS, h0_curve, color="0.5", ls="--", lw=1.0,
-         label="pure-H0 expectation")
-ax1.axvline(0.0, color="0.55", lw=0.8, ls=":")
-ax1.text(0.03, 0.03, "ceiling above core\n($k<0$; not adopted)",
-         transform=ax1.transAxes, fontsize=7.5, color="0.35", va="bottom")
-ax1.annotate("adopted ceiling ($k{=}0$)", xy=(0.0, 0.62), xycoords=("data", "axes fraction"),
-             xytext=(14, 0), textcoords="offset points", fontsize=7.5,
-             color="0.25", rotation=90, va="center")
-ax1.text(0.45, 0.03, "one-sided cut below core", transform=ax1.transAxes,
-         fontsize=7.5, color="0.35", va="bottom")
-ax1.set_xlabel(r"threshold offset below measured core  $k$  "
-               r"[$\sigma_{\rm core}$]  (negative: ceiling above core)")
-ax1.set_ylabel("kept pilot-channel bandwidth [MHz]")
-ax1.set_title(f"(a) kept bandwidth vs threshold offset "
-              f"({len(per)} null-calibrated channels)", fontsize=10)
-ax1.legend(fontsize=8)
-ax1.grid(color="0.92", lw=0.5)
-ax1.set_axisbelow(True)
+fig, ax2 = plt.subplots(figsize=(7.4, 4.6))
+# panel (a) content folded onto a twin axis: the aggregate kept
+# bandwidth rides behind the per-channel contamination curves.
+axk = ax2.twinx()
+axk.plot(KS, rec_1s, color="0.45", lw=1.4, alpha=0.8)
+axk.plot(KS, rec_bk, color="0.45", lw=1.1, ls="--", alpha=0.8)
+axk.set_ylabel("kept pilot-channel bandwidth [MHz] (grey)", color="0.35")
+axk.tick_params(axis="y", colors="0.35")
+axk.set_ylim(bottom=0)
+axk.set_zorder(1)
+ax2.set_zorder(2)
+ax2.patch.set_visible(False)
 
 SHOW = [(32, "ch32 (heavy low tail)"), (31, "ch31"), (35, "ch35"),
         (21, "ch21 (corrected)"), (34, "ch34")]
@@ -109,7 +99,17 @@ ax2.axvline(0.0, color="0.55", lw=0.8, ls=":")
 ax2.set_xlabel(r"threshold offset below measured core  $k$  "
                r"[$\sigma_{\rm core}$]  (negative: ceiling above core)")
 ax2.set_ylabel(f"non-null excess among retained frames [{PCT}]")
-ax2.set_title("(b) solid: one-sided keep;  dashed: band-keep", fontsize=10)
+ax2.axvline(0.0, color="0.55", lw=0.8, ls=":")
+ax2.annotate("adopted ceiling ($k{=}0$)", xy=(0.0, 0.62),
+             xycoords=("data", "axes fraction"), xytext=(10, 0),
+             textcoords="offset points", fontsize=7.5, color="0.25",
+             rotation=90, va="center")
+ax2.text(0.02, 0.965, "ceiling above core ($k<0$; not adopted)",
+         transform=ax2.transAxes, fontsize=7.5, color="0.35", va="top")
+ax2.set_title("deeper one-sided cuts lose data exponentially while the "
+              "kept fraction gets dirtier\n(colour: non-null excess, "
+              "solid one-sided / dashed band-keep;  grey: kept bandwidth)",
+              fontsize=9.5)
 ax2.legend(fontsize=7.5)
 ax2.grid(color="0.92", lw=0.5)
 ax2.set_axisbelow(True)

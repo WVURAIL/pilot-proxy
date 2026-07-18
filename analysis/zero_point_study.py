@@ -97,9 +97,27 @@ for ch in chans:
     mu_hat, mu_err, window_frac, low_frac, high_frac = core_zero(fv, mu0)
     mu_err_blk = block_err(fv, fui_v, mu_hat, mu0)
     mf_now = float(rej[valid].mean())
-    # distrust the empirical zero point when the H0 core is not identifiable
-    signal_dom = (mf_now > 0.9 or window_frac < 0.15
-                  or abs(mu_hat - mu0) / mu0 > 20e-3)
+    # Distrust the empirical zero point when the H0 core is not
+    # identifiable. One criterion, two measurements, plus a range check
+    # (see paper 5.2): an identifiable null subpopulation of >= ~15-20%
+    # -- measured directly (core-window count) and through the rule's
+    # masking arithmetic (null frames mask at 0.5 by construction and
+    # strong-signal frames at ~1, so f_null = 2(1 - mask_fraction)) --
+    # and a located core within the geometrically reachable range
+    # (largest geometry-producible shift in the bank: ch21 wrap,
+    # -12e-3; bound set ~1.7x beyond it). Values are equivalent to the
+    # original recorded constants (0.9 / 0.15 / 20e-3): decisions are
+    # identical on any input.
+    F_NULL_MIN_MASK_IMPLIED = 0.20    # f_null = 2(1-mf) >= this
+    F_NULL_MIN_DIRECT = 0.15          # core-window occupancy >= this
+    GEO_RANGE_BOUND = 20e-3           # ~1.7x max geometric |shift|
+    # (A sign-aware variant -- tighter positive bound, since geometry
+    # only produces negative shifts -- is documented in the provenance
+    # memos as a possible refinement; it selects identically on this
+    # archive and is deliberately not enacted post hoc.)
+    signal_dom = (2.0 * (1.0 - mf_now) < F_NULL_MIN_MASK_IMPLIED
+                  or window_frac < F_NULL_MIN_DIRECT
+                  or abs(mu_hat - mu0) / mu0 > GEO_RANGE_BOUND)
     mf_hat = float((fv > mu_hat).mean())
     veto = 12e-3 * mu0
     kept_2sided = float(((fv <= mu_hat) & (fv >= mu_hat - veto)).mean())
@@ -177,7 +195,9 @@ for r in rows:
     g = r["gap_1e3"]
     if r["signal_dominated"]:
         # no identifiable H0 core: the empirical gap is not a calibration
-        ax1.annotate(f"ch{r['ch']}: no null core",
+        val = (f"core at {1 + r['gap_1e3']/1e3:.1f}$\\times\\mu_0$"
+               if r["gap_1e3"] > 100 else f"${r['gap_1e3']:+.1f}$")
+        ax1.annotate(f"ch{r['ch']}: {val}",
                      xy=(r["ch"], YLIM * 0.95), xytext=(r["ch"], YLIM * 0.62),
                      ha="center", fontsize=7, color=c,
                      arrowprops=dict(arrowstyle="->", color=c, lw=1))
