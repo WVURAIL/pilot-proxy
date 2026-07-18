@@ -16,7 +16,7 @@ Usage:
     python launch_gpu_session.py             # launch or reuse, print connect URL
     python launch_gpu_session.py --status    # show status + URL only
     python launch_gpu_session.py --destroy   # tear it down when you're done
-    python launch_gpu_session.py --cores 8 --ram 32
+    python launch_gpu_session.py --cores 8 --ram 16 --gpu 2 --timeout 60
 """
 import argparse
 import os
@@ -66,10 +66,10 @@ def main() -> int:
                     help=f"session name (default: {DEFAULT_NAME})")
     ap.add_argument("--image", default=DEFAULT_IMAGE,
                     help="container image (default: astroml-cuda:latest)")
-    ap.add_argument("--cores", type=int, default=4)
-    ap.add_argument("--ram", type=int, default=16, help="RAM in GB")
+    ap.add_argument("--cores", type=int, default=1)
+    ap.add_argument("--ram", type=int, default=8, help="RAM in GB")
     ap.add_argument("--gpu", type=int, default=1, help="number of GPUs")
-    ap.add_argument("--timeout", type=int, default=900,
+    ap.add_argument("--timeout", type=int, default=999,
                     help="seconds to wait for the session to reach Running")
     ap.add_argument("--status", action="store_true",
                     help="just report status + connect URL")
