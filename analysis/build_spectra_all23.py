@@ -70,7 +70,9 @@ VTITLE = {"before": "before mask (raw)",
 INSTR_FRACS = {"SR/5": SR / 5, "SR/3": SR / 3, "2SR/5": 2 * SR / 5}
 DET_DB = 4.0            # detection threshold above running-median background
 IDENT_TOL_HZ = 30.0     # ~ half a 23.84 Hz bin, with margin
-NOTCH_PAD = 3           # extra bins notched either side of a detected group
+NOTCH_PAD = 3           # extra bins notched either side of the grown extent
+NOTCH_STOP_DB = 0.5     # adaptive growth stops when excess falls below this
+NOTCH_MAX_EXT = 15      # growth bound (bins) either side of a detected group
 MED_WIN = 401           # running-median window (~9.6 kHz)
 
 z = np.load(_paths.SPECTRA)
@@ -125,11 +127,27 @@ def _running_median(p, w=MED_WIN):
 
 
 def _notch(power, bg, groups):
-    """Replace the bins of each group (+/- NOTCH_PAD) with the background."""
+    """Replace the bins of each group with the background.
+
+    The notch extent is adaptive: from the detected group it grows outward
+    while the spectrum stays more than NOTCH_STOP_DB above the local
+    background (bounded by NOTCH_MAX_EXT bins each side), then adds
+    NOTCH_PAD bins. A fixed pad alone leaves measurable skirts on the
+    wider spurs (audited 2026-07-18: ch14 +2.3 dB, ch29 +4.4 dB, ch34
+    +2.1 dB residual shoulders outside a fixed +/-3 pad; ch25/ch28 clean).
+    """
     out = power.copy()
+    exc = 10 * np.log10(np.maximum(power, 1e-30) / np.maximum(bg, 1e-30))
     for grp in groups:
-        i0 = max(int(grp[0]) - NOTCH_PAD, 0)
-        i1 = min(int(grp[-1]) + NOTCH_PAD, power.size - 1)
+        g0, g1 = int(grp[0]), int(grp[-1])
+        i0, i1 = g0, g1
+        while i0 > max(g0 - NOTCH_MAX_EXT, 1) and exc[i0 - 1] > NOTCH_STOP_DB:
+            i0 -= 1
+        while (i1 < min(g1 + NOTCH_MAX_EXT, power.size - 2)
+               and exc[i1 + 1] > NOTCH_STOP_DB):
+            i1 += 1
+        i0 = max(i0 - NOTCH_PAD, 0)
+        i1 = min(i1 + NOTCH_PAD, power.size - 1)
         out[i0:i1 + 1] = bg[i0:i1 + 1]
     return out
 
