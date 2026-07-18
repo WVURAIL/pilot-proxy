@@ -21,8 +21,10 @@ from pilot_proxy.plot_style import setup_matplotlib
 plt = setup_matplotlib()
 OUT = _paths.OUT
 BIN_HZ = 390625.0 / 128.0
-COLORS = {0.0: "#0072B2", -1000.0: "#D55E00", 1000.0: "#009E73"}
-MARKS = {0.0: "o", -1000.0: "v", 1000.0: "^"}
+COLORS = {0.0: "#0072B2", -1000.0: "#D55E00", 1000.0: "#009E73",
+          -1500.0: "#A85C85", 1500.0: "#E69F00"}
+MARKS = {0.0: "o", -1000.0: "v", 1000.0: "^",
+         -1500.0: "<", 1500.0: ">"}
 
 csv_path = sys.argv[1] if len(sys.argv) > 1 else str(_paths.SWEEP_CSV)
 label = sys.argv[2] if len(sys.argv) > 2 else "1000 trials/point"
@@ -131,21 +133,13 @@ if pex:
         ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "-",
                     ms=4.5, lw=1.4, capsize=2, color=COLORS[off],
                     label=f"pos-excess (deployed), {lbl}")
-# Secondary: calibration-free fixed-threshold backup mode at the recorded
-# reference level (a testbench convention, not a derived requirement).
-for off, ro in sorted(thr.items()):
-    snr = np.array([x[0] for x in ro])
-    pd = np.array([x[1] for x in ro])
-    lo = np.array([x[2] for x in ro])
-    hi = np.array([x[3] for x in ro])
-    lbl = "0 Hz" if off == 0 else f"{off/1000:+.0f} kHz"
-    ax.errorbar(snr, pd, yerr=[pd - lo, hi - pd], fmt=MARKS[off] + "--",
-                ms=4.5, lw=1.0, capsize=2, color=COLORS[off],
-                markerfacecolor="none", alpha=0.8,
-                label=f"fixed-$\\tau$ backup, {lbl}")
-ax.axvline(-32.0, color="0.55", ls=":", lw=0.9)
-ax.text(-32.05, 0.03, "backup-mode reference level $-32$ dB (recorded)",
-        rotation=90, fontsize=7.5, va="bottom", ha="right", color="0.45")
+# Fixed-threshold backup curves intentionally NOT drawn: the paper
+# deploys the positive-excess rule only (backup mode documented in
+# text; its sweep columns remain in the archived summary CSV).
+ax.set_xlim(-60, -20)
+ax.text(-59, 0.55, "2048-input deployment curves land here\n"
+        "(GPU regeneration in progress)", fontsize=7.5,
+        color="0.45", va="center")
 for lev in (0.5, 0.9):
     ax.axhline(lev, color="0.8", ls=":", lw=0.8)
 vp = v_pex.get(0.0) if v_pex else None
@@ -154,17 +148,10 @@ if vp and np.isfinite(vp["p90"]):
         f"deployed rule: $P_d$=0.9 at $\\approx${vp['p90']:.1f} dB",
         xy=(vp["p90"], 0.9), xytext=(-38.3, 0.70), fontsize=8.5,
         arrowprops=dict(arrowstyle="->", lw=0.8, color="0.4"))
-v = v_thr.get(0.0)
-if v and np.isfinite(v["p90"]):
-    ax.annotate(
-        f"backup mode: $P_d$=0.5 at $\\approx${v['p50']:.1f} dB\n"
-        f"$P_d$=0.9 at $\\approx${v['p90']:.1f} dB",
-        xy=(v["p90"], 0.9), xytext=(-30.3, 0.55), fontsize=8.5,
-        arrowprops=dict(arrowstyle="->", lw=0.8, color="0.4"))
 ax.set_xlabel("requested shelf SNR [dB]")
 ax.set_ylabel(r"detection probability $P_d$")
 ax.set_title(f"Synthetic detection curves, exact-integer CPU reference "
-             f"({label}; Wilson 95\\%)", fontsize=10.5)
+             f"({label}; Wilson 95 per cent)", fontsize=10.5)
 ax.set_ylim(-0.02, 1.04)
 ax.legend(fontsize=7.5, loc="upper left", ncol=2 if pex else 1)
 ax.grid(color="0.92", lw=0.6)

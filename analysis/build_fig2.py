@@ -52,15 +52,19 @@ for i, (lbl, c) in enumerate((("target", C_T), ("lower reference", C_L),
     sel = np.abs(x) <= 8
     ax.plot(x[sel], 10 * np.log10(np.maximum(P[i][sel], 1e-8)),
             color=c, lw=1.3, label=lbl)
+ax.axvspan(-0.5, 0.5, color="#D55E00", alpha=0.10, lw=0, zorder=0)
 for g in (-1, 1):
     ax.axvspan(g - 0.5, g + 0.5, color="0.9", zorder=0)
+for rr in (-2, 2):
+    ax.axvspan(rr - 0.5, rr + 0.5, color="#7B4FA6", alpha=0.10, lw=0,
+               zorder=0)
 ax.axvline(0, color="0.75", lw=0.6)
 ax.set_xlim(-8, 8)
 ax.set_ylim(-58, 2)
 ax.set_xlabel("fine bins from the target (bin width 3051.76 Hz)")
 ax.set_ylabel(r"$|W(f)|^2$ [dB rel. target peak]")
 ax.set_title(f"(a) int4 weight-term responses, K=128 "
-             f"(ch18; guards shaded, refs at $\\pm2$ bins; "
+             f"(ch18; target/guard/reference cells shaded; "
              f"$\\mu_0$={lay18['mu0']:.4f})", fontsize=10)
 ax.legend(fontsize=8, loc="upper right")
 ax.grid(color="0.93", lw=0.5)
@@ -69,7 +73,7 @@ ax.set_axisbelow(True)
 # ---------- panels (b): manifest geometry strips ------------------------------
 CASES = ((18, "ch18 -- nominal"),
          (14, "ch14 -- DC in skipped guard"),
-         (28, "ch28 -- reference 2.1 bins from DC"),
+         (28, "ch28 -- closest ref--DC approach (2.1 bins; shift rule never fires)"),
          (21, "ch21 -- lower reference wrapped across edge"))
 
 
