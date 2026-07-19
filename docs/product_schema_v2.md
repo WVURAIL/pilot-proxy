@@ -1,175 +1,241 @@
 # Per-Pilot Detector Product Schema (v2)
 
-The `pilot-proxy-detector` datatrawl analyzer fans out one **authoritative per-pilot
-product** per CHIME coarse channel: `<freq_id>.npz` (under the scan's
-`_per_pilot/` directory). Every reporting artifact — the combined products in
-`DATA_PRODUCTS.md`, spectrograms, F-statistic distributions, LST folds — is
-**derived** from these files. They are the source of truth; nothing downstream
-recovers information they do not contain.
+The `pilot-proxy-detector` analyzer writes one per-pilot product for each
+selected CHIME coarse channel:
 
-`schema_version = "pilotproxy_detector_datatrawl_v2"`.
+```text
+<scan output>/_per_pilot/<freq_id>.npz
+```
 
-The combined products (`chime_detector_outputs.npz` etc.) keep the legacy field
-name `mask` for byte-compatibility with the standalone runner; the per-pilot
-product below uses the clearer `reject_mask`. They hold identical values.
+These files preserve the information produced before channels are aligned and
+stacked. For a `chime-scan` run, the combined products in `DATA_PRODUCTS.md`,
+the standard spectrograms, and the F-statistic distributions are derived from
+them. An event-keyed combine can discard frames that are not common to all
+channels, so the per-pilot files remain the authoritative record of each
+channel's processed frames.
+
+```text
+schema_version = "pilotproxy_detector_datatrawl_v2"
+```
+
+The per-pilot schema calls the rejection decision `reject_mask`. The combined
+`chime_detector_outputs.npz` file retains the older field name `mask` for
+compatibility. Both use `1 = reject` and carry the same values for frames kept
+by the combine.
 
 ---
 
 ## What changed from v1
 
-- `mask` → **`reject_mask`** (`1 = discard`; same positive-excess values).
-- Added **`integrated_spectrum_before_mask` / `_after_mask`** (per-bin power).
-- Added a **per-unit absolute-time axis** + per-frame unit tags (below).
-- Added provenance: **`weights_hash`, `detector_version`, `mask_rule`**.
+Version 2 makes four changes:
 
-The schema bump is load-bearing: `resume()` refuses to extend a v1 product, so a
-run started under the old schema can never be silently mixed with v2 output. A
-v1 → v2 transition starts the product fresh.
+- `mask` becomes `reject_mask`, with the same `1 = discard` convention.
+- `integrated_spectrum_before_mask` and
+  `integrated_spectrum_after_mask` preserve the per-bin accumulated power.
+- Per-unit timing values and per-frame unit tags provide an absolute-time axis
+  when the HDF5 attributes are available.
+- `weights_hash`, `detector_version`, and `mask_rule` record the detector
+  provenance required for resume.
 
-`N` = number of frames (one per `nfft`-sample chunk). `U` = number of units
-(input files) consumed into this product.
+The version change is a hard resume boundary. If an existing product has a v1
+schema, `resume()` stops and asks the operator to remove it or choose a clean
+output directory. The analyzer does not silently append v2 frames or
+automatically overwrite the v1 product.
+
+In the tables below, `N` is the number of detector frames and `U` is the number
+of consumed input files.
 
 ---
 
 ## Identity and geometry
 
-| Array                  | Shape  | Dtype     | Meaning                              |
-| ---------------------- | ------ | --------- | ------------------------------------ |
-| `freq_id`              | `(1,)` | `int64`   | CHIME coarse-channel id              |
-| `physical_channel`     | `(1,)` | `int32`   | ATSC physical channel                |
-| `pilot_in_band`        | `(1,)` | `uint8`   | `1` if the ATSC pilot is in band     |
-| `pilot_frequency_hz`   | `(1,)` | `float64` | ATSC pilot RF frequency              |
-| `chime_frequency_hz`   | `(1,)` | `float64` | CHIME coarse-channel center          |
-| `nfft`                 | scalar | `int64`   | FFT / frame length (16384)           |
-| `detector_window_samples` | scalar | `int64` | Kernel window `K` (128)            |
-| `num_input_streams`    | scalar | `int64`   | Feed/polarization streams summed     |
-| `sense`                | scalar | `int64`   | Spectral sense (`+1` / `-1`)         |
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `freq_id` | `(1,)` | `int64` | CHIME coarse-channel identifier |
+| `physical_channel` | `(1,)` | `int32` | Nearest ATSC physical channel |
+| `pilot_in_band` | `(1,)` | `uint8` | `1` when the selected coarse channel contains the nominal ATSC pilot |
+| `pilot_frequency_hz` | `(1,)` | `float64` | ATSC pilot RF frequency |
+| `chime_frequency_hz` | `(1,)` | `float64` | CHIME coarse-channel center |
+| `nfft` | scalar | `int64` | Analysis frame and FFT length used for this product |
+| `detector_window_samples` | scalar | `int64` | CUDA detector window `K`, currently 128 |
+| `num_input_streams` | scalar | `int64` | Input feed/polarization streams summed |
+| `sense` | scalar | `int64` | Spectral sense, `+1` or `-1` |
 
-When `pilot_in_band == 0` the channel carries no in-band pilot: every frame is
-emitted `valid = 0`, `reject_mask = 0`, with zeroed powers, and **both integrated
-spectra stay zero** (no valid frame enters them).
+The schema does not fix `nfft` to one value. The current software profile and
+tests use 16,384 samples, which is associated with the planned CHIME engine
+upgrade. The active acquisition value must be recorded from the run; a
+12,288-sample current-frame value remains provisional until independently
+verified. Any accepted value must be divisible by `K`.
+
+If the nominal ATSC pilot does not fall within half a coarse-channel bandwidth,
+the analyzer sets `pilot_in_band = 0`. It still emits one row per input frame,
+but sets `valid = 0`, `reject_mask = 0`, and the integer detector powers to
+zero. Derived detector values and `baseband_power_linear` are NaN, and neither
+integrated spectrum receives the frame.
 
 ## Per-frame detector output (length `N`)
 
-| Array            | Shape    | Dtype     | Meaning                                  |
-| ---------------- | -------- | --------- | ---------------------------------------- |
-| `frame_index`    | `(N,)`   | `int64`   | 0-based positional frame counter         |
-| `p_target_u64`   | `(N, 1)` | `uint64`  | Target-bin power (raw fixed point)       |
-| `p_ref_sum_u64`  | `(N, 1)` | `uint64`  | Lower + upper reference power            |
-| `fstat_raw`      | `(N, 1)` | `float64` | `2*p_target / p_ref_sum`                 |
-| `fstat_level_db` | `(N, 1)` | `float64` | `10*log10(F)`                            |
-| `pnr_bin_db`     | `(N, 1)` | `float64` | One-bin pilot-excess PNR                 |
-| `snr_shelf_db`   | `(N, 1)` | `float64` | Estimated ATSC data-shelf SNR            |
-| `valid`          | `(N, 1)` | `uint8`   | `p_ref_sum != 0`                         |
-| `reject_mask`    | `(N, 1)` | `uint8`   | `1 = discard` (positive excess)          |
-| `pilot_excess_corrected` | `(N, 1)` | `float64` | `F/mu0 - 1` (NaN where invalid)  |
-| `target_norm_sq` | `(1,)`   | `int64`   | Exact `||w_target||^2` of the int4 weights |
-| `ref_norm_sum_sq`| `(1,)`   | `int64`   | Exact `||w_ref_lo||^2 + ||w_ref_up||^2`  |
-| `mu0`            | `(1,)`   | `float64` | `2*target_norm_sq/ref_norm_sum_sq`       |
-| `baseband_power_linear` | `(N, 1)` | `float64` | Per-frame non-coherent baseband power |
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `frame_index` | `(N,)` | `int64` | Zero-based positional frame counter |
+| `p_target_u64` | `(N, 1)` | `uint64` | Target-bin power from the fixed-point detector |
+| `p_ref_sum_u64` | `(N, 1)` | `uint64` | Lower plus upper reference power |
+| `fstat_raw` | `(N, 1)` | `float64` | `2*p_target/p_ref_sum` |
+| `fstat_level_db` | `(N, 1)` | `float64` | `10*log10(F)` |
+| `pnr_bin_db` | `(N, 1)` | `float64` | One-bin pilot-excess PNR |
+| `snr_shelf_db` | `(N, 1)` | `float64` | Estimated ATSC data-shelf SNR |
+| `valid` | `(N, 1)` | `uint8` | `p_ref_sum != 0` |
+| `reject_mask` | `(N, 1)` | `uint8` | `1 = discard` under the recorded positive-excess rule |
+| `pilot_excess_corrected` | `(N, 1)` | `float64` | `F/mu0 - 1`, or NaN when invalid |
+| `target_norm_sq` | `(1,)` | `int64` | Exact `||w_target||^2` of the int4 weights |
+| `ref_norm_sum_sq` | `(1,)` | `int64` | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
+| `mu0` | `(1,)` | `float64` | `2*target_norm_sq/ref_norm_sum_sq` |
+| `baseband_power_linear` | `(N, 1)` | `float64` | Mean non-coherent baseband power for the frame |
 
-`p_target_u64` / `p_ref_sum_u64` are the **raw num/den** kept verbatim: any
-alternative threshold or dB recalibration is a post-hoc recompute against these,
-never a re-run.
+The product stores `p_target_u64` and `p_ref_sum_u64` without converting them to
+a thresholded statistic. We can therefore recompute an alternative F threshold
+or dB calibration from the same detector pass, provided the required calibration
+constants are also used. This does not require rerunning the CUDA detector.
 
 ### Mask convention
 
-`reject_mask` is parameter-free, **norm-corrected** positive excess — discard a
-frame when the pilot bin exceeds the detector's own flat-floor H0 zero-point
-`mu0 = 2*target_norm_sq/ref_norm_sum_sq` (int4 quantization leaves the three
-weight-term norms unequal, so `E[F] = mu0`, not 1):
+The current `reject_mask` compares the target and reference powers after
+correcting for unequal quantized weight norms. A valid frame is rejected when:
 
 ```text
 reject_mask = valid && (p_target_u64 * ref_norm_sum_sq
-                        > target_norm_sq * p_ref_sum_u64)   # mask_rule
-            = valid && (F > mu0)                            # exact integer form
+                        > target_norm_sq * p_ref_sum_u64)
+            = valid && (F > mu0)
 ```
 
-Products written before the correction declare
-`valid && (p_target_u64 > (p_ref_sum_u64 >> 1))` (that is, `F > 1`) in
-`mask_rule` and omit the norm fields; resume refuses to mix the two rules.
+The integer cross multiplication is the recorded `mask_rule`. It avoids a
+floating-point threshold decision and uses the weight-norm flat-floor reference
+`mu0 = 2*target_norm_sq/ref_norm_sum_sq` rather than assuming `mu0 = 1`.
 
-The multiply-ready **`keep_mask = 1 - reject_mask`** is derived in reporting
-(e.g. a spectrogram is `power ⊙ keep_mask`); it is not stored.
+Earlier products can declare:
+
+```text
+valid && (p_target_u64 > (p_ref_sum_u64 >> 1))
+```
+
+That legacy rule is equivalent to `F > 1` and does not carry the norm fields.
+Resume rejects a product whose mask rule or required provenance does not match
+the current analyzer.
+
+Reporting can derive `keep_mask = 1 - reject_mask`; the per-pilot product does
+not store a second copy.
 
 ## Integrated power spectra
 
-Rectangular-window `|FFT|^2` of each frame's raw samples, summed over feeds and
-accumulated over frames. The window is permanently rectangular because the stored
-quantity is the accumulated `|FFT|^2`, not per-frame complex spectra.
+For each full analysis frame, the analyzer computes a rectangular-window FFT of
+the raw samples, sums `|FFT|^2` over input streams, and accumulates the result.
 
-| Array                             | Shape     | Dtype     | Meaning                          |
-| --------------------------------- | --------- | --------- | -------------------------------- |
-| `integrated_spectrum_before_mask` | `(nfft,)` | `float64` | Σ over **valid** frames          |
-| `integrated_spectrum_after_mask`  | `(nfft,)` | `float64` | Σ over **kept** frames           |
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `integrated_spectrum_before_mask` | `(nfft,)` | `float64` | Sum over valid frames |
+| `integrated_spectrum_after_mask` | `(nfft,)` | `float64` | Sum over valid frames with `reject_mask = 0` |
 
-`before` integrates valid frames; `after` integrates valid **and** not-rejected
-frames, so `before - after` is exactly the spectrum the mask removed. Stored
-raw-accumulated; per-feed / per-frame normalization is a reporting choice. Bin
-`k` is baseband frequency `((k + nfft//2) % nfft - nfft//2) * fs / nfft`, with
-`fs = 1 / unit_delta_time`.
+Therefore `before - after` is the accumulated spectrum of frames rejected by
+the stored mask. The arrays are raw accumulated power; normalization by frame
+count or input-stream count is a reporting choice.
 
-The FFT runs on the GPU (cupy) on a CANFAR node and on numpy off-GPU; the
-arithmetic is identical (float64 accumulation of the feed sum).
+Bin `k` maps to baseband frequency by:
+
+```text
+((k + nfft//2) % nfft - nfft//2) * fs / nfft
+```
+
+where `fs = 1 / unit_delta_time` when every contributing unit has the same
+finite sample period. If the periods differ, one shared frequency axis is not
+defined; the canonical combine rejects that mixture.
+
+The production path uses CuPy when a GPU runtime is available, while tests can
+use NumPy. Both implement the same FFT and float64 feed-sum accumulation, but
+their results can differ by normal floating-point roundoff. The stored spectra
+contain accumulated power rather than per-frame complex FFT values. As a
+result, a different window or a different mask threshold requires a new spectral
+pass; those choices cannot be reconstructed from these two accumulated arrays.
 
 ## Absolute-time axis
 
-Per-unit values read from each file's HDF5 root attrs (aligned 1:1 with
-`unit_order`), plus per-frame tags that locate each frame in that axis. This
-avoids storing a timestamp per frame.
+The packed HDF5 reader copies timing and event attributes from each file into a
+per-unit table aligned with `unit_order`. Two per-frame arrays identify the
+corresponding unit and the frame position within that unit. This avoids storing
+one absolute timestamp per frame.
 
-| Array               | Shape  | Dtype     | Meaning                                  |
-| ------------------- | ------ | --------- | ---------------------------------------- |
-| `unit_time0_ctime`  | `(U,)` | `float64` | File start time (UNIX), NaN if absent    |
-| `unit_time0_fpga`   | `(U,)` | `uint64`  | FPGA frame counter at start, 0 if absent |
-| `unit_event_id`     | `(U,)` | `int64`   | CHIME event id, `-1` if absent           |
-| `unit_delta_time`   | `(U,)` | `float64` | Sample period (s), NaN if absent         |
-| `archive_version`   | `(U,)` | `str`     | CHIME archive version, `""` if absent    |
-| `frame_unit_index`  | `(N,)` | `int32`   | Unit `u` each frame belongs to           |
-| `frame_in_unit`     | `(N,)` | `int32`   | Frame's time position within its unit    |
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `unit_time0_ctime` | `(U,)` | `float64` | File start UNIX time, or NaN when absent |
+| `unit_time0_fpga` | `(U,)` | `uint64` | FPGA count at file start, or 0 when absent |
+| `unit_event_id` | `(U,)` | `int64` | CHIME event identifier, or `-1` when absent |
+| `unit_delta_time` | `(U,)` | `float64` | Sample period in seconds, or NaN when absent |
+| `archive_version` | `(U,)` | `str` | CHIME archive version, or an empty string when absent |
+| `frame_unit_index` | `(N,)` | `int32` | Unit index `u` for each frame |
+| `frame_in_unit` | `(N,)` | `int32` | Zero-based frame position within unit `u` |
 
-Per-frame wall time, with `u = frame_unit_index[f]`:
+For frame `f`, compute wall time with:
 
 ```python
-t[f] = unit_time0_ctime[u] + frame_in_unit[f] * nfft * unit_delta_time[u]
+u = frame_unit_index[f]
+t = unit_time0_ctime[u] + frame_in_unit[f] * nfft * unit_delta_time[u]
 ```
 
-A synthetic file carries only `freq`; the time axis then degrades to
-`NaN / 0 / -1 / ""` rather than failing the run.
+If a synthetic or incomplete file lacks the root attributes, the analyzer stores
+`NaN / 0 / -1 / ""` and continues. Any LST or wall-time analysis must first
+exclude those missing values.
 
 ## Provenance and calibration
 
-| Array               | Shape  | Dtype     | Meaning                                  |
-| ------------------- | ------ | --------- | ---------------------------------------- |
-| `weights_hash`      | scalar | `str`     | SHA-256 of the selected detector weights |
-| `weight_bank_sha256` | scalar | `str`    | SHA-256 of the complete weight bank      |
-| `weight_manifest_sha256` | scalar | `str` | SHA-256 of the adjacent manifest         |
-| `detector_version`  | scalar | `str`     | Package, source-tree, and kernel identity |
-| `mask_rule`         | scalar | `str`     | The positive-excess rule (above)         |
-| `reference_placement_json` | scalar | `str` | Auditable placement summary (JSON)   |
-| `rational_overflow_count` | scalar | `uint64` | Kernel fixed-point overflow tally   |
-| `max_chunks_per_file` | scalar | `int64` | Per-file cap, or `-1`                    |
-| `detector_contract_json` | scalar | `str` | Full detector contract (JSON)           |
-| `pilot_below_data_db`, `bin_enbw_hz`, `dtv_bandwidth_hz`, `pilot_capture_efficiency` | scalar | `float64` | dB-calibration constants |
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `weights_hash` | scalar | `str` | SHA-256 of the selected packed weight profile |
+| `weight_bank_sha256` | scalar | `str` | SHA-256 of the complete weight bank, or empty for injected weights |
+| `weight_manifest_sha256` | scalar | `str` | SHA-256 of the adjacent manifest, or empty when unavailable |
+| `detector_version` | scalar | `str` | Package, source-tree, kernel, schema, and `K` identity string |
+| `mask_rule` | scalar | `str` | Integer rejection rule used for this product |
+| `reference_placement_json` | scalar | `str` | Selected reference-placement metadata encoded as JSON |
+| `rational_overflow_count` | scalar | `uint64` | Accumulated fixed-point overflow telemetry |
+| `max_chunks_per_file` | scalar | `int64` | Per-file cap, or `-1` when uncapped |
+| `detector_contract_json` | scalar | `str` | Full detector contract encoded as JSON |
+| `pilot_below_data_db` | scalar | `float64` | Pilot-to-data-shelf calibration constant |
+| `bin_enbw_hz` | scalar | `float64` | Detector-bin equivalent noise bandwidth |
+| `dtv_bandwidth_hz` | scalar | `float64` | Assumed DTV bandwidth |
+| `pilot_capture_efficiency` | scalar | `float64` | Pilot capture-efficiency factor |
 
-Plus resume/alignment keys: `unit_keys`, `unit_order`, `source_event_keys`.
-A resume is accepted only when these configuration/provenance fields match the
-current analyzer exactly; otherwise the run must use a clean output directory.
+The file also stores keys needed for resume and channel alignment:
+
+| Array | Shape | Meaning |
+|---|---:|---|
+| `unit_keys` | `(U,)` | Sorted set of committed datatrawl unit keys |
+| `unit_order` | `(U,)` | Unit keys in analyzer consumption order |
+| `source_event_keys` | `(U,)` | Event identity used to align the same acquisition across `freq_id` products |
+
+Resume checks the schema, `freq_id`, frame cap, detector geometry, calibration,
+weights, mask rule, detector contract, and reference placement. A source-tree
+hash change is allowed only when the remaining `detector_version` geometry and
+kernel tokens match. Other mismatches stop the run and require a clean output
+directory.
 
 ---
 
 ## Derived in reporting (not stored)
 
-Computed downstream from the fields above; never baked into the run so the choice
-of binning / normalization / threshold stays free:
+The frame-level fields support these downstream products without another CUDA
+detector pass:
 
-- `keep_mask = 1 - reject_mask` (the `power ⊙ keep_mask` array).
-- Carrier spread from `integrated_spectrum_before_mask` (peak bin, width, sidebands).
-- 23-channel baseband before/after from `baseband_power_linear` gated on `reject_mask`.
-- F-statistic PDF / histogram / **survival** from raw `p_target_u64` / `p_ref_sum_u64`.
-- Masked fraction from `reject_mask` / `valid`.
-- Spectrum before-vs-after from the two integrated spectra.
-- LST / time dependence from the absolute-time axis at CHIME's longitude.
+- `keep_mask = 1 - reject_mask`;
+- F-statistic histograms and survival curves from the raw integer powers;
+- alternative frame-level thresholds from the raw powers and norms;
+- masked fraction from `reject_mask` and `valid`;
+- baseband before/after summaries from `baseband_power_linear` and a selected
+  frame mask;
+- per-frame wall time, and then LST where the timing attributes and telescope
+  longitude are available.
 
-Full 6 MHz DTV-channel mask expansion is intentionally **not** in this run; it is
-a separate, larger pass once the pilot F-statistic is trusted.
+The stored integrated spectra support the spectrum before/after comparison for
+the mask used during the run. They do not preserve enough information to apply a
+new frame threshold or FFT window after the fact.
+
+Full 6 MHz DTV-channel mask expansion is not part of this product. It requires a
+larger pass over the neighboring coarse channels after the pilot detector has
+been validated.

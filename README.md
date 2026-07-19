@@ -6,55 +6,58 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
 </p>
 
-`pilot-proxy` is a standalone CUDA F-statistic detector and GNU Radio ATSC 1.0
-validation testbench for estimating and detecting sub-noise-floor ATSC 1.0 DTV
-signals by using the ATSC pilot tone as a proxy for the data shelf.
+`pilot-proxy` evaluates an F-statistic detector for Advanced Television Systems
+Committee (ATSC) 1.0 digital television (DTV) signals. We use the narrow ATSC
+pilot tone as a measurable proxy for the broadband data shelf. This provides a
+narrow-band observable when the shelf is below the instantaneous noise level.
+The repository includes a standalone CUDA detector and a GNU Radio validation
+testbench.
 
-The package has two supported operating modes:
+The package has two main workflows:
 
-1. **Standalone synthetic/testbench mode** for clean ATSC generation, quantization,
-   CUDA-kernel evaluation, and controlled SNR sweeps.
+1. **Standalone synthetic/testbench mode** for ATSC generation without injected
+   noise, quantization, CUDA-kernel evaluation, and controlled SNR sweeps.
 2. **CHIME real-data mode** for baseband HDF5 data. The recommended archive-scale
-   entry point is `pilot-proxy chime-scan`, which runs the PilotProxy analyzers through
-   the `datatrawl` streaming engine and then combines the per-pilot products into
-   PilotProxy's canonical CHIME outputs.
+   entry point is `pilot-proxy chime-scan`. This command runs the PilotProxy
+   analyzer through the `datatrawl` streaming engine, then attempts to combine
+   the per-pilot products into the canonical CHIME outputs.
 
-The standalone detector core remains telescope-independent. Receiver or telescope
-integrations provide metadata and arrays; they do not change the CUDA kernel
-contract.
+The detector core is telescope-independent. A receiver integration supplies the
+metadata and arrays needed to satisfy the CUDA kernel contract; it does not
+change that contract.
 
 ---
 
 ## Choose your workflow
 
-`pilot-proxy` supports several independent paths. Pick your goal first --- it
-determines which guide you follow:
+The repository supports several workflows with different dependencies. Choose
+the row that matches the result you need:
 
 | Goal | Guide to follow | Needs GPU? | Needs datatrawl? |
 | --- | --- | :---: | :---: |
-| Run the CHIME detector on the CADC archive (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) --- complete and self-contained | Yes | Yes |
+| Run the CHIME detector on the CADC archive (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) | Yes | Yes |
 | Check the package installs and the CLI loads | This README: minimal CPU-only smoke test (below) | No | No |
 | Generate / audit synthetic ATSC | This README: standalone testbench | Partly | No |
 | Run the CUDA detector / SNR evaluation | This README: standalone CUDA path | Yes | No |
 | Publication SNR sweeps without a GPU | This README: `pilot-proxy evaluate-snr --detector-backend cpu-reference --noise-source python` | No | No |
 
-**Headed for CANFAR?** Go straight to the
-[runbook](docs/CANFAR_RUNBOOK.md): session launch, both clones, the
-environment (`setup_env.sh`), the CUDA kernel, survey, and scan --- in order,
-with nothing below as a prerequisite. The sections below are the guide for
-the standalone workflows; the smoke test is optional on the runbook path
-(`setup_env.sh` runs its own sanity checks).
+For a CANFAR run, begin with the
+[runbook](docs/CANFAR_RUNBOOK.md). It gives the required order: launch the
+session, clone both repositories, run `setup_env.sh` to build the environment
+and CUDA kernel, survey the archive, and run the scan. The standalone sections
+below are not prerequisites. `setup_env.sh` performs its own sanity checks, so
+the README smoke test is also optional on that path.
 
 ---
 
 ## Environment
 
-The standalone workflows below run inside one Python virtual environment. Choose
-any writable, persistent path for the venv; it does **not** need to live inside
-the source checkout. Use a Python that can create virtual environments; on
-minimal Debian/Ubuntu installs, install `python3-venv` first, or set
-`PYTHON_BIN` to a Miniconda/session Python that already includes `venv` and
-`ensurepip`.
+We run the standalone workflows in one Python virtual environment. The virtual
+environment can be in any writable, persistent directory; it does **not** need
+to be inside the source checkout. The selected Python must include `venv` and
+`ensurepip`. On a minimal Debian or Ubuntu installation, install
+`python3-venv`, or set `PYTHON_BIN` to a Miniconda or session Python that already
+provides them.
 
 ```bash
 export VENV_DIR="${VENV_DIR:-$HOME/.venvs/pilot-proxy-datatrawl}"
@@ -64,23 +67,23 @@ mkdir -p "$(dirname "$VENV_DIR")"
 source "$VENV_DIR/bin/activate"
 ```
 
-The venv is not optional on shared or image-managed Pythons (CANFAR session
-images, PEP 668 "externally managed" distros): a bare `pip install` there
-fails with `Permission denied` writing the console script.
-`--system-site-packages` keeps a session image's CuPy/CUDA stack importable
-for the GPU workflows. Re-activate on every **new** session; the venv
-persists if `VENV_DIR` points at persistent storage (on CANFAR, under `/arc`).
-CANFAR runbook users do not create this venv by hand: `setup_env.sh` builds ---
-and recreates --- its own configured venv.
+Shared and image-managed Python installations may be read-only or marked as
+PEP 668 externally managed. In those environments, install into the virtual
+environment rather than using bare `pip`. The `--system-site-packages` option
+keeps a session image's CuPy and CUDA packages visible to the GPU workflows.
+Activate the environment in every **new** session. It persists only when
+`VENV_DIR` is on persistent storage, such as `/arc` on CANFAR. The CANFAR
+runbook uses `setup_env.sh`, which creates and recreates its own configured
+environment; do not create that environment by hand.
 
 ---
 
 ## Fresh clone and minimal CPU-only smoke test
 
-This verifies the Python package, the CLI entry point, and the reference detector
-metadata **without** GNU Radio, datatrawl, CADC credentials, CUDA, or CHIME HDF5
-data --- a good first step before any of the standalone workflows. Run it
-inside the [environment](#environment) above.
+This smoke test checks the Python package, CLI entry point, and reference
+detector metadata. It does **not** require GNU Radio, datatrawl, CADC
+credentials, CUDA, or CHIME HDF5 data. Run it inside the
+[environment](#environment) above before using a standalone workflow.
 
 ```bash
 export REPO_DIR="${REPO_DIR:-$PWD/pilot-proxy}"
@@ -99,35 +102,41 @@ pilot-proxy check-layout \
 
 ### Repository test targets
 
-The smoke test above only runs `tests/test_cli.py`. To run the repository's
-Python test target, install the test extra first:
+The smoke test runs only `tests/test_cli.py`. To run the repository's Python
+test target, install the test extra and use:
 
 ```bash
 python -m pip install -e ".[test]"
 make test-python
 ```
 
-The `test` extra includes `h5py` because the checked-in Python tests cover CHIME
-HDF5 adapters. No CHIME data files are required.
+The `test` extra includes `h5py` because the checked-in tests exercise the CHIME
+HDF5 adapters. These tests generate or mock their inputs, so they do not require
+CHIME data files. Tests that import optional packages, including the datatrawl
+integration suite, are skipped when those packages are not installed.
 
-`make test` is **not** CPU-only: it runs `test-kernel` and then `test-python`.
-Run it only on a CUDA build/test host after these checks pass:
+`make test` runs `test-kernel` before `test-python`; therefore, it is **not** a
+CPU-only target. Use it on a CUDA build host after checking both the driver and
+compiler:
 
 ```bash
 command -v nvidia-smi && nvidia-smi --query-gpu=name,compute_cap --format=csv
 command -v nvcc && nvcc --version
 ```
 
-`nvidia-smi` comes from the NVIDIA driver/tooling, not from Python. On WSL it
-comes through the Windows NVIDIA driver with WSL CUDA support; on Linux it comes
-from the NVIDIA driver packages. If `nvidia-smi` is unavailable, do not run
-`make test` or `make test-kernel`; use `make test-python` instead. `make
-release-check` adds the CPU C/C++ reference checks plus profile/layout and
-runtime-bundle validation (needs a C++ compiler, not a GPU).
+`nvidia-smi` is part of the NVIDIA driver tooling, not Python. On WSL, it is
+provided through a Windows NVIDIA driver with WSL CUDA support. On Linux, it is
+provided by the NVIDIA driver packages. If `nvidia-smi` is unavailable, use
+`make test-python` instead of `make test` or `make test-kernel`. The
+`make release-check` target adds CPU C/C++ reference checks, profile and layout
+checks, and runtime-bundle validation. It requires a C++ compiler but not a GPU.
 
 ---
 
 ## Contents
+
+The repository separates the detector, integration code, configuration, and
+operating documentation as follows:
 
 - `cuda/` - CUDA kernel, public C header, CPU C++ reference, and C++ tests.
 - `src/pilot_proxy/` - Python package for kernel loading, detector geometry,
@@ -163,36 +172,39 @@ runtime-bundle validation (needs a C++ compiler, not a GPU).
   GNU Radio; environment-specific defaults --- override `SM`, `CUDA_PYTHON`,
   `GNURADIO_PYTHON`).
 
-Documentation is committed as source. Generated PDFs, figures, products, and CUDA
-shared libraries are build artifacts and should not be committed.
+We commit the documentation sources. Generated PDFs, figures, products, and
+CUDA shared libraries are build artifacts and should not be committed.
 
-Built wheels include the shipped receiver profiles, stream map, weight bank, and weight
-manifest. The CUDA shared library remains architecture-specific: build it from a source
-checkout and stage it under ``~/.cache/pilot_proxy/libfstatistic.so`` before running the
-GPU detector.
+Built wheels include the shipped receiver profiles, stream map, weight bank, and
+weight manifest. The CUDA shared library is architecture-specific and is not
+included. Before running the GPU detector, build the library from a source
+checkout and stage it under ``~/.cache/pilot_proxy/libfstatistic.so``.
 
 ---
 
 ## Setup for the CHIME / CANFAR workflow
 
-The integrated workflow needs both repositories checked out. `scripts/setup_env.sh`
-creates a clean virtual environment, installs both repos editable (CADC/survey and
-CHIME extras), resolves CuPy through datatrawl's `accel` module, builds the CUDA
-kernel when `nvcc` is available, and verifies that the PilotProxy datatrawl plugins
-are discoverable. It **removes and recreates** the target venv, so do not point
-`VENV_DIR` at one you need to keep.
+The integrated workflow uses checkouts of both `pilot-proxy` and `datatrawl`.
+The `scripts/setup_env.sh` script recreates a virtual environment, installs both
+repositories in editable mode with the CADC, survey, CHIME, and test extras,
+resolves CuPy through datatrawl's `accel` module, and checks plugin discovery.
+On a GPU node, it also requires `nvcc`, builds the CUDA kernel, and checks that
+the kernel loads. Because the script **removes and recreates** the target
+environment, do not set `VENV_DIR` to an environment you need to preserve.
 
-The full setup procedure --- the exact `setup_env.sh` invocation, the manual
-(no-recreate) fallback, GPU-session launch, Harbor registry credentials, required
-inputs, and the bounded run sequences --- is in
+The full procedure is in
 [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup).
-Integration-specific setup notes are in [INTEGRATION.md](INTEGRATION.md#setup).
+It gives the exact `setup_env.sh` invocation, a manual setup that does not
+recreate an environment, GPU-session launch, Harbor registry credentials,
+required inputs, and bounded run sequences. Integration-specific details are in
+[INTEGRATION.md](INTEGRATION.md#setup).
 
 ---
 
 ## Receiver integration contract
 
-Receiver integrations provide:
+A receiver integration translates telescope data into the detector's fixed
+input contract. It provides:
 
 - `receiver_profile.json` describing RF band, channelizer geometry, spectral
   sense, frame size, input streams, quantization policy, bin ENBW, and pilot
@@ -201,13 +213,13 @@ Receiver integrations provide:
 - channelized complex input arrays or packed detector matrices;
 - a generated weight bank built from the receiver profile.
 
-The CUDA kernel sees only:
+After this translation, the CUDA kernel sees only:
 
 - packed int4 detector rows;
 - packed int4 weights;
 - uint64 target/reference powers.
 
-CHIME real-data run products include a stable detector contract in
+CHIME run products record the detector contract in
 `run_config.json` and `stats.json` with:
 
 - `schema_version = pilotproxy_chime_detector_contract_v1`;
@@ -225,55 +237,61 @@ pilot-proxy check-profile   --receiver-profile configs/receiver_profiles/chime_d
 pilot-proxy check-layout   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json   --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
-The shipped receiver profiles have different roles:
+The shipped receiver profiles have different roles and evidential status:
 
 - `reference_800mhz_pfb.json` is the single-stream detector-coordinate reference
   profile used for shipped reference weights and tests.
-- `chime_dtv_fengine.json` is the CHIME DTV real-data adapter profile: 2048
-  feed-polarization streams, inverted spectral sense, and descending RF channel
-  order.
+- `chime_dtv_fengine.json` is the target CHIME DTV adapter profile used by the
+  current integration: 2048 feed-polarization streams, inverted spectral sense,
+  descending RF channel order, and `frame_size_samples=16384`. The 16384-sample
+  frame is the target for the CHIME Engine upgrade, not a claim about the
+  currently deployed frame. The file is explicitly marked
+  `example_requires_data_product_verification`; therefore, verify these values
+  against the data product used for an operational run.
 
 ---
 
 ## Weight bank
 
-Generate the default CHIME DTV weight bank with:
+We generate the default CHIME DTV weight bank from the receiver and detector
+profiles:
 
 ```bash
 pilot-proxy make-weights   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json   --detector-core-profile configs/detector_core/pilotproxy_cuda_fstat_v1.json   --physical-channel-range 14:36   --weight-coordinate-system post_spectral_sense_normalization   --output weights/chime_dtv_weights_k128.bin
 ```
 
-The default detector path expects this data file:
+By default, the detector looks for:
 
 ```text
 weights/chime_dtv_weights_k128.bin
 ```
 
-Do not run the `.bin` directly; it is a detector weight bank, not an executable.
-Leave the default in place, or pass it explicitly to commands that consume
-weights, for example:
+The `.bin` file contains detector weights; it is not an executable. Leave it at
+the default path, or pass the path explicitly to a command that consumes the
+weights:
 
 ```bash
 pilot-proxy list-channels --weights-path weights/chime_dtv_weights_k128.bin
 pilot-proxy chime-run --weights-path weights/chime_dtv_weights_k128.bin --help
 ```
 
-`list-channels` reports whether reference placement was adaptive for each
-physical channel; adaptive cases also print an explanatory `NOTE` to the screen
-without changing the CSV output. The shipped K=128 bank uses
-`reference_offset_bins=2` and `skipped_guard_bins=1`: one fine bin is skipped on
-each side of the target, and the next fine bin is used as the lower/upper
-reference. If a requested reference would leave the coarse-channel edge, it wraps
-around the circular coarse-channel FFT. If a requested reference collides with
-the forbidden coarse-channel DC tone, that reference shifts one bin farther from
-the target and records a placement warning in the weight manifest. If the target
-itself collides with DC, weight generation fails hard because the target signal
-cannot be moved. For the shipped ATSC 14-36 CHIME bank, only physical channel 21
-uses adaptive placement: its lower reference wraps across the coarse-channel
-edge. Physical channel 14 has DC inside the skipped guard region but no
-target/reference DC collision, so it is not marked adaptive.
+`list-channels` reports the reference placement for each physical channel.
+Adaptive cases also print an explanatory `NOTE` without changing the CSV
+output. The shipped K=128 bank uses `reference_offset_bins=2` and
+`skipped_guard_bins=1`. We skip one fine bin on each side of the target and use
+the next fine bin as the lower or upper reference. A reference that crosses a
+coarse-channel edge wraps around the circular coarse-channel FFT. A reference
+that collides with the forbidden coarse-channel DC tone moves one bin farther
+from the target, and the manifest records a placement warning. A target-DC
+collision stops weight generation because the target cannot be moved.
 
-Export and validate a compact runtime bundle with:
+For the shipped ATSC 14-36 CHIME bank, physical channel 21 is the only adaptive
+case: its lower reference wraps across the coarse-channel edge. Physical channel
+14 places DC inside the skipped guard region, but neither the target nor a
+reference collides with DC. It is therefore not marked adaptive.
+
+For deployment, export the profiles and weights as a compact runtime bundle,
+then validate that bundle:
 
 ```bash
 pilot-proxy export-runtime-weight-bundle   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json   --detector-core-profile configs/detector_core/pilotproxy_cuda_fstat_v1.json   --weight-coordinate-system post_spectral_sense_normalization   --physical-channel-range 14:36   --output-dir generated/deploy/chime_dtv_k128
@@ -291,7 +309,8 @@ On a GPU host:
 nvidia-smi --query-gpu=name,compute_cap --format=csv
 ```
 
-Convert compute capability to `SM` by removing the decimal point. Examples:
+The build uses the integer `SM` form of the compute capability. Remove the
+decimal point to obtain it:
 
 | Compute capability | `SM` |
 |---:|---:|
@@ -300,54 +319,55 @@ Convert compute capability to `SM` by removing the decimal point. Examples:
 | 8.9 | 89 |
 | 9.0 | 90 |
 
-The Python side of the GPU path uses CuPy. The integrated CHIME/CANFAR workflow
-installs it via `setup_env.sh` (which delegates to `datatrawl setup-cupy`); for the
-standalone workflow, install the build matching your CUDA runtime directly, e.g.
-`python -m pip install -e ".[cuda]"` (CUDA 12.x) or the appropriate
-`cupy-cudaXXx` wheel for your driver.
+The Python GPU path uses CuPy. In the integrated CHIME/CANFAR workflow,
+`setup_env.sh` resolves CuPy through datatrawl's `accel` API. For a standalone
+CUDA 12.x workflow, use `python -m pip install -e ".[cuda]"`. The `cuda` extra
+installs `cupy-cuda12x`; use the corresponding `cupy-cudaXXx` package when the
+runtime is not CUDA 12.x.
 
-Both `setup_env.sh` and the `make` targets themselves detect your GPU's `SM`
-automatically (first visible device via `nvidia-smi`). Pass `SM=<arch>` only to
-cross-compile for a different GPU or when detection fails; the table above gives
-the values. The build keys on the arch and kernel-config flags, so switching
-GPUs (or flags) between sessions forces the recompile automatically.
+Both `setup_env.sh` and the `make` targets detect `SM` from the first GPU visible
+to `nvidia-smi`. Pass `SM=<arch>` only when detection fails or when
+cross-compiling for another architecture. The build records the architecture
+and kernel configuration in its build stamp. If either value changes, the next
+build recompiles the kernel.
 
 ### CUDA toolchain (`nvcc`)
 
-Building the kernel needs the CUDA compiler, `nvcc`. Confirm it is on `PATH`:
+The kernel build requires the CUDA compiler, `nvcc`. Check that it is on
+`PATH`:
 
 ```bash
 command -v nvcc && nvcc --version
 ```
 
-On CANFAR CUDA images `nvcc` is often installed under `/usr/local/cuda/bin` but
-not on `PATH`. If `command -v nvcc` prints a path such as `/usr/bin/nvcc`, do
-not pass `NVCC=` at all; just run `make build-kernel`. If `nvcc` is not on
-`PATH`, locate the real compiler path first:
+On some CANFAR CUDA images, `nvcc` is installed under `/usr/local/cuda/bin` but
+that directory is not on `PATH`. If `command -v nvcc` returns a path such as
+`/usr/bin/nvcc`, use `make build-kernel` without setting `NVCC`. Otherwise,
+locate the compiler:
 
 ```bash
 find /usr/local -maxdepth 4 -path '*/bin/nvcc' -type f 2>/dev/null
 ```
 
-Then either add that directory to `PATH` (persist it in `~/.bashrc`):
+Then add its directory to `PATH`:
 
 ```bash
 export PATH=/path/to/cuda/bin:$PATH
 ```
 
-or point the build at it directly --- `cuda/Makefile` honours `NVCC=`:
+Alternatively, pass the compiler path directly. `cuda/Makefile` honors
+`NVCC=`:
 
 ```bash
 make build-kernel NVCC=/path/to/cuda/bin/nvcc
 ```
 
-If `nvcc` is absent entirely, use a CANFAR image that ships the CUDA *toolkit*
-(e.g. `skaha/astroml-cuda`), or install one matching the runtime CUDA version
-(your distro's `cuda-toolkit` package). A
-runtime-only image with CuPy but no compiler cannot build the kernel, and `make
-test` / `make test-kernel` fail at the `nvcc` step. On a CPU-only host, run `make
-test-python` (the Python suite) or `make release-check` (adds the CPU C/C++
-reference) instead --- neither needs a GPU.
+If `nvcc` is absent, use a CANFAR image that includes the CUDA *toolkit*, such as
+`skaha/astroml-cuda`, or install a toolkit that matches the runtime. A
+runtime-only image may run CuPy while still lacking the compiler needed for this
+kernel. In that case, `make test` and `make test-kernel` stop at the `nvcc`
+step. On a CPU-only host, use `make test-python` or `make release-check`; neither
+target requires a GPU.
 
 Build and stage the kernel:
 
@@ -361,7 +381,8 @@ This builds `cuda/libfstatistic.so` and stages a copy to:
 ~/.cache/pilot_proxy/libfstatistic.so
 ```
 
-Validate the kernel load and compile-time contract through Python:
+After building, load the library through Python and print its compile-time
+contract:
 
 ```bash
 PYTHONPATH=src python - <<'PY'
@@ -373,13 +394,13 @@ print(kernel.version.as_string())
 PY
 ```
 
-This output describes the CUDA kernel contract, not the full receiver frame
-layout. `detector_window_samples=128` is `K`: the row length and the number of
-coefficients in each of the three packed weight-term vectors (target, lower
-reference, upper reference). It is **not** the full frame length.
+This output describes the CUDA kernel, not the complete receiver frame.
+`detector_window_samples=128` is `K`. It is both the detector-row length and the
+number of coefficients in each packed weight vector: target, lower reference,
+and upper reference. It is **not** the receiver frame length.
 
-The receiver profile supplies `frame_size_samples`. The default profiles use
-`frame_size_samples=16384`, so:
+The receiver profile supplies `frame_size_samples`. Both shipped profiles set
+`frame_size_samples=16384`, so the tested configuration gives:
 
 ```text
 windows_per_stream = frame_size_samples / detector_window_samples
@@ -389,16 +410,18 @@ windows_per_stream = frame_size_samples / detector_window_samples
 detector_rows_per_frame = num_input_streams * num_selected_channels * windows_per_stream
 ```
 
-For the CHIME profile with one selected coarse channel, this is:
+For the target CHIME profile and one selected coarse channel, the row count is:
 
 ```text
 2048 feed-pol streams * 1 selected channel * 128 windows_per_stream = 262144 rows
 ```
 
-So one CHIME frame is packed as `(262144, 128)`, and a batched chunk is packed
-as `(frames_in_chunk, 262144, 128)`. The kernel sums target/reference powers
-over all detector rows before forming one F-statistic per frame/block. To check
-the derived row count for a profile:
+Thus, one frame in this profile is packed as `(262144, 128)`, and a batch is
+packed as `(frames_in_chunk, 262144, 128)`. The kernel sums the target and
+reference powers over every detector row before it forms one F-statistic for the
+frame or block. This geometry is conditional on the profile's 16384-sample
+frame. Use `check-layout` to print and validate the geometry derived from the
+profile:
 
 ```bash
 pilot-proxy check-layout \
@@ -406,9 +429,13 @@ pilot-proxy check-layout \
     --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
-Do not execute the shared library directly.
+This command checks the configuration, not a CHIME file. Because the CHIME
+profile is marked as requiring data-product verification, compare its frame
+size, stream count, and ordering with the operational data product separately.
 
-Run compiled CUDA/C++ regression tests with:
+The shared library is loaded by PilotProxy and is not executed directly.
+
+Run the compiled CUDA/C++ regression tests with:
 
 ```bash
 make test-kernel
@@ -418,59 +445,65 @@ make test-kernel
 
 ## CHIME / datatrawl archive workflow
 
-The archive-scale entry point is `pilot-proxy chime-scan`, which runs the PilotProxy
-analyzers through `datatrawl` and combines the per-pilot products into PilotProxy's
-canonical CHIME outputs. Two things to know before running:
+To retain datatrawl's staging bound during an archive-scale run, we use
+`pilot-proxy chime-scan`. It runs the PilotProxy analyzer through datatrawl,
+writes one product for each selected pilot with usable input, and attempts to
+combine those products into the canonical CHIME outputs. If no `(event,
+frame-in-file)` identity is common to every completed pilot, the scan preserves
+the per-pilot products and defers stacking until a compatible channel subset is
+chosen with `pilot-proxy chime-combine`. Two constraints determine how we run
+it:
 
-- **Selection is in the CHIME `freq_id` coarse-channel namespace**, not ATSC
-  physical-channel numbers. With `--source cadc-datatrail`, omitting `--select`
-  scans every freq_id the inventory contains (the resolved set is printed
-  before any staging); pass `--select` to scan a subset. `--source` itself is
-  inferred: `--inventory`/`--inventory-name` name the archive source. The
-  default ATSC 14-36 pilot set (23 `freq_id`s) is
+- **Selection uses the CHIME `freq_id` coarse-channel namespace**, not ATSC
+  physical-channel numbers. For `--source cadc-datatrail`, omitting `--select`
+  scans each `freq_id` present in the inventory. The command prints that set
+  before staging begins. Pass `--select` to restrict it. The
+  `--inventory` and `--inventory-name` flags also let `chime-scan` infer the
+  archive source. The 23 `freq_id`s for the default ATSC 14-36 pilot range are
   listed in
   [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention); `844` is
-  the single-channel smoke-test default (the ATSC 14 pilot).
-- **Use `chime-scan`, not raw `datatrawl scan`.** The PilotProxy analyzers are
-  order-sensitive, and `chime-scan` forces the single-staged-file path that keeps
-  frames time-aligned.
+  the single-channel smoke-test value for the ATSC 14 pilot.
+- **Use `chime-scan` for the supported path.** The analyzer appends frames in
+  delivery order. `chime-scan` forces one download worker and one staged file so
+  that file delivery follows source order. A raw `datatrawl scan` must reproduce
+  this constraint and explicitly select `chime-baseband-packed`.
 
-For the full reference --- selection details, the local and CADC/CANFAR run
-sequences, order-safety internals, and post-processing (`validate-products`,
-`chime-plot`) --- see:
+The following documents give the complete selection rules, local and
+CADC/CANFAR sequences, order constraint, and post-processing commands:
 
-- **[INTEGRATION.md](INTEGRATION.md)** --- the datatrawl integration contract.
-- **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- the step-by-step CANFAR
+- **[INTEGRATION.md](INTEGRATION.md)** --- datatrawl integration contract.
+- **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- step-by-step CANFAR
   operating procedure.
 
 ---
 
 ## Standalone synthetic/testbench workflow
 
-The standalone path uses two Python interpreters when GNU Radio is installed in
-the system Python:
+When GNU Radio is installed only in the system Python, the standalone workflow
+uses two interpreters:
 
-- GNU Radio Python for clean ATSC generation and GNU Radio AWGN;
+- GNU Radio Python for ATSC generation and GNU Radio AWGN;
 - CUDA Python for CuPy and the CUDA F-statistic library.
 
-Generate a clean ATSC signal:
+Generate an ATSC waveform without injected noise:
 
 ```bash
 PYTHONNOUSERSITE=1 PYTHONPATH=src /usr/bin/python3   -m pilot_proxy.testbench.generate_atsc_signal   --output-iq generated/atsc/atsc_8vsb_complex64.cfile   --num-iq-samples 600000
 ```
 
-Audit the clean waveform:
+Audit the generated waveform:
 
 ```bash
 PYTHONPATH=src python   -m pilot_proxy.testbench.audit_atsc_signal   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --fail-on-quality
 ```
 
-This writes `generated/atsc/atsc_waveform_audit.json` and prints a five-check
-quality summary. The checks quantify whether the GNU Radio waveform is usable:
-pilot frequency error, pilot level relative to the data shelf, occupied
-bandwidth, shelf flatness, and channel-edge rolloff. A healthy generated
-waveform prints `quality_passed=True (5/5)` plus per-check margins; with
-`--fail-on-quality`, the command exits non-zero if any check fails.
+The audit writes `generated/atsc/atsc_waveform_audit.json` and reports five
+measured properties: pilot frequency error, pilot level relative to the data
+shelf, occupied bandwidth, shelf flatness, and channel-edge rolloff. A waveform
+that meets all configured bounds prints `quality_passed=True (5/5)` and the
+margin for each check. With `--fail-on-quality`, the command exits nonzero when
+any bound is not met. This result validates the generated waveform against those
+five checks; it does not validate a receiver implementation.
 
 Pack detector input:
 
@@ -484,34 +517,34 @@ Run a small SNR evaluation:
 PYTHONPATH=src python   -m pilot_proxy.testbench.evaluate_snr   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --physical-channel 14   --frame-size-samples 16384   --num-input-streams 1   --requested-snr-shelf-db -26   --noise-trials 10
 ```
 
-This writes `generated/dtv_snr_eval/dtv_snr_summary.csv`. The main accuracy
-columns are `snr_error_db_mean` and `snr_error_db_std`, where error means
-estimated shelf SNR minus injected/measured truth. `cpu_gpu_abs_diff_max` should
-be zero for the packed fixed-point CUDA path. Ten trials are a quick smoke test;
-increase `--noise-trials` for tighter uncertainty.
+This command writes `generated/dtv_snr_eval/dtv_snr_summary.csv`. The
+`snr_error_db_mean` and `snr_error_db_std` columns summarize estimated shelf SNR
+minus the injected or measured reference. For the packed fixed-point path,
+`cpu_gpu_abs_diff_max` measures agreement between the CUDA detector and the CPU
+reference and is expected to be zero. Ten noise trials provide a smoke test,
+not a final uncertainty estimate. Increase `--noise-trials` when the uncertainty
+of the reported mean and standard deviation matters.
 
 ---
 
 ## Figures
 
-All figures use LaTeX styling and fonts. The default renderer is Matplotlib's
-Computer Modern mathtext, which needs no TeX installation; setting
-`PILOT_PROXY_USE_TEX=1` switches to full TeX text rendering when `latex`,
-`dvipng`, and the `cm-super` fonts are installed (CI runs with it off). Figures
-are written as 300 dpi PNG; set `PILOT_PROXY_FIGURE_FORMATS=png,pdf` to also
-write vector PDFs with the same stems for manuscript use.
+We use LaTeX-style fonts for figures. By default, Matplotlib renders Computer
+Modern with mathtext, which does not require a TeX installation. Set
+`PILOT_PROXY_USE_TEX=1` to use external TeX when `latex`, `dvipng`, and the
+`cm-super` fonts are installed. CI leaves this option disabled. Figure writers
+emit 300 dpi PNG files by default. Set
+`PILOT_PROXY_FIGURE_FORMATS=png,pdf` to write a vector PDF with the same stem.
 
 ## Build documentation
 
-Generated PDFs are ignored by git. Build locally with:
+Generated PDFs are ignored by git. Build them locally with:
 
 ```bash
 make docs        # latexmk; scratch in docs/auxil/, PDFs in docs/out/
 ```
 
-The toolchain on Debian/Ubuntu (verified package set --- each package below
-is required; `--no-install-recommends` with anything less fails on
-`lmodern.sty`):
+The checked Debian/Ubuntu package set is:
 
 ```bash
 sudo apt-get install --no-install-recommends \
@@ -519,15 +552,16 @@ sudo apt-get install --no-install-recommends \
     texlive-fonts-recommended texlive-pictures lmodern latexmk
 ```
 
-Publication figures rendered with `PILOT_PROXY_USE_TEX=1` use the same
-toolchain plus `dvipng cm-super ghostscript`. CANFAR session images ship no
-TeX and no root, so build documentation locally, not in a session.
+Figures rendered with `PILOT_PROXY_USE_TEX=1` also require
+`dvipng cm-super ghostscript`. The tested CANFAR session images do not provide
+TeX or root access, so build the documentation outside the session.
 
 ---
 
 ## Commit hygiene
 
-Before committing, remove generated products and local build artifacts:
+Before committing, remove generated products and local build artifacts, then
+check the remaining tree:
 
 ```bash
 make release-clean
@@ -536,15 +570,15 @@ make commit-check
 
 ## Compatibility note: datatrawl inventory metadata
 
-`pilot-proxy chime-scan` uses the `chime-baseband-packed` reader for
-`pilot-proxy-detector`, so the inventory-metadata default needs no attention on the
-recommended path. The full explanation --- including how to override the reader
-when driving raw `datatrawl scan` directly --- is in
-[INTEGRATION.md](INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata).
+`pilot-proxy chime-scan` selects `chime-baseband-packed` for
+`pilot-proxy-detector`, overriding the inventory's canonical-reader metadata on
+the supported path. [INTEGRATION.md](INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata)
+explains why this override is required and how to supply it when invoking raw
+`datatrawl scan` directly.
 
 ## Release history and citation
 
-Release notes are maintained in [`CHANGELOG.md`](CHANGELOG.md). A machine-readable
-software citation is provided in [`CITATION.cff`](CITATION.cff).
+We maintain release notes in [`CHANGELOG.md`](CHANGELOG.md) and provide a
+machine-readable software citation in [`CITATION.cff`](CITATION.cff).
 
-The package and runtime report the same version with `pilot-proxy --version`.
+Use `pilot-proxy --version` to report the installed package version.

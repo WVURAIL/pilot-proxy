@@ -1,46 +1,56 @@
 # CANFAR Runbook
 
-This runbook describes bounded pre-production CHIME DTV pilot runs using
-`pilot-proxy` and `datatrawl`.
+This runbook describes bounded pre-production CHIME DTV pilot runs with
+`pilot-proxy` and `datatrawl`. We begin with one file and one chunk because the
+detector needs a GPU, a matching weight bank, and archive metadata that agrees
+with the requested CHIME coarse channel. After that run validates, we expand the
+same workflow to the selected archive.
 
-The recommended archive-scale entry point is:
+For archive-scale work, use:
 
 ```bash
 pilot-proxy chime-scan ...
 ```
 
-The older `pilot-proxy chime-run` path remains useful for local, already-staged
-HDF5 data and regression comparisons, but new CANFAR/CADC work should start with
-`chime-scan`.
+The older `pilot-proxy chime-run` command reads an already-staged HDF5
+directory in one process. We retain it for local calibration and regression
+comparisons, but new CADC/CANFAR work should start with `chime-scan`.
 
 ---
 
 ## Baseline detector contract
 
-Use the current validated detector contract:
+The current executable detector contract is:
 
 ```text
 detector_window_samples = 128
 skipped_guard_bins = 1
 reference_offset_bins = 2
 mask mode = positive_excess
-candidate K values = 128, 256
 ```
 
-The detector window is not a runtime tuning parameter. It is determined by the
-kernel contract and the weight bank.
+The CUDA kernel and the shipped weight bank fix the detector window at
+`K = 128`; it is not a runtime tuning parameter. `K = 256` remains a future
+candidate discussed in the design documents, but it is not part of this run
+contract.
 
----
+No GPU session is required for the CPU-only synthetic publication sweeps in
+item 2 of `docs/PUBLICATION_VALIDATION.md`. Run those sweeps with:
 
-No GPU session available? Item 2's synthetic publication sweeps run CPU-only via `pilot-proxy evaluate-snr --detector-backend cpu-reference --noise-source python`; see `docs/PUBLICATION_VALIDATION.md`.
+```bash
+pilot-proxy evaluate-snr \
+  --detector-backend cpu-reference \
+  --noise-source python
+```
 
 ## Launch a GPU session
 
-The detector path (`pilot-proxy-detector`) needs a CUDA GPU node.
-`scripts/launch_gpu_session.py` launches (or reuses) a CANFAR GPU notebook session
-via the `canfar` client. It needs your Harbor CLI secret to pull the session image
-(https://images.canfar.net -> your profile -> CLI secret); `setup_env.sh` prompts for
-and stores it, or export it yourself:
+The `pilot-proxy-detector` path requires a CUDA GPU. The helper script launches
+a CANFAR GPU notebook session through the `canfar` client, or reuses a running
+or pending session with the same name. The client also needs a Harbor CLI secret
+to pull the session image. Obtain that secret from
+`https://images.canfar.net` under your profile, then either export it or let
+`setup_env.sh` prompt for and store it.
 
 ```bash
 export CANFAR_REGISTRY_USER=<your-cadc-username>
@@ -51,16 +61,15 @@ python scripts/launch_gpu_session.py --status   # status + URL only
 python scripts/launch_gpu_session.py --destroy  # tear it down when done
 ```
 
-It reuses a session of the same name (`cupy-gpu`) rather than duplicating it. Open the
-printed URL, then run the environment setup below inside that session's terminal.
+The default session name is `cupy-gpu`. Open the printed URL and complete the
+environment setup in that session's terminal.
 
 ---
 
 ## Environment setup
 
-Clone both repositories (skip if the checkouts already exist on `/arc`), then
-run the setup script from the pilot-proxy checkout --- `setup_env.sh` requires
-both checkouts to exist:
+Clone both repositories before running the setup script. The script requires
+both checkouts and recreates the target virtual environment from scratch.
 
 ```bash
 git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
@@ -72,17 +81,18 @@ VENV_DIR=~/pilot-proxy-datatrawl DATATRAWL_DIR=~/datatrawl PILOT_PROXY_DIR=~/pil
 source ~/pilot-proxy-datatrawl/bin/activate
 ```
 
-The script recreates the target venv. Do not point VENV_DIR at a venv you need to
-preserve.
+Do not point `VENV_DIR` at an environment that must be preserved. The script
+uses `python -m venv --clear`, installs both repositories in editable mode,
+checks plugin discovery, and builds the CUDA library when a GPU and `nvcc` are
+available.
 
-The venv lives on `/arc` and persists across sessions: on every **new**
-session, re-activate it (`source ~/pilot-proxy-datatrawl/bin/activate`) before
-any `pip install -e` or `pilot-proxy` command --- the session image's own
-Python is read-only, and a bare install fails with `Permission denied`
-writing the console script. Rerun `setup_env.sh` only when you want the venv
-rebuilt from scratch.
+In the expected CANFAR notebook environment, the home directory is on
+persistent `/arc` storage. Activate the virtual environment in every new
+session before running `pip` or `pilot-proxy`. A bare install against the
+session image's Python may fail because that Python environment is read-only.
+Rerun `setup_env.sh` only when the environment should be rebuilt.
 
-Manual fallback, if you do not want the script to recreate the venv:
+If the environment should not be cleared, use the manual installation path:
 
 ```bash
 python3.12 -m venv --system-site-packages ~/pilot-proxy-datatrawl   # keeps the image's CuPy importable
@@ -92,75 +102,83 @@ python -m pip install -e "$HOME/datatrawl[cadc,survey]"
 python -m pip install -e "$HOME/pilot-proxy[datatrawl,chime,test]"   # CuPy comes from the image via datatrawl's accel, so no cuda extra
 ```
 
-Confirm plugin discovery:
+Then confirm that datatrawl can discover both PilotProxy plugins:
 
 ```bash
 datatrawl list | grep -E 'pilot-proxy-detector|chime-baseband-packed'
 ```
 
-The detector analyzer requires a GPU node with CUDA/CuPy and a built/staged
-`libfstatistic.so`.
+The production analyzer also needs a working CUDA/CuPy runtime and a built or
+staged `libfstatistic.so`.
 
 ---
 
 ## Required inputs
 
-For local scans:
+For a local scan, provide CHIME HDF5 baseband files whose names end in the
+selected `freq_id`, such as `baseband_<event>_844.h5`. The current datatrawl
+local source reads the option key `source_freq_id_regex`. PilotProxy's advertised
+`--source-channel-regex` flag still writes the older key
+`source_channel_regex`, so it does not override the current source parser. Until
+that interface is repaired, pass the current key through `--set` as shown in the
+local workflow below.
 
-- CHIME HDF5 baseband files named with the terminal `freq_id`, for example
-  `baseband_<event>_844.h5`, or an explicit `--source-channel-regex`.
-
-For CADC/CANFAR scans:
+For a CADC/CANFAR scan, provide:
 
 - a valid CADC proxy certificate;
-- an `inventory.jsonl` built by `datatrawl survey`;
-- the desired CHIME `freq_id` selection.
+- an `inventory.jsonl` produced by `datatrawl survey`;
+- the CHIME `freq_id` values to scan, or an inventory from which they can be
+  inferred.
 
-For detector scans:
+The detector resolves these runtime artifacts unless explicit alternatives are
+passed:
 
 - `configs/receiver_profiles/chime_dtv_fengine.json`;
 - `weights/chime_dtv_weights_k128.bin`;
-- `cuda/libfstatistic.so` or the staged cache copy;
+- `cuda/libfstatistic.so`, or its staged cache copy;
 - a working CuPy/CUDA runtime.
 
-Before a detector run, confirm the profile and layout:
+Check the receiver profile and layout before staging archive data:
 
 ```bash
-pilot-proxy check-profile   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json
+pilot-proxy check-profile \
+  --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json
 
-pilot-proxy check-layout   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json   --stream-map configs/stream_maps/chime_feed_pol_example.json
+pilot-proxy check-layout \
+  --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
+  --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
 ---
 
 ## Selection convention
 
-`pilot-proxy chime-scan --select` uses CHIME `freq_id` coarse-channel indices, not
-ATSC physical-channel numbers.
+`pilot-proxy chime-scan --select` uses the CHIME `freq_id` coarse-channel
+identifier. It does not use the ATSC physical-channel number.
 
-For the default ATSC physical-channel range 14-36, the corresponding CHIME pilot
-`freq_id` set is:
+For ATSC physical channels 14 through 36, the corresponding pilot `freq_id`
+set is:
 
 ```text
 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844
 ```
 
-For a one-channel smoke test, use a `freq_id` that is present in the inventory or
+For a one-channel smoke test, choose a `freq_id` present in the inventory or
 local directory. `844` is the expected coarse channel for the ATSC 14 pilot.
-
-Do not use `396-412` for the default DTV 14-36 run.
+Do not substitute `396-412`; those are not the `freq_id` values for this DTV
+14-36 pilot selection.
 
 ---
 
 ## CADC inventory
 
-Renew the CADC certificate:
+Renew the CADC proxy certificate:
 
 ```bash
 cadc-get-cert -u <your-cadc-username>
 ```
 
-Build a bounded first inventory:
+Begin with a bounded inventory:
 
 ```bash
 datatrawl survey \
@@ -171,13 +189,13 @@ datatrawl survey \
   --max-events 5
 ```
 
-This writes:
+This command writes:
 
 ```text
 data/chime-pilots/inventory.jsonl
 ```
 
-Inspect without downloading data:
+Inspect the inventory without downloading baseband data:
 
 ```bash
 datatrawl explore \
@@ -186,17 +204,15 @@ datatrawl explore \
   --inventory data/chime-pilots/inventory.jsonl
 ```
 
-Run the `pilot-proxy chime-scan` commands below from the same directory where `datatrawl survey`
-wrote the `data/` tree. If you run from another directory, add
-`--source-root <survey-root>` to each `pilot-proxy chime-scan` command.
-
-Increase `--max-events` only after a bounded scan succeeds.
+Run `chime-scan` from the directory in which `datatrawl survey` wrote the
+`data/` tree. If the scan starts elsewhere, add `--source-root <survey-root>`
+to each command. Increase `--max-events` only after the bounded scan succeeds.
 
 ---
 
 ## Bounded detector smoke test
 
-Run this only on a GPU node:
+First verify the GPU runtime:
 
 ```bash
 nvidia-smi
@@ -207,7 +223,7 @@ print("GPU count", cp.cuda.runtime.getDeviceCount())
 PY
 ```
 
-Then:
+Then process one file and one full analysis chunk for `freq_id 844`:
 
 ```bash
 pilot-proxy chime-scan \
@@ -220,54 +236,74 @@ pilot-proxy chime-scan \
   --max-chunks-per-file 1
 ```
 
-Validate and plot:
+Validate the combined products and generate the diagnostic plots:
 
 ```bash
-pilot-proxy validate-products   --run-dir "$HOME/pilot_proxy_runs/detector_smoke_844"   --output-json "$HOME/pilot_proxy_runs/detector_smoke_844/product_validation.json"
+pilot-proxy validate-products \
+  --run-dir "$HOME/pilot_proxy_runs/detector_smoke_844" \
+  --output-json "$HOME/pilot_proxy_runs/detector_smoke_844/product_validation.json"
 
-pilot-proxy chime-plot   --run-dir "$HOME/pilot_proxy_runs/detector_smoke_844"   --clean-figures
+pilot-proxy chime-plot \
+  --run-dir "$HOME/pilot_proxy_runs/detector_smoke_844" \
+  --clean-figures
 ```
 
-Expected detector outputs:
+After these commands, the run directory should contain:
 
 ```text
 run_config.json
 stats.json
 input_manifest.json
+product_validation.json
 chime_detector_outputs.npz
 chime_spectrogram_cache.npz
+chime_integrated_spectra.npz
 chime_reductions_10s.npz
 tables/mask_summary_by_pilot.csv
 figures/*.png
 ```
 
+An event-keyed combine also writes `chime_frame_identity.npz`. A combine of
+legacy products without identity tags uses strict positional alignment and does
+not write that sidecar.
+
 ---
 
 ## H0 zero-point check
 
-Before (or alongside) the full run, verify the mask's zero-point on real data:
+Before spending GPU time on the full archive, test the detector on a channel
+that should approximate the no-pilot hypothesis, H0. Choose a DTV pilot
+frequency that lies inside the selected CHIME coarse channel but whose physical
+channel has no station listed in the 500-mile census. This is a census-based
+control selection, not a propagation prediction. Do not choose an arbitrary
+coarse channel with no nominal ATSC pilot in band: the analyzer marks that case
+invalid and does not form an F-statistic.
 
-1. Pick one **control frequency** with no ATSC pilot in band (any freq_id whose
-   coarse channel contains no transmitter from the census) and one quiet pilot
-   channel, and run the bounded smoke test on each.
-2. In `stats.json`, read `mu0_by_pilot`; in the products, compare the mean of
-   `fstat_raw` over valid frames against `mu0` (not against 1) and check the
-   mask fraction on the control channel sits near `0.5` rather than pinning
-   toward 0 or 1.
-3. A mask fraction far from `0.5` on a pilot-free channel indicates a
-   zero-point problem (wrong weights, wrong `mask_rule`, or structured
-   interference) and should be resolved before spending GPU-days on the full
-   archive.
+Run the bounded scan for the census-control channel and for one quiet channel
+with a known pilot. Then:
 
-`tests/core/test_mask_zero_point.py` runs the same check against synthetic
-white noise at every CI run; this section is its on-sky counterpart.
+1. Read `mu0` from `chime_detector_outputs.npz` or from the authoritative
+   `_per_pilot/<freq_id>.npz` product. The `chime-run` batch path also records
+   `mu0_by_pilot` in `stats.json`, but the combined `chime-scan` statistics do
+   not currently duplicate that array.
+2. Over frames with `valid = 1`, compare the mean `fstat_raw` with `mu0`. Also
+   inspect the valid-frame mask fraction. Under the tested white-noise model,
+   the corrected threshold gives a fraction near one half; on real data this is
+   a diagnostic expectation, not a pass condition by itself.
+3. If the control result is strongly displaced, check the weight bank,
+   `mask_rule`, channel selection, and structured interference before expanding
+   the scan.
+
+`tests/core/test_mask_zero_point.py` performs the corresponding white-noise
+regression with the shipped weights. The on-sky check tests the additional
+instrument and archive path that the synthetic regression cannot cover.
 
 ## Full pilot detector run
 
-After the bounded detector smoke test passes, run the production scan.
-`--select` defaults to every `freq_id` the inventory contains and the resolved
-set is printed before any staging; `--source cadc-datatrail` is inferred from
-`--inventory-name`:
+After the smoke test and H0 check are acceptable, run the selected inventory.
+For the archive source, omitting `--select` selects every `freq_id` present in
+the inventory. The command prints the resolved set before staging data, and
+`--inventory-name` implies `--source cadc-datatrail`.
 
 ```bash
 pilot-proxy chime-scan \
@@ -275,13 +311,15 @@ pilot-proxy chime-scan \
   --inventory-name chime-pilots
 ```
 
-The terminal combine stacks frames by (event, frame-in-file) identity over the
-events common to every completed channel, reporting per-channel drops in
-`stats.json` (`combine_alignment`) and the kept identities in
-`chime_frame_identity.npz`. On a ragged archive where **no** event is common
-to all channels, the scan still finishes successfully with complete per-pilot
-products and skips the stack; choose a channel subset from the presence
-report and stack it explicitly:
+The terminal combine aligns frames by `(event, frame-in-file)` identity. It
+keeps only identities common to every completed channel, records the per-channel
+drops under `combine_alignment` in `stats.json`, and writes the retained
+identities to `chime_frame_identity.npz`.
+
+Some archives are ragged: different channels may contain different event sets.
+If no event is common to all selected channels, the per-pilot products remain
+complete and the terminal stack is skipped. Inspect channel presence and choose
+a subset:
 
 ```bash
 pilot-proxy chime-combine --report --work-dir "$HOME/pilot_proxy_runs/chime-pilots/_per_pilot"
@@ -291,40 +329,56 @@ pilot-proxy chime-combine \
   --output-dir "$HOME/pilot_proxy_runs/chime-pilots-subset"
 ```
 
-The report prints per-channel event counts, the presence histogram, and the
-greedy drop-curve (intersection size after removing the most-constraining
-channel, repeatedly) -- the decision input for which channels the stacked
-analyses keep.
+The report gives the event count per channel, the presence histogram, and a
+greedy drop curve. Use those quantities to state which channels are retained;
+the drop curve is a decision aid rather than an automatic scientific
+selection.
 
-Validate:
-
-```bash
-pilot-proxy validate-products   --run-dir "$HOME/pilot_proxy_runs/chime-pilots"   --output-json "$HOME/pilot_proxy_runs/chime-pilots/product_validation.json"
-```
-
-Plot:
+Validate and plot whichever directory contains the final combined products:
 
 ```bash
-pilot-proxy chime-plot   --run-dir "$HOME/pilot_proxy_runs/chime-pilots"   --clean-figures
+pilot-proxy validate-products \
+  --run-dir "$HOME/pilot_proxy_runs/chime-pilots" \
+  --output-json "$HOME/pilot_proxy_runs/chime-pilots/product_validation.json"
+
+pilot-proxy chime-plot \
+  --run-dir "$HOME/pilot_proxy_runs/chime-pilots" \
+  --clean-figures
 ```
+
+If a subset combine was required, replace `chime-pilots` with
+`chime-pilots-subset` in both commands.
 
 ---
 
 ## Local staged-data equivalent
 
-For data already on disk:
+For HDF5 data already on disk, run the same detector analyzer through the local
+source:
 
 ```bash
 export LOCAL_H5=/path/to/chime_hdf5
 
-pilot-proxy chime-scan   --input-dir "$LOCAL_H5"   --output-dir "$HOME/pilot_proxy_runs/local_detector_smoke_844"   --source local   --analyzer pilot-proxy-detector   --select 844   --max-files 1   --max-chunks-per-file 1
+pilot-proxy chime-scan \
+  --input-dir "$LOCAL_H5" \
+  --output-dir "$HOME/pilot_proxy_runs/local_detector_smoke_844" \
+  --source local \
+  --analyzer pilot-proxy-detector \
+  --select 844 \
+  --max-files 1 \
+  --max-chunks-per-file 1
 ```
 
-If filenames do not end in `_<freq_id>.h5`, pass:
+If the filenames do not end in `_<freq_id>.h5`, override the current datatrawl
+parser with one capturing group:
 
 ```bash
---source-channel-regex '<regex-with-one-capturing-group>'
+--set 'source_freq_id_regex=<regex-with-one-capturing-group>'
 ```
+
+Do not rely on `--source-channel-regex` for the current repository pair. That
+flag populates `source_channel_regex`, while `LocalDirectorySource` reads
+`source_freq_id_regex`.
 
 ---
 
@@ -332,45 +386,47 @@ If filenames do not end in `_<freq_id>.h5`, pass:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `nvidia-smi: command not found` | CPU-only host or driver utility unavailable | Move detector run to a GPU node |
-| `nvcc: command not found` | CUDA compiler module/toolkit not loaded | Load CUDA module or set `NVCC`/`PATH` |
-| `pilot-proxy-detector needs cupy/CUDA` | Detector run on CPU-only env | Use a GPU node |
-| `no files matched` | `--select` does not match local filename/inventory `freq_id` | Run `datatrawl explore` or inspect filenames |
-| first file's center implies a different `freq_id` | filename/inventory mismatch | Fix filename regex or rebuild inventory |
-| combine finds no common events | the archive holds different event sets per channel (ragged replication) | `chime-combine --report --work-dir <work>`, pick a subset, restack with `--drop <freq_ids>` |
-| all frames invalid for a pilot | selected coarse channel does not contain pilot or no valid refs | verify `freq_id` selection and HDF5 metadata |
+| `nvidia-smi: command not found` | CPU-only host or unavailable driver utility | Move the detector run to a GPU node |
+| `nvcc: command not found` | CUDA compiler toolkit is not on `PATH` | Load the CUDA toolkit/module or set `NVCC`/`PATH` |
+| `pilot-proxy-detector needs cupy/CUDA` | Production detector started in a CPU-only environment | Use a GPU node |
+| `no files matched` | `--select` does not match the inventory or local filename `freq_id` | Run `datatrawl explore` or inspect the filenames |
+| first file's center implies a different `freq_id` | Inventory or filename label disagrees with HDF5 metadata | For local data, pass the current parser with `--set source_freq_id_regex=...`; for archive data, rebuild the inventory |
+| combine finds no common events | The selected channels contain different event sets | Run `chime-combine --report`, choose a stated subset, and recombine with `--drop` |
+| all frames are invalid | The selected coarse channel does not contain the nominal pilot, or the reference denominator is zero | Check `freq_id`, HDF5 frequency metadata, and the detector weights |
 
 ---
 
 ## Restart policy
 
-Do not append into a suspect output directory. Start a new output directory for
-retries unless you are deliberately resuming a known-good partial run.
+Use a new output directory when the existing products are suspect. Resume only
+when the partial run is known to have the same channel selection, frame cap,
+weights, detector geometry, and provenance. The analyzer rejects several
+incompatible resume cases, but that validation does not classify a scientifically
+bad run.
 
-Keep failed run directories until the failure is classified. Remove generated
-products before committing or packaging the source tree.
+Keep a failed run until its failure has been classified. Do not commit generated
+products while diagnosing the run.
 
 ---
 
 ## Archive policy
 
-Archive:
+For each accepted run, archive:
 
-- validated run products;
-- `product_validation.json`;
-- the exact receiver profile;
-- the exact stream map if used;
-- the exact weight manifest;
-- the exact commit hash or source archive;
-- the exact inventory used for CADC scans.
+- the validated products and `product_validation.json`;
+- the receiver profile and any stream map used;
+- the weight bank manifest;
+- the source commit hash or source archive;
+- the exact CADC inventory used.
 
 Do not commit CANFAR products, local HDF5 files, generated figures, or CUDA build
-artifacts into the source tree.
+artifacts to the source repository.
 
 ## Compatibility note: datatrawl inventory metadata
 
-`pilot-proxy chime-scan` uses the `chime-baseband-packed` reader for
-`pilot-proxy-detector`. When driving raw `datatrawl scan` directly, the detector run
-must override the inferred reader. See
+`pilot-proxy chime-scan` selects the `chime-baseband-packed` reader for the
+`pilot-proxy-detector` analyzer. A raw `datatrawl scan` may instead infer the
+canonical unpacked CHIME reader from inventory metadata. In that case, pass the
+packed reader explicitly. See
 [INTEGRATION.md](../INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata)
-for the full explanation and the override commands.
+for the direct datatrawl commands and the reason for the override.

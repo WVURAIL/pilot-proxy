@@ -1,77 +1,89 @@
-# Design Decisions
+# Design decisions
 
-This document records project decisions that affect interpretation of CHIME DTV
-products and should not be rediscovered during review or article writing.
+This file records choices that affect the interpretation of CHIME DTV
+products. We keep the choice, its reason, and its boundary together so the
+same question does not have to be reconstructed during review.
 
-## Positive-Excess Masking Is The CHIME Default
+## The CHIME default is norm-corrected positive excess
 
-The CHIME real-data path uses parameter-free, norm-corrected positive-excess
-masking:
+The CHIME real-data path uses the following comparison:
 
 ```text
 valid = p_ref_sum != 0
 mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the exact integer-power form of `F > mu0`, where `mu0 =
-2*target_norm_sq/ref_norm_sum_sq` is the detector's own flat-floor H0
-zero-point (int4 weight quantization leaves the three weight-term norms
-unequal, so `E[F] = mu0`, not 1; the shipped ATSC 14-36 bank spans
-`mu0 ~ 0.985..1.011`). Comparing against `mu0` instead of 1 keeps the H0 mask
-fraction channel-independent, avoids empirical threshold fitting before the
-bounded CANFAR pilot, and keeps the detector policy auditable. Products
-written under the earlier `F > 1` rule declare it in their recorded
-`mask_rule`.
+This is the exact integer form of `F > mu0`, where
 
-## K=128 Is The CANFAR Baseline
+```text
+mu0 = 2 * target_norm_sq / ref_norm_sum_sq
+```
 
-K=128 remains the validated baseline because it matches the current CUDA
-contract, shipped detector core profile, generated manifests, and test coverage.
+is the flat-floor `H0` zero point implied by the packed weights. Int4
+quantization leaves the target and reference norms unequal. Independent
+recomputation from the shipped ATSC 14--36 manifest gives a `mu0` range of
+0.9853298815 to 1.0111111111 rather than exactly 1.
 
-K=256 remains a plausible future candidate. It is not blocked by unavoidable
-precision loss if implemented with int32 dot products, uint32 row powers, and
-uint64 frame sums, but it is a separate detector configuration and is not
-promoted until CANFAR cleaning evidence supports it.
+We compare each channel with its own `mu0` so that the rule is defined by the
+shipped weights and can be reproduced from integer powers. This avoids
+fitting a separate operational threshold before the bounded CANFAR test.
+Products written under the earlier `F > 1` rule retain that rule in
+`mask_rule` and must be interpreted under their recorded convention.
 
-K=512 is not part of the current production candidate set.
+## `K = 128` is the CANFAR baseline
 
-## Guard/Reference Terminology Was Reset
+We retain `K = 128` because it matches the current CUDA contract, detector
+core profile, shipped manifests, and regression tests.
 
-The public terminology is:
+`K = 256` remains a possible later configuration. The proposed implementation
+uses int32 dot products, uint32 row powers, and uint64 frame sums to avoid the
+current precision constraint. It is not implemented or tested here and would
+require a separate weight bank, contract, and validation set. We do not
+promote it without CANFAR cleaning evidence.
+
+`K = 512` is outside the current candidate set.
+
+## Guard and reference terms have separate names
+
+The public terms are:
 
 ```text
 skipped_guard_bins
 reference_offset_bins
 ```
 
-with:
+They obey:
 
 ```text
 reference_offset_bins = skipped_guard_bins + 1
 ```
 
-User-authored detector-core configs specify `skipped_guard_bins` only. Generated
-metadata may record both fields for auditability.
+A user-authored detector-core configuration specifies
+`skipped_guard_bins`. Generated metadata may also record
+`reference_offset_bins` so that the selected geometry can be audited.
 
-## Reference Placement Is Adaptive And Auditable
+## Reference placement is adaptive and recorded
 
-Reference placement keeps the requested offset when possible, but records any
-adaptive handling explicitly.
+The resolver retains the requested reference offset when the receiver
+geometry permits it. If a reference reaches a circular FFT edge, it wraps. If
+a reference would collide with the forbidden coarse-channel DC tone, it moves
+away. A target/DC collision is invalid because moving the target would change
+the signal being tested.
 
-Important CHIME cases:
+The shipped CHIME bank includes two useful boundary cases:
 
-- DTV 14 has the coarse-channel DC tone in the skipped guard region; this is
-  valid and does not require moving the reference.
-- DTV 21 has a lower reference that wraps across the coarse-channel edge; the
-  reference wraps rather than being silently moved closer to the target.
-- Target/DC collisions are invalid because the target signal cannot be moved.
+- DTV 14 places the forbidden DC tone in the skipped guard. Neither the
+  target nor a reference collides with it.
+- DTV 21 wraps its lower reference across the coarse-channel edge instead of
+  moving that reference toward the target.
 
-Run products must preserve the reference-placement summary so these cases are
-visible to validators and downstream reviewers.
+Run products retain the reference-placement summary. Validators and later
+analyses should use the recorded placement rather than reconstructing it from
+the nominal offset.
 
-## Runtime Bundle Is Preparation, Not Kotekan Integration
+## The runtime bundle prepares, but does not implement, Kotekan
 
-The runtime bundle exporter prepares:
+The runtime exporter writes:
 
 ```text
 detector_contract.json
@@ -81,7 +93,7 @@ weights.manifest.json
 sha256sums.txt
 ```
 
-The intended future deployment model is:
+The planned deployment model is:
 
 ```text
 same detector software on every node
@@ -91,18 +103,23 @@ non-pilot channel disables detector
 pilot channel selects one weight-bank pointer
 ```
 
-No actual Kotekan stage is implemented in this project state.
+This repository does not contain a Kotekan stage. The bundle defines the
+inputs that a later stage would consume; it is not evidence of deployment.
 
-## Deferred Work
+## Deferred work
 
-The following work is intentionally deferred until after the bounded CANFAR
-pilot:
+The following items are outside the minimum detector result and remain
+separate tasks:
 
-- tone catalog and intermodulation classification,
-- LimeSDR loopback,
-- actual Kotekan stage,
-- K=256 implementation,
-- new threshold modes,
-- additional empirical threshold fitting.
+- tone catalog and intermodulation classification;
+- LimeSDR loopback;
+- Kotekan integration;
+- a `K = 256` implementation;
+- production integration of additional threshold modes;
+- a common-mode power veto; and
+- threshold fitting from CANFAR-measured means.
 
-The current bottleneck is validation on real data, not new detector logic.
+The analysis directory can test alternative thresholds after the scan. That
+does not change the shipped real-data mask or add a new production mode. The
+current paper should therefore distinguish the recorded detector output from
+post-hoc sensitivity studies.

@@ -1,16 +1,33 @@
+# Output structure from examples/quickstart.sh.
+# Numeric measurements depend on the generated waveform, noise realization,
+# hardware, and software revision. Retain the actual console transcript for a
+# release; do not substitute the placeholders below into a result record.
+
 Wrote generated/atsc/atsc_8vsb_complex64.cfile
 Wrote generated/atsc/atsc_waveform_audit.json
-measured_pilot_frequency_hz=-2690559.44
-baseband_pilot_note=for physical channel 14 this corresponds to RF 470.309441 MHz after reference-band placement
-measured_pilot_to_data_power_db=-11.9
-measured_pilot_below_data_db=11.9
+sample_rate_hz=<measured>
+symbol_rate_hz=<measured>
+pilot_offset_hz=<measured>
+measured_pilot_frequency_hz=<measured>
+measured_pilot_to_data_power_db=<measured>
+measured_pilot_below_data_db=<measured>
+measured_pilot_below_data_direct_db=<measured>
+occupied_bandwidth_hz=<measured>
+shelf_flatness_db=<measured>
+edge_rolloff_check_db=<measured>
+quality_passed=<True-or-False> (<passed>/5)
+quality_check.<name>=<PASS-or-FAIL> value=<measured> margin=<measured>
+
 Wrote generated/detector_input/detector_blocks_i4.npy
 Wrote generated/detector_input/detector_matrix_i4.npy
-Wrote generated/dtv_snr_eval/dtv_snr_eval.csv
-Wrote generated/dtv_snr_eval/dtv_snr_summary.csv
-Wrote generated/dtv_snr_eval/dtv_snr_eval.json
-requested_snr_shelf_db, measured_truth_snr_shelf_db, fstat_raw, fstat_level_db, pnr_bin_db, estimated_snr_shelf_db, snr_error_db
- -26.000,  -26.005,   1.436541,    1.541,   -3.967,  -25.603,    0.402
+
+Wrote generated/quickstart/dtv_snr_eval/dtv_snr_eval.csv
+Wrote generated/quickstart/dtv_snr_eval/dtv_snr_summary.csv
+Wrote generated/quickstart/dtv_snr_eval/dtv_snr_eval.json
+frequency_offset_hz, requested_snr_shelf_db, measured_truth_snr_shelf_db, cpu_float_snr_shelf_db, gpu_snr_shelf_db, gpu_snr_error_db
+     0.000,  -26.000, <measured>, <measured>, <measured>, <measured>
+
+Pilot frequency from sidecar generated/detector_input/metadata.json: <measured> MHz
 Wrote generated/detections/detect.json
-blocks, masks_set, threshold_snr_shelf_db, threshold_pnr_bin_db, threshold_fstat_raw, threshold_half_num, threshold_half_den, rational_overflow_count
-1, 1, -26.000, -4.364, 1.36610123, 2254618387, 3300807204, 0
+blocks, positive_excess_set, fstat_raw_mean, estimated_snr_shelf_db_mean
+1, <0-or-1>, <measured>, <measured>

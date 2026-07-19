@@ -674,7 +674,7 @@ def _print_adaptive_reference_diagnostics(
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Standalone CUDA F-statistic DTV pilot detector testbench",
+        description="Run PilotProxy detector, validation, and CHIME workflows.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
     from pilot_proxy import __version__
@@ -693,7 +693,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     gen = _add_command(
         "generate-atsc",
-        "Generate a clean ATSC 8-VSB IQ capture (and transport stream) "
+        "Generate a reference ATSC 8-VSB IQ capture (and transport stream) "
         "with GNU Radio.",
     )
     gen.add_argument(
@@ -729,11 +729,11 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser = subparsers.add_parser(
         "evaluate-snr",
         help=(
-            "Sweep detection rate versus shelf SNR: inject AWGN into a clean "
+            "Sweep detection rate versus shelf SNR: inject AWGN into a reference "
             "IQ capture and run the detector at each level."
         ),
         description=(
-            "Sweep detection rate versus shelf SNR: inject AWGN into a clean "
+            "Sweep detection rate versus shelf SNR: inject AWGN into a reference "
             "IQ capture and run the detector at each level. Options are the "
             "testbench evaluator's, inherited directly (single source of "
             "truth)."
@@ -1159,7 +1159,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     recovery = _add_command(
         "analyze-injection-recovery",
-        "Analyze injection-ladder run products: recovery linearity plus the "
+        "Analyze injection-ladder run products: response linearity plus the "
         "F-statistic vs radiometer comparison at matched false-alarm rates.",
     )
     recovery.add_argument("--point", type=Path, action="append", required=True,
@@ -1199,7 +1199,7 @@ def build_parser() -> argparse.ArgumentParser:
     tradeoff = _add_command(
         "analyze-cleaning-tradeoff",
         "Post-hoc mask-threshold sweep over stored products: operating "
-        "curve and recovered-bandwidth headline (exact x=0 anchor).",
+        "curve and retained-bandwidth summary (exact x=0 anchor).",
     )
     tradeoff.add_argument("--run-dir", type=Path, required=True)
     tradeoff.add_argument("--control-run-dir", type=Path, default=None)
@@ -1241,7 +1241,7 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan = _add_command(
         "chime-scan",
         "Stream CHIME data through the datatrawl engine (one resumable "
-        "product per pilot), then combine into the canonical products. The "
+        "product per pilot), then combine compatible products. The "
         "recommended archive-scale entry point; chime-run remains for "
         "pre-staged local directories.",
     )
@@ -1300,8 +1300,16 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan.add_argument("--work-dir", type=Path, default=None,
                             help="Per-pilot products + staging (default: <output-dir>/_per_pilot).")
     chime_scan.add_argument("--source-glob", default="*.h5")
-    chime_scan.add_argument("--source-channel-regex", default=None,
-                            help="Override the filename->freq_id regex for --source local.")
+    chime_scan.add_argument(
+        "--source-channel-regex",
+        default=None,
+        help=(
+            "Legacy filename->freq_id regex option for --source local. The current "
+            "paired datatrawl source reads source_freq_id_regex instead; use "
+            "--set 'source_freq_id_regex=<regex-with-one-capturing-group>' until "
+            "the adapter alias is repaired."
+        ),
+    )
     chime_scan.add_argument("--weights-path", type=Path, default=None)
     chime_scan.add_argument("--lib-path", type=Path, default=None)
     chime_scan.add_argument(

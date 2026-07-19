@@ -1,30 +1,32 @@
 # Publication validation runbook
 
-Five items stand between the current repos and a publication-ready result set.
-All tooling now ships in this repository; the remaining work is GPU/on-sky
-runs and the analysis over their products. Ordering, effort, and tooling
-status:
+This runbook defines the five checks required for a publication result. The
+repository contains the analysis commands. The remaining work is to run the
+GPU and on-sky cases, retain their products, and apply the acceptance tests
+below. Until a check passes, its associated manuscript number is provisional.
 
 | # | Item | Depends on | Effort | Tooling |
 |---|------|-----------|--------|---------|
 | 1 | On-sky norm-corrected mask validation | -- | ~1 GPU day (incl. control) | shipped (runbook + `validate-products`) |
 | 2 | Detection-rate curves at publication trial counts | -- | hours (parallel with 1) | shipped (`evaluate-snr` Wilson fields) |
-| 3 | Injection-recovery on real baseband | 1 | ~1-2 days of runs | shipped (`inject-pilot-tone`, `analyze-injection-recovery`) |
-| 4 | Radiometer baseline comparison | 3 | free (same command) | shipped (`analyze-injection-recovery`) |
+| 3 | Injection-recovery on real baseband | 1 | ~1-2 days of runs after preflight | injection and analysis commands shipped; realized-power coordinate must be added before the publication run |
+| 4 | Radiometer baseline comparison | 3 | free after item 3 | same command and same realized-power precondition as item 3 |
 | 5 | Cleaning tradeoff in science terms | 1 (products) | hours (post-hoc) | shipped (`analyze-cleaning-tradeoff`) |
 
-**Mid-survey execution.** Nothing below requires the production scan to
-finish, and running alongside it is safe by design: staging directories are
-per-invocation (concurrent scans cannot delete each other's files), per-pilot
-checkpoints are atomic renames (any `work/<freq_id>.npz` you read is a
-complete, consistent product), and the bounded runs below are a negligible
-CADC load next to the survey. Concretely, while the survey runs:
+### Running these checks during a survey
 
-- Items 2 (synthetic curves), 1 (control-channel scan), and 3-4 (the
-  injection ladder) run on a second GPU session in that order.
-- Item 1's DTV 18/20 zero-point checks need no new scan at all: snapshot the
-  survey's own checkpoints (`cp work/<freq_id>.npz snapshot/`), combine, and
-  read `mu0`/mask fractions from the snapshot --
+The checks do not require the production scan to finish. Each invocation uses
+its own staging directory, and each per-pilot checkpoint is installed by an
+atomic rename. Thus, a visible `work/<freq_id>.npz` is a complete checkpoint.
+Use a separate output directory for every bounded run and coordinate CADC
+access with the active survey rather than assuming its load is negligible.
+
+While a survey is running:
+
+- Run item 2 and the item 1 control scan on a second GPU session. Run the
+  item 3--4 ladder only after its realized-power preflight is closed.
+- The DTV 18 and DTV 20 zero-point checks in item 1 can use a snapshot of the
+  survey checkpoints. Copy `work/<freq_id>.npz` into `snapshot/`, then run:
 
   ```bash
   pilot-proxy chime-combine --product snapshot/<freq_id>.npz \
@@ -32,35 +34,35 @@ CADC load next to the survey. Concretely, while the survey runs:
   pilot-proxy validate-products --run-dir snapshot_combined/<freq_id>
   ```
 
-- Item 5's machinery can be rehearsed the same way on any completed channel's
-  snapshot (`analyze-cleaning-tradeoff --run-dir snapshot_combined/<freq_id>`);
-  final numbers still come from the full combined survey.
-- `chime-combine` across multiple channels requires them to have processed
-  the same event set; combining a complete channel with a partial one is
-  refused with a frame-grid diagnostic. That refusal is correct -- combine
-  completed channels together, or one channel at a time.
+- Item 5 can be rehearsed on a completed channel snapshot with
+  `analyze-cleaning-tradeoff --run-dir snapshot_combined/<freq_id>`. The
+  publication result must still use the declared final survey set.
+- `chime-combine` requires a common event set across channels. It rejects a
+  complete channel combined with a partial channel and prints a frame-grid
+  diagnostic. Combine compatible completed channels, or process one channel
+  at a time.
 
-Run 1 first — it gates everything downstream on the corrected rule. Item 2 is
-independent and can run on the same GPU session. Items 4 and 5 are pure
-analysis over stored products; no new detector code.
+Close item 1 before interpreting downstream on-sky results because it tests
+the corrected mask rule. Item 2 is independent. Items 4 and 5 operate on
+stored products and do not require a new detector run.
 
-Environment for 1 and 3: the existing `docs/CANFAR_RUNBOOK.md` setup (A100
-session, `setup_env.sh`, CADC cert). All figures: run with
-`PILOT_PROXY_USE_TEX=1 PILOT_PROXY_FIGURE_FORMATS=png,pdf` for camera-ready
-output.
+For items 1 and 3, use the A100, `setup_env.sh`, and CADC-certificate setup in
+`docs/CANFAR_RUNBOOK.md`. For camera-ready figures, set
+`PILOT_PROXY_USE_TEX=1 PILOT_PROXY_FIGURE_FORMATS=png,pdf`.
 
 ---
 
 ## 1. On-sky validation of the norm-corrected mask
 
-Goal: demonstrate on real data that E[F] under H0 tracks the per-channel
-`mu0`, not 1, and that the corrected mask restores a channel-independent ~0.5
-H0 mask fraction. This is the on-sky counterpart of
+This test asks whether the real-data `H0` distribution follows each channel's
+`mu0` rather than 1. It also measures whether the corrected comparison gives
+an `H0` mask fraction consistent with approximately 0.5 for the tested
+channels. This is the on-sky counterpart of
 `tests/core/test_mask_zero_point.py` and the runbook's "H0 zero-point check"
 section.
 
-1. **Export and validate the runtime bundle** so the kernel rational
-   half-thresholds `nt:(nl+nu)` are the deployed correction:
+1. **Export and validate the runtime bundle.** This establishes that the
+   runtime profiles carry the rational correction `nt:(nl+nu)`:
 
    ```bash
    pilot-proxy export-runtime-weight-bundle \
@@ -71,21 +73,29 @@ section.
    pilot-proxy validate-runtime-weight-bundle --bundle-dir bundles/norm_corrected
    ```
 
-   Acceptance: validator reports valid; `pilot_profiles.json` rows carry
-   `target_norm_sq`, `ref_norm_sum_sq`, `mu0`,
-   `positive_excess_half_threshold_num/den`.
+   Accept the bundle only when the validator reports `valid` and every row in
+   `pilot_profiles.json` contains `target_norm_sq`, `ref_norm_sum_sq`, `mu0`,
+   and `positive_excess_half_threshold_num/den`.
 
-2. **Choose three freq_ids** from the transmitter census in the calibration
+2. **Choose three `freq_id` values** from the transmitter census in the calibration
    report:
-   - **Control**: a coarse channel in the DTV band containing *no* ATSC pilot
-     within capture (use the census 500-mile table; confirm the band is quiet
-     with `pilot-proxy chime-inspect --input-dir <staged>` on a few staged
-     files before burning GPU time).
-   - **Extreme-mu0 quiet channels**: DTV 18 (largest shipped `mu0`, 1.0111)
+   - **Control:** use a normal DTV pilot profile whose nominal ATSC pilot is
+     inside the selected coarse-channel passband, but for which the 500-mile
+     census lists no station on that physical channel. This is a census-based
+     selection, not a propagation prediction. Do not select an arbitrary
+     pilot-free coarse channel: the detector analyzer rejects a target outside
+     the passband.
+     Inspect several staged files with
+     `pilot-proxy chime-inspect --input-dir <staged>` before running the
+     detector. This is a pilot-free control for the tested sample, not a
+     proof that the channel is always free of RFI.
+   - **Extreme-`mu0` quiet channels:** DTV 18 (largest shipped `mu0`, 1.0111)
      and DTV 20 (smallest, 0.9853). These are where the legacy rule pinned
-     hardest, so they are the discriminating measurement.
+     most strongly, so they provide the clearest comparison. The values are
+     rounded from an independent recomputation over the shipped manifest;
+     whether the selected intervals are quiet is determined from the data.
 
-3. **Bounded scans** (same pattern as the pre-production gates):
+3. **Run bounded scans** using the pre-production pattern:
 
    ```bash
    pilot-proxy chime-scan --inventory-name chime-pilots --select <freq_id> \
@@ -93,48 +103,53 @@ section.
    pilot-proxy validate-products --run-dir runs/h0check_<freq_id>/<...>
    ```
 
-   Aim for ≥1000 valid frames per channel (50 files is ample at 10 s frames).
+   Aim for at least 1000 valid frames per channel. The `--max-files 50` bound
+   is an initial allocation; use the measured valid-frame count rather than
+   assuming it is sufficient.
 
-4. **Acceptance criteria**, per channel, from `stats.json` and
-   `chime_detector_outputs.npz`:
+4. **Apply the acceptance criteria** to each channel using `stats.json` and
+   `chime_detector_outputs.npz`. The numerical bounds below are planned
+   acceptance criteria, not existing measurements:
    - `mu0_by_pilot` matches the weight-manifest value exactly.
-   - Control + quiet channels: `mean(fstat_raw[valid])` agrees with `mu0`
-     far better than with 1 — require `|mean − mu0| < |mu0 − 1| / 3` and note
-     the frame count. With ≥1000 frames the standard error on the mean is
-     ~`sqrt(1.5/rows_per_frame)/sqrt(nframes)`, orders below the 1↔mu0 gap.
-   - Mask fraction over valid frames in **0.45–0.55** on the control and on
-     quiet channels at quiet hours (compare the same channels' pinned 0/1
-     fractions from any pre-correction products for the paper's
-     before/after panel).
+   - For the control and quiet channels, require
+     `|mean(fstat_raw[valid]) - mu0| < |mu0 - 1| / 3`. Record the frame count
+     and measured standard error. The approximation
+     `sqrt(1.5/rows_per_frame)/sqrt(nframes)` is a planning estimate, not a
+     substitute for the measured uncertainty.
+   - Require a mask fraction of **0.45--0.55** over valid frames for the
+     control and for quiet-channel intervals. If compatible pre-correction
+     products exist, use the same channels in the before/after panel.
    - `validate-products` passes (it now checks the *declared* corrected
      rule with exact integer math).
-   - DTV-loud channel/hours: mask fraction well above 0.5 and
-     `pilot_excess_corrected` strongly positive — the signal side still
-     detects.
+   - For a DTV-loud interval, report the mask fraction and distribution of
+     `pilot_excess_corrected`. Do not replace these measured values with
+     qualitative terms such as "well above" or "strongly positive" in the
+     paper.
 
-5. **Kill/resume once** mid-scan on one channel and confirm the resume is
-   accepted (provenance now gates on the norms and rule string) and the
-   combined product is deterministic against an uninterrupted rerun — the
-   same check as the pre-production gate, under the new rule.
+5. **Exercise resume once.** Stop one channel mid-scan, resume it, and verify
+   that provenance accepts the recorded norms and rule. Compare its combined
+   product with an uninterrupted rerun using the same inputs.
 
-Paper artifact: a two-panel figure — per-channel measured `mean F` vs `mu0`
-(with the `F=1` line for contrast), and H0 mask-fraction before/after the
-correction.
+The paper artifact is a two-panel figure. The first panel compares measured
+`mean F` with `mu0` and includes `F = 1` for reference. The second reports the
+`H0` mask fraction before and after the correction for matched data where
+available.
 
 ---
 
 ## 2. Detection-rate curves at publication trial counts
 
-Goal: `P_d` vs shelf SNR with Wilson 95% intervals, per frequency offset, at
-the −32 dB science threshold and for the parameter-free positive-excess rule.
-The summary machinery already emits `positive_excess_detection_rate` and
-`threshold_detection_rate` with `*_wilson95_lo/hi` — the only change from your
-existing sweeps is the trial count.
+This test measures `P_d` as a function of shelf SNR for each frequency offset.
+We evaluate both the -32 dB science threshold and the positive-excess rule,
+and we report Wilson 95% intervals. The summary already emits
+`positive_excess_detection_rate`, `threshold_detection_rate`, and their
+`*_wilson95_lo/hi` fields. The publication run increases the trial count.
 
-1. On the GPU node, reuse the golden ATSC capture (or regenerate:
-   `pilot-proxy generate-atsc ...` then `pilot-proxy audit-atsc`).
+1. On the GPU node, use the audited golden ATSC capture, or regenerate and
+   audit it with
+   `pilot-proxy generate-atsc ...` then `pilot-proxy audit-atsc`.
 
-2. Sweep the threshold region densely with ≥300 trials/point:
+2. First sweep the threshold region with 300 trials per point as a shakedown:
 
    ```bash
    pilot-proxy evaluate-snr --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
@@ -145,75 +160,124 @@ existing sweeps is the trial count.
      --noise-trials 300 --output-dir results/pd_curves
    ```
 
-   (`--requested-snr-shelf-db` / `--frequency-offset-hz` are repeatable if you
-   prefer explicit lists to the start/stop/step grid.) Budget: each trial is
-   one kernel batch; 15 points × offsets × 300 trials is minutes on the A100,
-   so 300 is a floor, not a ceiling — use 1000 for the final figure if the
-   session allows.
+   The standard sweep is `-1000`, `0`, and `+1000` Hz. The
+   `--requested-snr-shelf-db` and `--frequency-offset-hz` options are
+   repeatable when an explicit grid is preferable. Each trial is one detector
+   batch.
 
-**No GPU available?** The full sweep also runs GPU-free:
+   The `16384`-sample frame is the project-supplied configuration for the
+   planned CHIME engine upgrade, not a measurement of the current live
+   correlator. Until a public upgrade paper or other citable record exists,
+   describe it as the planned configuration and retain the internal source
+   used to set it.
+
+   A 300-trial point cannot support a 2--3% precision claim: at `P_d = 0.5`,
+   its independently recomputed Wilson 95% half-width is approximately 5.6%.
+   After the shakedown, rerun the final grid with `--noise-trials 1500`, which
+   gives approximately 2.5% at `P_d = 0.5` (1000 trials gives approximately
+   3.1%). Use the emitted interval fields, rather than these worst-case
+   planning values, for the final acceptance decision.
+
+**CPU path.** The full sweep can also run without a GPU:
 `--detector-backend cpu-reference` computes the primary fields with the
-validated exact-integer CPU reference (Python-integer rational-half mask, so
-decisions are exact); each row records its `detector_backend`. The kernel <->
-reference equivalence is CI-gated by the kernel parity suite, so a
-CPU-produced curve is the deployed detector's curve up to that gate; before
-the camera-ready figure, tie them together with a same-seed GPU spot check
-(one mid-transition SNR point, both backends, assert identical detection
-counts). Sweep cost on CPU is minutes at these geometries.
+exact-integer CPU reference, and every row records `detector_backend`. The
+kernel parity suite checks the CPU and CUDA implementations. Before using a
+CPU sweep in the paper, repeat one mid-transition, same-seed point on the GPU
+and require identical detection counts.
 
-3. Figures from the summary CSV/JSON:
+3. Build the publication figure from the summary CSV/JSON:
 
    ```bash
    PILOT_PROXY_USE_TEX=1 PILOT_PROXY_FIGURE_FORMATS=png,pdf \
-     pilot-proxy plot-results \
-       --input-csv results/pd_curves/dtv_snr_summary.csv \
-       --output-png results/pd_curves/dtv_snr_sweep.png
+     python analysis/fig3_publication.py \
+       results/pd_curves/dtv_snr_summary.csv "1500 trials/point"
    ```
 
-   The paper figure is `positive_excess_detection_rate` (and the −32 dB
-   threshold curve) vs requested shelf SNR with the Wilson bounds as error
-   bars, one curve per offset.
+   Use this backend-aware publication script for CPU-reference sweeps. The
+   general `pilot-proxy plot-results` response plot currently labels its packed
+   fixed-point column `GPU fixed-point` even when that column was produced by
+   `--detector-backend cpu-reference`; do not use that label as backend
+   provenance.
 
-4. Acceptance: monotone curves; Wilson half-widths ≲2–3% through the
-   transition; quote the `P_d = 0.5` and `P_d = 0.9` crossings with their
-   intervals, and confirm the ±300 Hz offset curve shift is consistent with
-   the METHOD_SPEC capture-loss bound (≤0.14 dB).
+   Plot `positive_excess_detection_rate` and the -32 dB threshold rate against
+   requested shelf SNR. Show the Wilson bounds and one curve per offset.
+
+4. Accept the result when the rates are statistically consistent with a
+   monotone response and the Wilson half-width is at most 3% through the
+   transition. The current `analysis/fig3_publication.py` check rejects a
+   downward step only when the adjacent Wilson intervals do not overlap; keep
+   that rule fixed before the final run.
+
+   Report the `P_d = 0.5` and `P_d = 0.9` crossings. The current helper
+   linearly interpolates point estimates but does not calculate crossing
+   intervals. If the manuscript quotes those intervals, derive them from the
+   Wilson envelopes or a retained bootstrap and record the method. For the
+   standard sweep, compare the `+/-1 kHz` shifts with the `1.5923` dB
+   rectangular-window capture-loss prediction. That value was independently
+   recomputed from the `sinc^2` expression in `docs/METHOD_SPEC.md` and is
+   already used by `analysis/fig3_publication.py`.
 
 ---
 
 ## 3. Injection–recovery on real CHIME baseband
 
-Goal: inject a complex tone of known amplitude at the pilot frequency into
-*real* baseband and show recovered pilot excess tracks injected amplitude —
-slope 1, intercept = the channel's ambient floor. No harness exists yet; build
-it as a preprocessing script so the production pipeline runs untouched and
-every product carries normal provenance.
+This test requests a complex tone at the pilot frequency in real baseband.
+We then measure corrected pilot excess against the realized injected tone
+power. The expected signal-dominated log-log slope is 1, and the linear-fit
+floor is the ambient pilot excess of the selected channel. These are model
+predictions to test, not existing measurements.
 
-**Tooling:** `pilot-proxy inject-pilot-tone` works in the file's own integer
-domain (offset-binary 4+4-bit, components [-8, 7]): a zero-amplitude pass is
-byte-identical to the source unconditionally, injected deltas are exact apart
-from counted saturation, and sibling datasets/attributes/filenames are
-preserved so the output tree runs through `chime-scan --source local`
-unchanged.
+The preprocessing harness is already implemented as
+`pilot-proxy inject-pilot-tone`. It operates in the file's offset-binary
+4+4-bit domain, whose components span `[-8, 7]`. An `a = 0` run is checked for
+byte identity. For nonzero amplitudes, the harness adds the tone, rounds the
+sum once to the integer domain, clips to the component range, and records the
+clip count. It verifies that sibling datasets and attributes are unchanged
+and preserves each filename. Therefore, the resulting directory can be read
+by `chime-scan --source local` without a detector-specific input path.
 
-1. **Build the ladder** on the quiet channel from item 1. Choose 6-8
-   amplitudes spanning shelf-SNR-equivalent -40 to -20 dB (the manifest
-   records each file's measured per-component RMS in LSB, so `--amplitude-lsb`
-   converts to dB after the fact), plus the mandatory `a = 0` control:
+The current analysis is not yet sufficient for a publication ladder. It uses
+the requested `amplitude_lsb**2` as the injected-power coordinate. The
+manifest records the source RMS and clip count, but not the realized coherent
+tone power after rounding and clipping. In particular, any requested
+amplitude below 0.5 LSB makes no sample change under the current rounding
+rule, so the earlier `0.05`--`0.4` LSB points were not valid injections.
+
+1. **Close the realized-power preflight.** Update the injection manifest to
+   record the realized post-quantization delta and its coherent power at the
+   pilot frequency. Compute that quantity from the decoded output-minus-source
+   samples after rounding and clipping; retain enough information to audit the
+   projection. Update `analyze-injection-recovery` to use this measured value
+   rather than `amplitude_lsb**2`, and add a regression test covering a point
+   altered by rounding. Do not make a linearity or sensitivity claim until
+   that change is implemented and tested.
+
+2. **Build the ladder** on the quiet channel from item 1. Choose 6--8
+   amplitudes whose realized powers span the transition, plus the required
+   `a = 0` control. Populate `VALIDATED_AMPLITUDES` from the preflight; do not
+   include a nonzero point below 0.5 LSB with the current integer-rounding
+   path:
 
    ```bash
-   for a in 0 0.05 0.1 0.2 0.4 0.8 1.6; do
+   for a in "${VALIDATED_AMPLITUDES[@]}"; do
      pilot-proxy inject-pilot-tone --input staged/<freq_id>/ \
        --output-dir injected/a$a --amplitude-lsb $a \
        --physical-channel <ch> --phase-seed 20260701
    done
    ```
 
-   A second ladder at the channel's *measured* transmitter offset
-   (`--pilot-frequency-hz <pilot + df>`) tests the capture-loss bound on-sky.
+   Run a second ladder at the measured transmitter offset with
+   `--pilot-frequency-hz <pilot + df>`. This tests the capture-loss model on
+   the same baseband distribution.
 
-2. **Run the untouched pipeline** over each tree, then keep the manifest with
-   its products:
+   Before scanning, require every ladder point to list the same source files,
+   event identities, frame grid, phase seed, and pilot frequency, except for
+   the intentionally offset ladder. The current analysis command does not
+   enforce all of these cross-point identity checks, so retain and audit the
+   comparison explicitly.
+
+3. **Run the same pipeline** over each injected directory and retain the
+   injection manifest with the products:
 
    ```bash
    pilot-proxy chime-scan --source local --input-dir injected/a$a \
@@ -223,104 +287,115 @@ unchanged.
    cp injected/a$a/injection_manifest.json runs/inj_a$a/<...>/
    ```
 
-3. **Analyze the ladder** (this also produces item 4's comparison):
+4. **Analyze the ladder.** This command also produces the comparison used in
+   item 4:
 
    ```bash
    pilot-proxy analyze-injection-recovery \
-     --point runs/inj_a0/<...> --point runs/inj_a0.05/<...> ... \
+     --point runs/inj_a0/<...> --point runs/inj_a<a1>/<...> ... \
      --false-alarm-rate 1e-2 --output-dir results/injection_recovery
    ```
 
-4. Acceptance: weighted-fit floor consistent with the `a = 0` ambient level;
-   signal-dominated log-log slope `1.00` within error (reported as
-   `signal_dominated_log_slope`); the offset ladder depressed by the
-   predicted `sinc^2` capture loss; clip counts negligible at every point
-   (they are in the CSV). This figure plus item 2's synthetic curves is the
-   sensitivity validation a referee will look for first.
+5. Accept the ladder when the fitted floor is consistent with the `a = 0`
+   point, the reported `signal_dominated_log_slope` is consistent with 1.00,
+   and the offset ladder is consistent with the predicted `sinc^2` factor.
+   Report the clip count at every point; do not call it negligible without a
+   numerical bound. The linearity figure and item 2's synthetic curves form
+   the primary sensitivity check.
 
 ---
 
 ## 4. Radiometer baseline comparison
 
-Goal: quantify, on identical data and timescales, the advantage of the
-pilot-informed F-statistic over the classical total-power detector. Pure
-analysis: both statistics are already in the products.
+This test compares the pilot-informed F-statistic with a total-power
+radiometer on the same frames and integration time. Both statistics are
+already present in the run products, so no additional detector run is needed.
 
-**Tooling:** produced by the same `analyze-injection-recovery` run as item 3
--- the radiometer statistic is `baseband_power_linear` on identical frames,
-thresholds are empirical quantiles of the `a = 0` control at each requested
-`P_fa` (the tool refuses a `P_fa` the control's frame count cannot support:
-it needs >= 10/P_fa valid frames), and both detectors' rates carry Wilson
-95% intervals.
+The `analyze-injection-recovery` command from item 3 uses
+`baseband_power_linear` for the radiometer. For each requested `P_fa`, it sets
+both thresholds from empirical quantiles of the `a = 0` control and reports a
+Wilson 95% interval for each detector's rate. It requires at least `10/P_fa`
+valid control frames.
 
-Deliverable: the `detector_vs_radiometer_pd` figure -- `P_d` vs injected tone
-power for both detectors at matched `P_fa`; the horizontal gap at
-`P_d = 0.9` is the headline sensitivity advantage in dB. Add the analytic
-overlay in the manuscript: the pilot occupies one fine bin while the
-radiometer integrates the full band's noise, so the expected processing-gain
-gap is `~10*log10(N_bins_effective)` scaled by the per-frame integration;
-state the prediction and show the measurement matches within the ladder's
-CIs.
+The realized-power and cross-point identity preconditions from item 3 also
+apply here. The current command does not independently prove that each ladder
+point contains the same source events or frame identities. Verify those
+identities before comparing the two detection curves, and use only the
+matched valid-frame intersection if a frame is missing from any point.
 
-Acceptance: measured gap consistent with the analytic expectation; the
-comparison uses *identical frames*, thresholds set on *data*, and both curves
-carry binomial intervals.
+The deliverable is `detector_vs_radiometer_pd`: `P_d` versus injected tone
+power at matched `P_fa`. Report the horizontal difference at `P_d = 0.9` in
+dB only when both curves cross that level within the sampled ladder. The
+analytic comparison should state its assumed effective number of independent
+bins and integration convention. The approximate scaling
+`10*log10(N_bins_effective)` is a prediction to test, not a replacement for
+the measured difference.
+
+Accept the comparison when it uses identical valid frames, thresholds derived
+from the same control data, and intervals on both rates. Then report whether
+the measured difference is consistent with the stated analytic model.
 
 ---
 
 ## 5. Cleaning tradeoff in science terms
 
-Goal: an operating curve a BAO referee can act on — masked fraction versus
-residual contamination, with the recovered-bandwidth headline. Entirely
-post-hoc: the schema keeps raw `p_target_u64`/`p_ref_sum_u64` verbatim and the
-norms per pilot precisely so thresholds are a recompute, never a re-run.
+This test reports how the retained frame fraction changes with the detector
+threshold. It is a detector-space cleaning study, not a BAO integration-time
+forecast. The product schema stores `p_target_u64`, `p_ref_sum_u64`, and the
+per-pilot weight norms, so the threshold can be recomputed after the scan.
 
-**Tooling:** `pilot-proxy analyze-cleaning-tradeoff` implements the sweep
-below; the `x = 0` anchor against the stored mask is enforced as a hard gate.
+`pilot-proxy analyze-cleaning-tradeoff` implements the sweep. Before using any
+alternative threshold, it requires the `x = 0` float recomputation to match
+the stored exact-integer mask on every valid frame.
 
-1. **Threshold sweep** (`pilot-proxy analyze-cleaning-tradeoff --run-dir
+1. **Run the threshold sweep** (`pilot-proxy analyze-cleaning-tradeoff --run-dir
    <combined> --control-run-dir <control> --survey-hours <H>`) over the
    combined survey products:
-   - Grid `tau = mu0 * 10^(x/10)` for `x` in 0…12 dB (x = 0 is the shipped
-     operating point).
-   - Exact integer mask per frame:
-     `p_target * ref_norm_sum_sq * den > target_norm_sq * p_ref_sum * num`
-     with `num/den` the rational for `10^(x/10)` (or float is fine for the
-     sweep; the x = 0 point must reproduce the stored mask exactly — assert
-     it).
-   - Per channel and per `tau`: masked fraction over valid frames, and the
-     **residual metric** — mean cleaned baseband power (mask applied to
-     `baseband_power_linear`) minus the control channel's mean, in dB.
+   - Use `tau = mu0 * 10^(x/10)` for `x` from 0 through 12 dB. The `x = 0`
+     point is the stored operating point.
+   - The implemented sweep forms `F` from the stored powers in float and
+     applies `F > tau`. At `x = 0`, it asserts equality with the stored mask,
+     which was formed by exact integer cross-multiplication.
+   - For each channel and `tau`, report the masked fraction over valid frames.
+     When a control run is provided, also report the cleaned mean
+     `baseband_power_linear` relative to the control mean in dB.
 
-2. **Operating curve figure**: residual (dB above control floor) vs masked
-   fraction, one curve per DTV-affected channel, shipped point `tau = mu0`
-   marked. Loud channels show the knee; quiet channels hug the floor.
+2. **Build the operating curve.** Plot residual relative to the tested
+   control against masked fraction, with one curve per DTV channel and
+   `tau = mu0` marked. The current command emits a descriptive curve and
+   frame counts, but no residual uncertainty intervals. Add a retained
+   per-event block bootstrap before making an inferential claim about a knee
+   or floor agreement. Otherwise, describe the curve as descriptive and do
+   not imply that plotted lines are confidence intervals.
 
-3. **Recovered-bandwidth headline**: at the operating point,
+3. **Compute retained bandwidth** at the operating point:
 
    `recovered = sum over affected freq_ids of (1 − mask_fraction) × 0.390625 MHz`
 
-   quoted alongside the alternative (discarding those coarse channels
-   outright) and scaled by the survey hours — "X MHz·h recovered at ≤Y dB
-   residual above the pilot-free floor". Express X also as a percentage of
-   the CHIME band currently lost to DTV flagging.
+   Compare this value with discarding the affected coarse channels outright.
+   If `survey_hours` is supplied, also report the corresponding MHz-hours.
+   Any percentage must name its denominator; do not describe the denominator
+   as the amount "currently lost" unless that operational flagging policy is
+   documented separately.
 
-4. **BAO tie-in, minimal defensible version**: convert the residual dB excess
-   into a fractional system-temperature contribution per channel and state it
-   against the survey's noise budget; full power-spectrum propagation can be
-   future work if the residual is ≪ the thermal floor, which the control
-   comparison establishes.
+4. **Bound the interpretation.** The control comparison is in stored
+   baseband-power units. Convert it to a system-temperature contribution only
+   when a calibrated transfer and its uncertainty are available. The
+   radiofisher uncertainty-tolerance study is the appropriate place to
+   propagate that result into a BAO integration-time forecast.
 
-Acceptance: the x = 0 sweep point reproduces the stored products bit-exactly;
-curves are monotone; the headline number carries the frame counts and hours
-behind it.
+Accept the analysis when the `x = 0` mask reproduces the stored decision on
+every valid frame and the retained-bandwidth curve is monotone with threshold.
+Report any non-monotone residual behavior rather than filtering it out. The
+headline value must include the valid-frame count, affected-channel set, and
+survey hours used to compute it.
 
 ---
 
-## Suggested paper-figure inventory from these items
+## Figures produced by these checks
 
-The full editorial mapping (venue, section outline, figure/table numbers,
-statements-to-artifacts) lives in `docs/PAPER_PLAN.md`.
+`docs/PAPER_PLAN.md` assigns the final figure and table numbers. The five core
+checks produce:
 
 1. Measured `mean F` vs `mu0` per channel + H0 mask-fraction before/after
    (item 1).
@@ -332,15 +407,14 @@ statements-to-artifacts) lives in `docs/PAPER_PLAN.md`.
 
 ---
 
-## Release checklist (at submission)
+## Release checklist
 
-1. Freeze results, then tag: bump `0.2.0.dev0` -> `0.2.0` in `pyproject.toml`
-   and `CITATION.cff`, update `CHANGELOG.md`'s heading, tag and push.
-2. Archive the tagged release (e.g. Zenodo's GitHub integration) and add the
-   minted DOI to `CITATION.cff` (`doi:` field) and the manuscript's software
-   citation. Do the same for `datatrawl`.
-3. Rebuild the formal documents from the tag
-   (`PILOT_PROXY_USE_TEX` irrelevant here; they are LaTeX sources) and attach
-   the PDFs to the release.
-4. Re-run `make release-check` and the kernel suite on the GPU node at the
-   tag; record the CI run URL in the paper's reproducibility note.
+1. Freeze the result set. Change `0.2.0.dev0` to `0.2.0` in `pyproject.toml`
+   and `CITATION.cff`, update the `CHANGELOG.md` heading, and create the tag.
+2. Archive the tagged release. Add the resulting DOI to the `doi` field in
+   `CITATION.cff` and to the manuscript software citation. Repeat this step
+   for datatrawl.
+3. Build both formal documents from the tag and attach their PDFs to the
+   release. `PILOT_PROXY_USE_TEX` does not affect these LaTeX documents.
+4. Run `make release-check` and the kernel suite on the GPU node at the tag.
+   Record the tag, test result, and CI URL in the reproducibility note.

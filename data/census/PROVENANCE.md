@@ -1,41 +1,71 @@
-# Transmitter census provenance
+# Transmitter-census provenance
 
-Source: FCC LMS and ISED station data, compiled as
-`TV_Stations_UHF_within500mi_DRAO.xlsx`. Retrieved 2026-06-09.
-Query criterion: UHF ATSC television stations within 500 statute miles of
-DRAO (49.3208 N, 119.6239 W). Collection method: listing collection only
-(all stations in radius; over-the-air filter; transmitter-class
-identification for offset-tolerance context). No propagation model was
-applied by this census.
+The source workbook is `TV_Stations_UHF_within500mi_DRAO.xlsx`, retrieved on
+2026-06-09. It is a manually compiled listing from FCC LMS and ISED station
+information, not a propagation simulation. The inclusion rule was every UHF
+ATSC television station listed within 500 statute miles of DRAO
+(`49.3208 N`, `119.6239 W`). We used the station class and frequency-tolerance
+fields to interpret possible pilot offsets. We did not use the census alone
+to claim that a station was detectable at CHIME.
 
-Field strengths (detectability_db, 42 merged rows; 43 values before the
-channel-sharing merge, one merge collapsing two): RabbitEars Signal Search
-Map study, 2026-06-09 12:15 ET, shareable id 2738863, 120-statute-mile
-search radius, receive height set to its maximum (99,999,999 ft AGL),
-which effectively removes terrain blocking; values are therefore
-optimistic/upper-bound estimates. Rows beyond 120 miles carry no field
-strength and rank by distance. The RabbitEars result-list printout is
-archived alongside this file.
+## Optional field-strength screen
 
-Derivation (`census_from_xlsx.py`, deterministic; regenerate with
-`python census_from_xlsx.py TV_Stations_UHF_within500mi_DRAO.xlsx census.csv`):
+The workbook also contains `detectability_db` for a limited nearby subset.
+These values came from a RabbitEars Signal Search Map study run on
+2026-06-09 at 12:15 ET, shareable ID `2738863`. The study radius was 120
+statute miles, and receive height was set to the tool maximum of 99,999,999 ft
+AGL. This setting largely removes terrain blocking. Therefore, these field
+strengths are optimistic upper-bound estimates, not site predictions.
 
-- Population = Type "on-air" only. Dropped: 23 off-air (no emission),
-  9 analog (no ATSC pilot), 4 ATSC 3.0 (OFDM; no 8-VSB pilot tone).
-- "Physical Ch(s)" parsing: every integer token in 14..36 becomes one row;
-  multi-channel entries expand. One on-air row (CH5643-DT) carried no UHF
-  token and is excluded: confirmed VHF-only. VHF allocations (channels
-  2-13, 54-216 MHz) lie entirely below CHIME's 400-800 MHz band, so no
-  VHF pilot can appear in-band; the census scope is UHF by construction.
-- Channel-sharing partners (same rf_channel at the same site) emit one
-  physical carrier and are merged into single emitter rows (4 merges;
-  494 -> 490 emitter-channel rows: 93 primary, 397 non-primary).
-- detectability_db = RabbitEars Signal Search field strength (dBuV/m)
-  where available (42 merged rows within the 120-mile study radius; 43
-  pre-merge values); association ranking falls back to distance
-  otherwise.
-- Distances converted miles -> km; bearings, CHIME channel indices, and
-  the source sheet's Frequency Tolerance carried through. Note the
-  regulatory asymmetry preserved from the source: every on-air
-  full-power/Class A/Relay specifies +/-1 kHz; every Translator/LPTV is
-  "None specified".
+The final merged CSV contains 42 rows with field strength. Before the
+channel-sharing merge, 43 values were present. Rows outside the 120-mile study
+have no field strength and fall back to distance when the association code
+needs a rank. The earlier record says that the RabbitEars result-list printout
+was archived with the source material; no separate copy is present in this
+checkout.
+
+## Deterministic reduction
+
+Regenerate the CSV with:
+
+```bash
+python census_from_xlsx.py TV_Stations_UHF_within500mi_DRAO.xlsx census.csv
+```
+
+The reduction applies the following rules:
+
+The row counts below were independently reproduced by running the committed
+reduction over the retained workbook. The RabbitEars study settings above are
+recorded source metadata; the separate result-list printout is unavailable,
+so those settings were not independently verified here.
+
+1. The workbook contains 521 rows. We retain the 485 rows whose `Type` is
+   `on-air`. We remove 23 `off-air` rows because they do not describe a
+   current emission, 9 analog rows because they have no ATSC pilot, and 4
+   ATSC 3.0 rows because OFDM does not contain the 8-VSB pilot used here.
+2. We parse every integer in `Physical Ch(s)` and emit one row for each value
+   in 14--36. Multi-channel entries therefore expand. One on-air entry,
+   `CH5643-DT`, has no UHF token and is excluded; it is VHF-only. Channels
+   2--13 occupy 54--216 MHz and lie below CHIME's 400--800 MHz band.
+3. The expansion produces 494 emitter-channel rows. Four pairs share an RF
+   channel and site, so we merge each pair into one physical carrier. The
+   final CSV contains 490 emitter-channel rows: 93 with service class
+   `Full-power` and 397 in the other recorded classes.
+4. `detectability_db` is the RabbitEars field strength in dBuV/m when one is
+   available. Otherwise it is blank. Association ranking then falls back to
+   distance.
+5. We convert distance from miles to kilometers and carry the bearing,
+   frequency tolerance, CHIME channel index, nominal pilot frequency, city,
+   and state or province through when present. Five output rows have no CHIME
+   index and retain `nan` for nominal pilot frequency because those fields are
+   absent in the source workbook.
+
+## Frequency-tolerance boundary
+
+At the unmerged source-row level, full-power, Class A, and Relay entries use
+`±1 kHz`, while Translator and LPTV entries use `None specified`. The merge
+promotes the service class to the more primary partner but retains the first
+row's frequency-tolerance field. Consequently, two merged rows
+(`KJYY-LD+KOPB-TV` and `KCKW-LD+KEZI`) are labeled `Full-power` while retaining
+`None specified`. Analyses should treat this as a channel-sharing provenance
+case rather than infer tolerance from the merged class alone.

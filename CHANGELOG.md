@@ -2,6 +2,15 @@
 
 ## 0.2.0.dev0 - Unreleased
 
+- Documentation was rewritten in a direct, evidence-bounded engineering style
+  and checked against the current code, tests, profiles, manifests, and product
+  schemas. The runbooks now distinguish the planned 16,384-sample CHIME Engine
+  profile from the currently deployed correlator; separate synthetic
+  thresholds, the fixed weight-norm null point `mu0`, and data-estimated
+  thresholds; and record the current local-source regex-key mismatch with its
+  working `source_freq_id_regex` fallback. CLI help no longer presents the
+  legacy `--source-channel-regex` option as a working override.
+
 - Mask boundary aligned to the contract: the CUDA kernel used inclusive
   `>=` where the schema, method spec, and Python reference declare strict
   positive excess (`>`). Behavior differs only on exact integer equality

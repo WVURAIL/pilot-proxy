@@ -1,13 +1,11 @@
 # PilotProxy v0.2 CHIME Real-Data Adapter
 
-> **Status:** Historical adapter notes. For new CANFAR/CADC archive-scale
-> work, use `pilot-proxy chime-scan` via `docs/CANFAR_RUNBOOK.md`. The
-> `chime-run` examples below are retained for already-staged local HDF5 data
-> and regression comparisons.
+> **Status:** Historical adapter notes. For new archive-scale CADC/CANFAR work,
+> use `pilot-proxy chime-scan` and `docs/CANFAR_RUNBOOK.md`. We retain the
+> `chime-run` workflow for already-staged HDF5 data and regression comparisons.
 
-
-This revision adds an optional CHIME adapter layer under `pilot_proxy.chime`.
-The CUDA kernel contract is unchanged:
+The v0.2 adapter connects segmented CHIME HDF5 baseband data to the existing
+fixed-point detector. It does not change the CUDA kernel contract:
 
 ```text
 K = 128 detector samples
@@ -18,49 +16,52 @@ packed complex int4 input
 uint64 power accumulation
 ```
 
-The standalone synthetic/testbench path still supports explicit shelf-SNR
-thresholds. The CHIME real-data workflow does not use a shelf-SNR threshold or
-threshold table; it applies the norm-corrected positive-excess rule:
+The synthetic testbench can apply an explicit shelf-SNR threshold. The CHIME
+real-data path does not use that table. It forms the validity flag and the
+norm-corrected positive-excess mask from the exact integer powers:
 
 ```text
 valid = p_ref_sum != 0
 mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-the exact integer form of `F > mu0`, where `mu0 = 2*target_norm_sq/
-ref_norm_sum_sq` is the flat-floor H0 zero-point set by the int4 weight norms
-(see `docs/METHOD_SPEC.md`).
+This comparison is the integer form of `F > mu0`, where
+`mu0 = 2*target_norm_sq/ref_norm_sum_sq`. The value `mu0` is the flat-floor
+reference implied by the quantized weight norms; it is not assumed to be one.
+See `docs/METHOD_SPEC.md` for the statistic and its calibration.
 
-`reference_offset_bins` is the primary internal/kernel term. It is the
-target-to-reference spacing in detector fine bins. `skipped_guard_bins` is the
-more intuitive user-facing gap between target and reference, and is always:
+`reference_offset_bins` measures the target-to-reference separation in detector
+fine bins. `skipped_guard_bins` counts the fine bins between them. Therefore:
 
 ```text
 skipped_guard_bins = reference_offset_bins - 1
 ```
 
-The adapter streams segmented CHIME HDF5 files into the published detector:
+For each selected pilot, the adapter follows this data path:
 
 ```text
 CHIME HDF5 segments
   -> normalized block (num_input_streams, 1, samples)
   -> packed detector input (frames, detector_rows_per_frame, 128)
-  -> CUDA NumDen detector
-  -> one F-statistic per frame per physical DTV pilot channel
+  -> CUDA numerator/denominator detector
+  -> one F-statistic per frame per selected DTV pilot channel
 ```
 
 ## Data Contract
 
-The CHIME input directory is set by `PILOT_PROXY_CHIME_INPUT_DIR`, and defaults to
-`$HOME/dataset/canfar_pilots_10s` when that variable is unset:
+The helper script `scripts/run_chime_local_calibration.sh` reads
+`PILOT_PROXY_CHIME_INPUT_DIR` and otherwise uses
+`$HOME/dataset/canfar_pilots_10s`. The `pilot-proxy chime-run` command itself
+does not read that variable; it always requires `--input-dir`.
 
 ```text
 $PILOT_PROXY_CHIME_INPUT_DIR    # e.g. $HOME/dataset/canfar_pilots_10s
 ```
 
-Inspection found 23 physical DTV pilot channels mapped from CHIME coarse-channel
-directories `ch0844` through `ch0506`, corresponding to physical channels
-14 through 36. Each file contains:
+The original data inspection found 23 DTV pilot channels in directories
+`ch0844` through `ch0506`, corresponding to physical channels 14 through 36.
+That observation came from the staged dataset and is not reconstructed by the
+unit tests. The inspected files had:
 
 ```text
 dataset path: /baseband
@@ -72,22 +73,32 @@ frequency/channel: one CHIME coarse channel per directory
 encoding: CHIME native offset-binary complex int4 packed in uint8
 ```
 
-CHIME `freq_id` and `chNNNN` labels are treated as data-product identifiers.
-For example, CHIME `ch0844` maps to PilotProxy receiver-profile
-`coarse_channel_index = 843`; the CHIME label is one-based while the PilotProxy
-coarse-channel index is zero-based.
+The adapter treats the CHIME `freq_id` and `chNNNN` label as data-product
+identifiers. In the current receiver profile, `ch0844` corresponds to
+`coarse_channel_index = 843`: the CHIME label is one-based and the PilotProxy
+profile index is zero-based. The receiver profile is marked
+`example_requires_data_product_verification`, so this coordinate relation must
+still agree with the metadata of the dataset being processed.
 
-The adapter converts CHIME offset-binary int4 bytes to the detector kernel's
-two's-complement packed complex int4 format. Absolute telescope timestamps are
-ignored; files are concatenated in deterministic sorted segment order and
-reported by `frame_index`.
+The adapter converts each CHIME offset-binary int4 byte to the detector's
+two's-complement packed complex int4 representation. `chime-run` concatenates
+files in deterministic sorted segment order, ignores absolute telescope time,
+and reports the resulting position as `frame_index`.
+
+The software profile and the commands below use a 16,384-sample analysis frame.
+This value is the profile for the planned CHIME engine-upgrade frame and should
+not be presented as a measurement of the currently deployed correlator. A
+12,288-sample current-frame value has been discussed but remains provisional
+until it is checked against an authoritative CHIME data product or upgrade
+document. In all cases, record the frame length used for the run and require it
+to be divisible by `K = 128`.
 
 ## Weight Coordinate Convention
 
-The CHIME profile has inverted spectral sense. The runner transforms CHIME data
-into the normal detector coordinate by reversing each detector window before the
-kernel sees it. Therefore the runner uses detector-coordinate weights, not raw
-inverted-coordinate weights:
+The CHIME receiver profile declares inverted spectral sense. The runner reverses
+each detector window before the CUDA kernel, which places the samples in the
+detector frequency coordinate. It must therefore use weights defined in that
+same coordinate:
 
 ```text
 weight_coordinate_system = post_spectral_sense_normalization
@@ -95,44 +106,38 @@ input_spectral_sense = inverted
 input_requires_time_reversal = true
 ```
 
-Use the shipped/default reference weight bank for this CHIME runner. Do not
-generate a CHIME weight bank from `chime_dtv_fengine.json` unless the weight
-manifest explicitly declares `post_spectral_sense_normalization`; otherwise the
-pilot fine-bin offset can be flipped twice. The runner records the validated
-weight convention in `run_config.json` and `stats.json`, and rejects raw
-inverted-coordinate manifests when time reversal is active.
+Use the shipped detector-coordinate weight bank with this runner. A newly
+generated CHIME bank is acceptable only when its manifest declares
+`post_spectral_sense_normalization` and the matching time-reversal preprocessing.
+Otherwise the pilot offset can be reversed twice. The runner records the
+effective convention in `run_config.json` and `stats.json` and rejects a raw
+input-coordinate manifest when time reversal is active.
 
 ## Legacy staged-data workflow
 
-Use this order for local 10 s CHIME calibration and as the CANFAR template:
+For a local staged dataset, run the detector and then validate the products:
 
 ```text
 chime-run
   -> validate-products
 ```
 
-`K=128`, `reference_offset_bins=2`, `skipped_guard_bins=1`, and the shipped
-detector-coordinate weights remain the baseline. The CHIME cleaning rule is
-norm-corrected positive excess:
+The baseline remains `K = 128`, `reference_offset_bins = 2`,
+`skipped_guard_bins = 1`, and the shipped detector-coordinate weights. The mask
+is the norm-corrected positive-excess comparison shown above.
 
-```text
-valid = p_ref_sum != 0
-mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
-```
-
-Set the input directory explicitly for local or CANFAR mounts:
+Set the local input path explicitly:
 
 ```bash
 export PILOT_PROXY_CHIME_INPUT_DIR="$HOME/dataset/canfar_pilots_10s"
 ```
 
-When the variable is unset, the local script defaults to
-`$HOME/dataset/canfar_pilots_10s`. CANFAR jobs should set
-`PILOT_PROXY_CHIME_INPUT_DIR` to the CANFAR input mount/path.
+The helper script uses this value. A CANFAR job should point it at the mounted or
+staged CANFAR directory.
 
 ## Commands
 
-Inspect:
+Inspect the staged files before running the detector:
 
 ```bash
 PYTHONPATH=src python -m pilot_proxy.cli chime-inspect \
@@ -141,7 +146,7 @@ PYTHONPATH=src python -m pilot_proxy.cli chime-inspect \
   --dataset-path baseband
 ```
 
-Check the detector layout:
+Check the proposed 16,384-sample upgrade layout:
 
 ```bash
 PYTHONPATH=src python -m pilot_proxy.cli check-layout \
@@ -151,9 +156,9 @@ PYTHONPATH=src python -m pilot_proxy.cli check-layout \
   --num-selected-channels 1
 ```
 
-Positive-excess detector run. for already-staged local HDF5 data;
-it reads the real samples once and writes detector and mask products into one
-run directory:
+Run the positive-excess detector over physical channels 14 through 36. This
+command reads the staged samples once and writes the frame products and mask to
+one run directory:
 
 ```bash
 PYTHONPATH=src python -m pilot_proxy.cli chime-run \
@@ -164,7 +169,7 @@ PYTHONPATH=src python -m pilot_proxy.cli chime-run \
   --plot
 ```
 
-Validate the combined products:
+Validate the combined files:
 
 ```bash
 PYTHONPATH=src python -m pilot_proxy.cli validate-products \
@@ -174,7 +179,7 @@ PYTHONPATH=src python -m pilot_proxy.cli validate-products \
 
 ## Output Products
 
-Each run directory contains:
+The staged-data runner writes:
 
 ```text
 run_config.json
@@ -187,22 +192,28 @@ tables/
 figures/
 ```
 
-Generated metadata may contain absolute local paths for the receiver profile,
-weights, kernel library, input manifest, and output directory. Those paths are
-informational and may not be portable between local, CANFAR, and review
-systems. Provenance SHA256 fields are the authoritative identity checks for
-configuration, weights, kernel, and input artifacts.
+The archive-scale `chime-scan` path additionally writes authoritative per-pilot
+products and `chime_integrated_spectra.npz`; see `docs/product_schema_v2.md` and
+`docs/DATA_PRODUCTS.md`.
+
+Generated metadata can contain absolute paths for the receiver profile, stream
+map, weight bank, kernel library, input manifest, and output directory. Those
+paths describe the machine that produced the run and may not be portable. Use
+the corresponding SHA-256 fields to compare artifact contents across local,
+CANFAR, and review systems.
 
 `run_config.json` and `stats.json` use schema versions
-`fstat_chime_run_config_v2` and `fstat_chime_stats_v2`. Both files include the
-same `detector_contract` object with `schema_version =
-pilotproxy_chime_detector_contract_v1`. That contract is the methods-level summary
-of the K=128 detector geometry, positive-excess mask, power accumulator, and
-all-row summation rule.
+`fstat_chime_run_config_v2` and `fstat_chime_stats_v2`. Both carry a matching
+`detector_contract` object with schema
+`pilotproxy_chime_detector_contract_v1`. The contract records the `K = 128`
+geometry, the positive-excess rule, the `uint64` accumulator, and the
+all-row-sum statistic.
 
-The detector output arrays are shaped `(num_frames, num_pilots)`. Baseband
-before/after spectra use masked-frame exclusion; masked frames are not
-zero-filled. Positive-excess runs write:
+The frame arrays have shape `(num_frames, num_pilots)`. Before/after baseband
+summaries exclude invalid frames, and the after-mask value averages only frames
+with `mask = 0`; rejected frames are not replaced with zeros.
+
+After `--plot`, the staged-data run contains:
 
 ```text
 tables/fstat_summary_by_pilot.csv
@@ -217,14 +228,15 @@ figures/baseband_spectrum_before_after_mask.png
 figures/mask_spectrogram.png
 ```
 
-Reference placement is adaptive and auditable. The requested reference offset is
-never silently weakened to a closer adjacent bin. If a requested reference leaves
-the coarse-channel edge, it wraps around the circular coarse-channel FFT. If a
-requested reference collides with the coarse-channel DC/forbidden tone, that one
-reference shifts farther from the target. If the target bin itself collides with
-the forbidden DC tone, weight generation fails hard because the target cannot be
-moved without changing the signal under test.
-The DC/forbidden-tone collision rule is:
+Reference placement is adaptive and recorded in the weight manifest. A
+reference that crosses a coarse-channel edge wraps on the circular FFT grid. A
+reference that collides with the forbidden coarse-channel DC tone moves farther
+from the target. The algorithm does not silently reduce the requested offset to
+the adjacent fine bin. If the target itself collides with the forbidden tone,
+weight generation stops because moving the target would change the signal being
+tested.
+
+The collision rule is:
 
 ```text
 forbidden_tone = coarse_channel_dc
@@ -232,8 +244,7 @@ forbidden_tone_normalized = 0.5
 forbidden_collision_rule = circular_normalized_distance <= 0.5 / detector_window_samples
 ```
 
-Use `reference_offset_bins` for the internal/kernel value and
-`skipped_guard_bins` for the human-readable gap:
+The internal offset and the human-readable gap remain related by:
 
 ```text
 reference_offset_bins = skipped_guard_bins + 1
@@ -241,7 +252,7 @@ reference_offset_bins = 2  # shipped K=128 baseline
 skipped_guard_bins = 1     # one skipped fine bin between target and reference
 ```
 
-The weight manifest records placement status and warning fields such as:
+The manifest records the placement status and warnings:
 
 ```text
 reference_placement_status
@@ -252,7 +263,7 @@ forbidden_tone_in_skipped_guard
 placement_warnings
 ```
 
-The manifest also records human-readable selected/requested offsets:
+It also records the requested and selected offsets:
 
 ```text
 target_offset_hz
@@ -268,76 +279,66 @@ upper_reference_requested_relative_to_target_hz
 ```
 
 `run_config.json` and `stats.json` copy a compact
-`reference_placement_summary` from the weight manifest, including adaptive
-channels, DC-shifted references, edge-wrapped references, skipped-guard DC
-channels, and the forbidden-tone policy.
+`reference_placement_summary`, including the channels with adaptive placement,
+DC shifts, edge wraps, or a forbidden tone in the skipped guard. For the shipped
+`K = 128`, offset-2 bank, DTV 21 wraps its lower reference across the
+coarse-channel edge rather than substituting `-1,+1` references.
 
-For the shipped K=128, reference-offset-2 baseline, DTV 21 wraps its lower
-reference across the coarse-channel edge rather than falling back to adjacent
-`-1,+1` references.
-
-The SNR-shelf histogram summary distinguishes:
+The SNR-shelf table uses legacy column names that need careful interpretation:
 
 ```text
-num_detector_valid_frames     # reference denominator > 0
-num_positive_excess_frames    # finite SNR shelf, equivalent to F > mu0
+num_detector_valid_frames
+num_positive_excess_frames
 positive_excess_fraction
+mask_fraction
 ```
 
-> **Note (finite SNR vs positive excess):** frames with `F <= 1` have no
-> finite `SNR_shelf` (`10 log10(F-1)` undefined). That fraction is NOT the
-> norm-corrected positive-excess mask fraction when `mu0 != 1`; the mask
-> follows `F > mu0` and is recorded separately as `positive_excess_fraction`.
+`num_positive_excess_frames` is currently the number of finite
+`snr_shelf_db` values. Because `10*log10(F - 1)` is finite only for `F > 1`,
+this count and `positive_excess_fraction` describe `F > 1`, not the
+norm-corrected mask when `mu0 != 1`. The stored mask follows `F > mu0`.
+`mask_fraction` is the table's direct mean of the stored binary mask over all
+frames. Use `mask_summary_by_pilot.csv` when the valid-frame denominator must be
+explicit.
 
 ## Injection-recovery and cleaning tradeoff
 
-Two publication-analysis commands operate on this workflow's files and
-products (procedures: `docs/PUBLICATION_VALIDATION.md`):
+Four publication-analysis commands operate on the staged files or the
+archive-scale products. Their procedures are in
+`docs/PUBLICATION_VALIDATION.md`.
 
 ```text
-pilot-proxy inject-pilot-tone        # copy real baseband with a known tone
-pilot-proxy analyze-cleaning-tradeoff  # post-hoc mask-threshold sweep
-pilot-proxy analyze-injection-recovery # ladder linearity + radiometer baseline
-pilot-proxy chime-combine              # stack per-pilot checkpoints -> canonical
+pilot-proxy inject-pilot-tone
+pilot-proxy analyze-cleaning-tradeoff
+pilot-proxy analyze-injection-recovery
+pilot-proxy chime-combine
 ```
 
-`inject-pilot-tone` works in the file's own integer domain (offset-binary
-4+4-bit, components [-8, 7]): a zero-amplitude pass is byte-identical to the
-source, injected deltas are exact apart from counted saturation, and sibling
-datasets/attributes and filenames are preserved, so the output directory runs
-through `chime-scan --source local` unchanged. `analyze-cleaning-tradeoff`
-sweeps `tau = mu0 * 10^(x/10)` over the stored `p_target_u64`/`p_ref_sum_u64`
-and norms; the `x = 0` point must reproduce the stored mask exactly before any
-other threshold is reported, and the outputs are the masked-fraction/residual
-operating curve plus the recovered-bandwidth headline.
+`inject-pilot-tone` works in the file's native offset-binary 4+4-bit integer
+domain, with component range `[-8, 7]`. A zero-amplitude pass preserves the
+baseband bytes, and a nonzero pass records saturation while preserving sibling
+datasets, attributes, and filenames. Therefore the output can be read by
+`chime-scan --source local`.
 
-Figures use LaTeX styling (Computer Modern mathtext by default;
-`PILOT_PROXY_USE_TEX=1` for full TeX rendering) and are written as 300 dpi
-PNG, with `PILOT_PROXY_FIGURE_FORMATS=png,pdf` adding vector PDFs for the
-manuscript. Core figures include a finite \(\mathrm{SNR}_{\mathrm{shelf}}\) histogram,
-F-statistic survival curves, F-statistic level spectrograms, baseband
-before/after spectra, baseband spectrograms, and mask spectrograms. The
-histogram x-axis is only \(\mathrm{SNR}_{\mathrm{shelf}}\): the top panel spans
-\([-90, 0]\) dB, and the lower panel zooms to \([-90, -25]\) dB to cut off the
-strong channel-30 outlier. The histogram is
-a probability density over finite \(\mathrm{SNR}_{\mathrm{shelf}}\) values for
-each pilot channel: counts are divided by the number of finite shelf-SNR
-samples and by the bin width. Frames with \(F\leq1\) have no finite shelf-SNR
-value, so their contribution is recorded separately by the
-`positive_excess_fraction` column in
-`tables/snr_shelf_histogram_summary.csv`.
-Spectrogram plots use
-relative time on the bottom axis with frame index on the top axis, and CHIME
-coarse-channel frequency on the left axis with DTV physical channel labels on
-the right axis. The F-statistic survival and F-statistic level spectrogram
-figures include a second lower panel excluding the strong DTV-30 outlier. The
-10-second local spectrograms include an explicit 10 s tick, and mask
-spectrogram colorbars are discrete with only \(M=0\) and \(M=1\).
-The SNR-shelf histogram intentionally uses only
-\(\mathrm{SNR}_{\mathrm{shelf}}\) on the x-axis because the y-axis is a
-probability density per shelf-SNR dB. The F-statistic survival plots keep
-\(R_F=10\log_{10}F\) on the bottom axis and show the corresponding finite
-\(\mathrm{SNR}_{\mathrm{shelf}}\) axis values on the top axis.
+`analyze-cleaning-tradeoff` evaluates
+`tau = mu0 * 10^(x/10)` from the stored integer powers and weight norms. The
+`x = 0` point must reproduce the stored mask before the remaining thresholds are
+interpreted. The command then reports the masked-fraction and residual-power
+operating curve.
 
-Generated CHIME analysis plots are written as high-DPI PNG files. The run
-products do not write PDF or JPEG copies.
+The plotting code uses Computer Modern mathtext by default. Set
+`PILOT_PROXY_USE_TEX=1` for full TeX rendering. The default output is a 300 dpi
+PNG; `PILOT_PROXY_FIGURE_FORMATS=png,pdf` adds a vector PDF copy. JPEG output is
+not implemented.
+
+The current SNR-shelf figure uses an `[-90, 0]` dB overview and an
+`[-90, -25]` dB detail panel. Each channel histogram is normalized over its
+finite shelf-SNR samples and by bin width. Frames with `F <= 1` therefore do not
+enter the histogram and must be counted separately.
+
+The spectrograms place relative data time and frame index on the horizontal
+axes, with CHIME coarse-channel frequency and DTV physical channel on the
+vertical axes. The F-statistic survival and level-spectrogram figures include a
+second panel without DTV 30. The 10 s local plots include a 10 s tick, and the
+mask colorbar is discrete at `M = 0` and `M = 1`. These are reporting choices;
+the NPZ products remain the numerical record.
