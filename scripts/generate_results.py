@@ -1284,7 +1284,9 @@ def main(argv: list[str] | None = None) -> int:
     # ---- bundle ------------------------------------------------------------
     if "bundle" not in skip:
         bundle_path = (args.bundle_out or
-                       Path.home() / f"results_bundle_{run_name}_{stamp}.tar.gz")
+                       Path.home() / "archive" /
+                       f"results_bundle_{run_name}_{stamp}.tar.gz")
+        bundle_path.parent.mkdir(parents=True, exist_ok=True)
         manifest = make_bundle(out_dir, bundle_path, args.bundle_max_file_mb,
                                runner)
         (out_dir / "bundle_manifest.json").write_text(

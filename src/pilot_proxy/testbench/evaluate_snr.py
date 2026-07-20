@@ -101,7 +101,8 @@ HALF_SCALE = 2.0
 COMPLEX_COMPONENT_COUNT = 2.0
 DEFAULT_EVALUATOR_SEED = 12345
 DEFAULT_NOISE_TRIALS = 3
-DEFAULT_NUM_INPUT_STREAMS = 1
+DEFAULT_NUM_INPUT_STREAMS = 4  # deployment-standard trial: 4 streams x 128 rows = 512
+# (was 1; a silent 1-stream default cost a debugging night on 2026-07-19)
 DEFAULT_GNURADIO_PYTHON = "/usr/bin/python3"
 DEFAULT_CLIP_SIGMA = 3.0
 DEFAULT_SNR_SWEEP_MIN_DB = -60.0

@@ -7,8 +7,9 @@ do the secular rate transitions survive restriction to a single uniform
 trigger class (classified.FRB)?
 
 Inputs (env-overridable):
-  PP_INVENTORY  datatrawl inventory.jsonl        (default ~/paper/inventory.jsonl)
-  PP_EVENTKEYS  event_presence_keys.csv.gz       (default ~/paper/event_presence_keys.csv.gz)
+  PP_INVENTORY  datatrawl inventory.jsonl        (default ~/data/chime-pilots/inventory.jsonl)
+  PP_EVENTKEYS  event_presence_keys.csv.gz       (default: the copy committed
+                in data/provenance/survey_stratum_20260718/)
   PP_PERFRAME   per-frame dump (shared _paths default)
 
 Unit->event assignment: units carry only capture times; events carry only
@@ -52,9 +53,11 @@ plt = setup_matplotlib()
 PCT = r"\%" if plt.rcParams["text.usetex"] else "%"
 OUT = _paths.OUT
 INV = Path(os.environ.get("PP_INVENTORY",
-                          str(Path.home() / "paper/inventory.jsonl")))
+                          str(Path.home() / "data/chime-pilots/inventory.jsonl")))
 KEYS = Path(os.environ.get("PP_EVENTKEYS",
-                           str(Path.home() / "paper/event_presence_keys.csv.gz")))
+                           str(_paths.REPO / "data/provenance"
+                               / "survey_stratum_20260718"
+                               / "event_presence_keys.csv.gz")))
 EPISODIC = (17, 32, 33, 35)
 C_ALL, C_FRB = "0.35", "#0072B2"
 TRANS = {33: 2020.2, 32: 2023.3, 35: 2021.7, 17: None}    # measured falls/rises
