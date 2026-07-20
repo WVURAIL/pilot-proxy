@@ -43,8 +43,15 @@ def _named_inventory_path(name: str, source_root: str | Path | None = None) -> P
     """
     if not str(name).strip():
         raise ValueError("inventory name may not be empty")
-    root = Path.cwd() if source_root is None else Path(source_root)
-    return root / "data" / str(name).strip() / "inventory.jsonl"
+    if source_root is not None:
+        return Path(source_root) / "data" / str(name).strip() / "inventory.jsonl"
+    try:
+        # single source of truth for inventory locations (canonical root +
+        # legacy fallbacks) once datatrawl ships invpaths
+        from datatrawl.invpaths import resolve_inventory
+        return Path(resolve_inventory(str(name).strip()))
+    except ImportError:
+        return Path.cwd() / "data" / str(name).strip() / "inventory.jsonl"
 
 
 def _inventory_path_from_options(options: Mapping[str, Any], instrument_name: str) -> Path:
