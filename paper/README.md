@@ -13,7 +13,14 @@ Both documents build with `latexmk` (TeX Live 2023+):
     cd paper/manuscript  && latexmk -pdf main             # journal wrapper, same body (needs mnras.cls)
     cd paper/supplement  && latexmk -pdf dissertation_supplement
 
-Compiled PDFs are gitignored; revisions travel as dated bundles.
+Build products follow the project's generated-artifact convention: if
+`PP_OUT` is set (see `analysis/_paths.py`), each document's `.latexmkrc`
+routes the compiled PDF and all aux files to `$PP_OUT/tex/manuscript/` or
+`$PP_OUT/tex/supplement/` and the source tree stays untouched. With
+`PP_OUT` unset (fresh clone, CI) the build is in-tree and gitignored.
+Either way, revisions travel as dated bundles, not through git. (WSL +
+SumatraPDF users: the routed PDF is reachable from Windows at
+`\\wsl.localhost\<distro>\home\<user>\paper\out\tex\manuscript\draft_article.pdf`.)
 
 ## Layout
 
