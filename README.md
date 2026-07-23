@@ -479,6 +479,14 @@ CADC/CANFAR sequences, order constraint, and post-processing commands:
 
 ## Standalone synthetic/testbench workflow
 
+<p align="center">
+  <img src="docs/figures/validation_flow.svg" alt="Standalone validation flow: ATSC generation, waveform audit, AWGN injection, reference PFB, packed int4 matrix, CUDA F-statistic kernel, report" width="560">
+</p>
+
+This is the same diagram the Data Sheet and User Guide carry; all three
+render from the single source `docs/figures/validation_flow.tikz` (see the
+header of that file for the one-command svg re-render).
+
 When GNU Radio is installed only in the system Python, the standalone workflow
 uses two interpreters:
 
