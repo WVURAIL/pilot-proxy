@@ -31,9 +31,28 @@
  * over the row-sum buffer plus exact uint64 feed sums. Existing entry
  * points are unchanged; the extension is additive and policy-free (no
  * CFAR or designated-set decision in the library).
+ *
+ * 2.2.0: adds the fused fine kernel (FStat_Compute_FusedFine_U64): one
+ * launch from packed samples to exact fine and coarse power sums,
+ * block-per-stream with shared-memory row sums (materialized to global
+ * only through the optional debug tap) and the marginal identity
+ * internal to the launch. Bit-identical to the composed
+ * RowSums -> FinePowers path plus Powers_U64. Existing entry points are
+ * unchanged; still policy-free.
+ *
+ * 2.3.0: adds the decision epilogue (FStat_Compute_FusedFineMask_U64):
+ * the fused datapath plus a last-block epilogue forming the frozen fine
+ * decision v1 (rank-based null-bulk CFAR, designated-set compare, exact
+ * 128/192-bit integer comparisons; bit-identical to
+ * src/pilot_proxy/fine_decision.py) and emitting one mask bit per
+ * aligned frame. Calibration inputs (anchor, width, bulk mask, rank,
+ * Q16 multiplier) are runtime-bundle data passed as arguments --- the
+ * library remains policy-free in the sense that it compiles in no
+ * channel constants. Existing entry points are unchanged;
+ * FStat_Compute_FusedFine_U64 output is bit-identical to 2.2.0.
  */
 #define FSTAT_CORE_VERSION_MAJOR 2
-#define FSTAT_CORE_VERSION_MINOR 1
+#define FSTAT_CORE_VERSION_MINOR 3
 #define FSTAT_CORE_VERSION_PATCH 0
 
 /* ===========================================================================

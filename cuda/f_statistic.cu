@@ -1340,6 +1340,468 @@ __global__ void kernel_fine_powers(
     }
 }
 
+
+/* ===========================================================================
+ * EXACT WIDE-INTEGER COMPARE HELPERS (kernel core 2.3.0 epilogue)
+ * ===========================================================================
+ * The decision epilogue compares exact rationals built from uint64 fine
+ * power sums. Cross products reach 128 bits and the threshold compare is
+ * a triple product (192 bits), so the comparisons are formed in explicit
+ * hi/lo fixed-width arithmetic --- never floating point, never truncated.
+ * The Python reference (src/pilot_proxy/fine_decision.py) performs the
+ * same comparisons with arbitrary-precision integers; the results are
+ * identical because both are exact.
+ */
+
+__device__ __forceinline__
+unsigned long long fstat_umul64hi_(unsigned long long a, unsigned long long b)
+{
+    return __umul64hi(a, b);
+}
+
+/**
+ * @brief Exact rational comparison: is na/da < nb/db (da, db > 0)?
+ */
+__device__ __forceinline__
+int fstat_frac_less(unsigned long long na, unsigned long long da,
+                    unsigned long long nb, unsigned long long db)
+{
+    const unsigned long long l1 = na * db;
+    const unsigned long long h1 = fstat_umul64hi_(na, db);
+    const unsigned long long l2 = nb * da;
+    const unsigned long long h2 = fstat_umul64hi_(nb, da);
+    return (h1 < h2) || (h1 == h2 && l1 < l2);
+}
+
+/**
+ * @brief 128-bit value (hi:lo) times 64-bit -> exact 192-bit (r2:r1:r0).
+ */
+__device__ __forceinline__
+void fstat_mul_128_by_64(unsigned long long hi, unsigned long long lo,
+                         unsigned long long c,
+                         unsigned long long* r2, unsigned long long* r1,
+                         unsigned long long* r0)
+{
+    const unsigned long long lo_c_lo = lo * c;
+    const unsigned long long lo_c_hi = fstat_umul64hi_(lo, c);
+    const unsigned long long hi_c_lo = hi * c;
+    const unsigned long long hi_c_hi = fstat_umul64hi_(hi, c);
+    const unsigned long long mid = lo_c_hi + hi_c_lo;
+    *r0 = lo_c_lo;
+    *r1 = mid;
+    *r2 = hi_c_hi + (mid < lo_c_hi ? 1ULL : 0ULL);
+}
+
+/**
+ * @brief Exact triple-product comparison: is a*b*c > d*e*f?
+ *
+ * All operands are 64-bit; each side is formed exactly in 192 bits.
+ */
+__device__ __forceinline__
+int fstat_triple_greater(unsigned long long a, unsigned long long b,
+                         unsigned long long c,
+                         unsigned long long d, unsigned long long e,
+                         unsigned long long f)
+{
+    unsigned long long x2, x1, x0, y2, y1, y0;
+    fstat_mul_128_by_64(fstat_umul64hi_(a, b), a * b, c, &x2, &x1, &x0);
+    fstat_mul_128_by_64(fstat_umul64hi_(d, e), d * e, f, &y2, &y1, &y0);
+    if (x2 != y2) return x2 > y2;
+    if (x1 != y1) return x1 > y1;
+    return x0 > y0;
+}
+
+/* ===========================================================================
+ * FUSED FINE KERNEL (kernel cores 2.2.0 / 2.3.0)
+ * ===========================================================================
+ * One launch from packed samples to exact fine and coarse power sums: the
+ * fused form recorded in docs/DESIGN_DECISIONS.md ("one solid kernel").
+ * Block-per-stream: each block computes its stream's 3 x 128 row sums into
+ * shared memory (never materialized to global unless the debug tap is
+ * bound), accumulates the exact coarse marginals from the same values ---
+ * making the bit-exact marginal identity an internal property of the
+ * launch --- and runs the frozen fxfft256 v1 transform in place, with
+ * cooperative butterflies (identical arithmetic to fstat_fxfft256_device;
+ * stage order preserved, butterflies within a stage write disjoint pairs,
+ * so the produced bits are identical for any thread schedule).
+ *
+ * Acceptance is bit-equality with the composed path
+ * (RowSums_I32 -> FinePowers_U64, plus Powers_U64) --- enforced by
+ * tests/kernel/test_fused_fine_gpu.py.
+ *
+ * Kernel core 2.3.0 adds the decision epilogue (MaskOut != NULL): each
+ * block's thread 0 increments a per-batch-entry completion counter (the
+ * MaskOut element itself, zeroed by the API entry) after a
+ * __threadfence; the last-arriving block for a batch entry re-reads the
+ * finalized FinePowers sums and forms the frozen fine decision v1
+ * (src/pilot_proxy/fine_decision.py): rank-based null-bulk CFAR over
+ * the bundle's 256-bit bulk mask, designated-set compare with a Q16
+ * multiplier, exact 128/192-bit integer comparisons, then overwrites
+ * the counter with the mask bit (1 = reject; degenerate frames forced
+ * 0). The epilogue is deterministic because it reads order-independent
+ * exact integer sums and rank selection is by value. With
+ * MaskOut == NULL the added path is not executed and the kernel is
+ * bit-identical to core 2.2.0. PowerTerms may be NULL (2.3.0 entry)
+ * to skip the coarse-marginal accumulation entirely.
+ */
+
+__global__ void
+kernel_fused_fine(
+    const InputType* __restrict__ X,
+    const InputType* __restrict__ W,
+    const int*       __restrict__ W_Lanes,
+    unsigned long long* __restrict__ FinePowers,
+    unsigned long long* __restrict__ PowerTerms,
+    int*             __restrict__ RowSumsTap,
+    int*             __restrict__ MaskOut,
+    int anchor_bin,
+    int designated_half_width,
+    unsigned long long bulk_mask_w0,
+    unsigned long long bulk_mask_w1,
+    unsigned long long bulk_mask_w2,
+    unsigned long long bulk_mask_w3,
+    int cfar_rank,
+    unsigned long long multiplier_q16,
+    int num_streams,
+    int detector_rows_per_block,
+    int batch)
+{
+    #if FSTAT_USE_DP4A
+    (void)W;
+    #if FSTAT_USE_CONSTANT_WEIGHT_LANES
+    (void)W_Lanes;
+    #endif
+    #else
+    (void)W_Lanes;
+    #endif
+
+    const int s = blockIdx.x;
+    const int b = blockIdx.y;
+    if (s >= num_streams || b >= batch) {
+        return;
+    }
+
+    const int tid = threadIdx.x;
+    const int wpt = FSTAT_FINE_WINDOWS_PER_STREAM / blockDim.x;  /* windows per thread */
+
+    __shared__ int s_z[FSTAT_NUM_WEIGHT_TERMS][FSTAT_FINE_WINDOWS_PER_STREAM][2];
+    __shared__ int s_fft[FSTAT_FINE_NUM_BINS][2];
+    __shared__ long long s_part[FSTAT_BLOCK_THREADS];
+
+    #if FSTAT_USE_DP4A && FSTAT_USE_SHARED_WEIGHT_LANES && !FSTAT_USE_CONSTANT_WEIGHT_LANES
+    const int* weight_lanes = W_Lanes;
+    __shared__ int shared_weight_lanes[FSTAT_WEIGHT_LANE_COUNT];
+    for (int idx = tid; idx < FSTAT_WEIGHT_LANE_COUNT; idx += blockDim.x) {
+        shared_weight_lanes[idx] = W_Lanes[idx];
+    }
+    __syncthreads();
+    weight_lanes = shared_weight_lanes;
+    #elif FSTAT_USE_DP4A
+    const int* weight_lanes = W_Lanes;
+    #endif
+
+    /* Phase 1: row sums for this stream's windows (each thread owns
+     * `wpt` whole windows; no cross-thread reduction), accumulating the
+     * exact per-thread marginal partial from the same registers. */
+    long long part[FSTAT_NUM_WEIGHT_TERMS];
+    #pragma unroll
+    for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+        part[n] = 0LL;
+    }
+
+    const size_t batch_stride =
+        static_cast<size_t>(detector_rows_per_block) * FSTAT_DETECTOR_WINDOW_SAMPLES;
+    const InputType* Xb = X + batch_stride * static_cast<size_t>(b);
+
+    for (int q = 0; q < wpt; ++q) {
+        const int w = tid * wpt + q;                       /* window in stream */
+        const int m = s * FSTAT_FINE_WINDOWS_PER_STREAM + w;  /* detector row */
+
+        int2 dot[FSTAT_NUM_WEIGHT_TERMS];
+        #pragma unroll
+        for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+            dot[n] = make_int2(0, 0);
+        }
+
+        #if FSTAT_USE_DP4A
+        for (int pair = 0; pair < FSTAT_DP4A_TAP_PAIRS; ++pair) {
+            const int k0 = 2 * pair;
+            int a_re;
+            int a_im;
+            unpack_two_complex_bytes_to_dp4a_lanes(
+                Xb[m * FSTAT_DETECTOR_WINDOW_SAMPLES + k0],
+                Xb[m * FSTAT_DETECTOR_WINDOW_SAMPLES + k0 + 1],
+                a_re,
+                a_im);
+            #pragma unroll
+            for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+                const int w_lane =
+                    load_weight_lane(weight_lanes, n * FSTAT_DP4A_TAP_PAIRS + pair);
+                dot[n].x = __dp4a(a_re, w_lane, dot[n].x);
+                dot[n].y = __dp4a(a_im, w_lane, dot[n].y);
+            }
+        }
+        #else
+        for (int k = 0; k < FSTAT_DETECTOR_WINDOW_SAMPLES; ++k) {
+            short2 x_val = unpack_sample(Xb[m * FSTAT_DETECTOR_WINDOW_SAMPLES + k]);
+            #pragma unroll
+            for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+                short2 w_val = unpack_sample(W[n * FSTAT_DETECTOR_WINDOW_SAMPLES + k]);
+                dot[n] = complex_add(dot[n], complex_multiply(x_val, w_val));
+            }
+        }
+        #endif
+
+        #pragma unroll
+        for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+            s_z[n][w][0] = dot[n].x;
+            s_z[n][w][1] = dot[n].y;
+            const long long zr = static_cast<long long>(dot[n].x);
+            const long long zi = static_cast<long long>(dot[n].y);
+            part[n] += zr * zr + zi * zi;
+        }
+    }
+    __syncthreads();
+
+    /* Phase 2: exact coarse marginals (the identity is internal: same
+     * shared values the FFT consumes), plus the optional row-sum tap.
+     * PowerTerms == NULL (uniform across the block) skips the stage. */
+    if (PowerTerms != NULL) {
+        for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+            s_part[tid] = part[n];
+            __syncthreads();
+            if (tid == 0) {
+                long long acc = 0LL;
+                for (int i = 0; i < static_cast<int>(blockDim.x); ++i) {
+                    acc += s_part[i];
+                }
+                atomicAdd(&PowerTerms[static_cast<size_t>(b) * FSTAT_NUM_WEIGHT_TERMS + n],
+                          static_cast<unsigned long long>(acc));
+            }
+            __syncthreads();
+        }
+    }
+    if (RowSumsTap != NULL) {
+        int* Out = RowSumsTap
+            + static_cast<size_t>(b) * FSTAT_NUM_WEIGHT_TERMS
+                  * static_cast<size_t>(detector_rows_per_block) * 2;
+        for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+            for (int w = tid; w < FSTAT_FINE_WINDOWS_PER_STREAM; w += blockDim.x) {
+                const int m = s * FSTAT_FINE_WINDOWS_PER_STREAM + w;
+                Out[(static_cast<size_t>(n) * detector_rows_per_block + m) * 2 + 0] =
+                    s_z[n][w][0];
+                Out[(static_cast<size_t>(n) * detector_rows_per_block + m) * 2 + 1] =
+                    s_z[n][w][1];
+            }
+        }
+    }
+
+    /* Phase 3: frozen fxfft256 v1 per term, cooperative butterflies. */
+    for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
+        __syncthreads();
+        for (int i = tid; i < FSTAT_FINE_NUM_BINS; i += blockDim.x) {
+            const unsigned src = fstat_fxfft_bitrev8(static_cast<unsigned>(i));
+            if (src < FSTAT_FINE_WINDOWS_PER_STREAM) {
+                s_fft[i][0] = s_z[n][src][0];
+                s_fft[i][1] = s_z[n][src][1];
+            } else {
+                s_fft[i][0] = 0;
+                s_fft[i][1] = 0;
+            }
+        }
+        __syncthreads();
+        for (unsigned stage = 1; stage <= 8u; ++stage) {
+            const unsigned m2 = 1u << stage;
+            const unsigned half = m2 >> 1;
+            for (unsigned bf = tid; bf < FSTAT_FINE_NUM_BINS / 2u; bf += blockDim.x) {
+                const unsigned g = bf / half;
+                const unsigned t = bf % half;
+                const unsigned i0 = g * m2 + t;
+                const unsigned i1 = i0 + half;
+                const int* tw = fstat_fxfft_twiddle_q15[t << (8u - stage)];
+                const long long c = tw[0];
+                const long long sn = tw[1];
+                const long long br = s_fft[i1][0];
+                const long long bi = s_fft[i1][1];
+                const int tr = fstat_fxfft_round15(br * c - bi * sn);
+                const int ti = fstat_fxfft_round15(bi * c + br * sn);
+                const int ar = s_fft[i0][0];
+                const int ai = s_fft[i0][1];
+                s_fft[i0][0] = ar + tr;
+                s_fft[i0][1] = ai + ti;
+                s_fft[i1][0] = ar - tr;
+                s_fft[i1][1] = ai - ti;
+            }
+            __syncthreads();
+        }
+        unsigned long long* fine = FinePowers
+            + (static_cast<size_t>(b) * FSTAT_NUM_WEIGHT_TERMS + n)
+                  * FSTAT_FINE_NUM_BINS;
+        for (int i = tid; i < FSTAT_FINE_NUM_BINS; i += blockDim.x) {
+            const long long re = s_fft[i][0];
+            const long long im = s_fft[i][1];
+            atomicAdd(&fine[i], static_cast<unsigned long long>(re * re + im * im));
+        }
+    }
+
+    /* Phase 4 (kernel core 2.3.0): decision epilogue, last block only. */
+    if (MaskOut == NULL) {
+        return;
+    }
+
+    /* Completion counter: MaskOut[b] itself counts arrivals (the API
+     * entry zeroes it); the last-arriving block overwrites it with the
+     * decision, so no separate scratch allocation exists. The
+     * threadfence-then-atomic pattern makes every earlier FinePowers
+     * atomicAdd visible to the block that observes the final count
+     * (CUDA threadFenceReduction pattern). */
+    __shared__ int s_last;
+    __shared__ int s_int[FSTAT_BLOCK_THREADS];
+    __shared__ int s_rank_bin;
+    __shared__ int s_nbulk;
+    __shared__ unsigned long long s_num[FSTAT_FINE_NUM_BINS];
+    __shared__ unsigned long long s_den[FSTAT_FINE_NUM_BINS];
+    __threadfence();
+    if (tid == 0) {
+        const int prior = atomicAdd(&MaskOut[b], 1);
+        s_last = (prior == num_streams - 1) ? 1 : 0;
+    }
+    __syncthreads();
+    if (!s_last) {
+        return;
+    }
+    __threadfence();
+
+    /* Exact rational per bin: num = 2 S_target, den = S_lo + S_up.
+     * Volatile loads bypass L1 so the finalized device-wide atomic sums
+     * are read, not a stale local copy. Deployed magnitudes satisfy
+     * S < 2^56 (Parseval over the 14336 row-sum bound), so 2 S and the
+     * downstream 192-bit products are exact. */
+    {
+        const unsigned long long* base = FinePowers
+            + static_cast<size_t>(b) * FSTAT_NUM_WEIGHT_TERMS
+                  * FSTAT_FINE_NUM_BINS;
+        for (int i = tid; i < FSTAT_FINE_NUM_BINS; i += blockDim.x) {
+            const unsigned long long st =
+                *(volatile const unsigned long long*)&base[i];
+            const unsigned long long sl =
+                *(volatile const unsigned long long*)
+                    &base[FSTAT_FINE_NUM_BINS + i];
+            const unsigned long long su =
+                *(volatile const unsigned long long*)
+                    &base[2 * FSTAT_FINE_NUM_BINS + i];
+            s_num[i] = 2ULL * st;
+            s_den[i] = sl + su;
+        }
+    }
+    __syncthreads();
+
+    const unsigned long long bulk_words[4] = {
+        bulk_mask_w0, bulk_mask_w1, bulk_mask_w2, bulk_mask_w3};
+    #define FSTAT_BULK_BIT(i) \
+        ((bulk_words[(i) >> 6] >> ((i) & 63)) & 1ULL)
+
+    /* Usable bulk census: mask bit set and den > 0. */
+    {
+        int cnt = 0;
+        for (int i = tid; i < FSTAT_FINE_NUM_BINS; i += blockDim.x) {
+            if (FSTAT_BULK_BIT(i) && s_den[i] > 0ULL) {
+                cnt++;
+            }
+        }
+        s_int[tid] = cnt;
+    }
+    __syncthreads();
+    if (tid == 0) {
+        int total = 0;
+        for (int i = 0; i < static_cast<int>(blockDim.x); ++i) {
+            total += s_int[i];
+        }
+        s_nbulk = total;
+    }
+    __syncthreads();
+    if (s_nbulk <= cfar_rank) {
+        /* Degenerate bulk for the requested rank: invalid frame. */
+        if (tid == 0) {
+            MaskOut[b] = 0;
+        }
+        return;
+    }
+
+    /* Rank selection by counting (value-unique under ties; the lowest
+     * qualifying bin is the deterministic representative, and any
+     * representative of a tied value yields the same decision). */
+    {
+        int best = FSTAT_FINE_NUM_BINS;
+        for (int i = tid; i < FSTAT_FINE_NUM_BINS; i += blockDim.x) {
+            if (!FSTAT_BULK_BIT(i) || s_den[i] == 0ULL) {
+                continue;
+            }
+            int c_lt = 0;
+            int c_eq = 0;
+            for (int j = 0; j < FSTAT_FINE_NUM_BINS; ++j) {
+                if (!FSTAT_BULK_BIT(j) || s_den[j] == 0ULL) {
+                    continue;
+                }
+                if (fstat_frac_less(s_num[j], s_den[j],
+                                    s_num[i], s_den[i])) {
+                    c_lt++;
+                } else if (!fstat_frac_less(s_num[i], s_den[i],
+                                            s_num[j], s_den[j])) {
+                    c_eq++;
+                }
+            }
+            if (c_lt <= cfar_rank && cfar_rank < c_lt + c_eq && i < best) {
+                best = i;
+            }
+        }
+        s_int[tid] = best;
+    }
+    __syncthreads();
+    if (tid == 0) {
+        int best = FSTAT_FINE_NUM_BINS;
+        for (int i = 0; i < static_cast<int>(blockDim.x); ++i) {
+            if (s_int[i] < best) {
+                best = s_int[i];
+            }
+        }
+        s_rank_bin = best;
+    }
+    __syncthreads();
+
+    /* Designated-set compare: F2[bin] > (multiplier_q16 / 2^16) * F2_r
+     * as num[bin] * 2^16 * den_r > multiplier_q16 * num_r * den[bin].
+     * Degenerate denominators can never fire (zero-reference forced 0,
+     * per bin). */
+    {
+        const unsigned long long num_r = s_num[s_rank_bin];
+        const unsigned long long den_r = s_den[s_rank_bin];
+        const int set_size = 2 * designated_half_width + 1;
+        int fired = 0;
+        for (int t = tid; t < set_size; t += blockDim.x) {
+            const int bin = (anchor_bin - designated_half_width + t
+                             + FSTAT_FINE_NUM_BINS)
+                            & (FSTAT_FINE_NUM_BINS - 1);
+            if (s_den[bin] > 0ULL
+                && fstat_triple_greater(
+                       s_num[bin], den_r, 1ULL << 16,
+                       multiplier_q16, num_r, s_den[bin])) {
+                fired = 1;
+            }
+        }
+        s_int[tid] = fired;
+    }
+    __syncthreads();
+    if (tid == 0) {
+        int any = 0;
+        for (int i = 0; i < static_cast<int>(blockDim.x); ++i) {
+            any |= s_int[i];
+        }
+        MaskOut[b] = any;
+    }
+    #undef FSTAT_BULK_BIT
+}
+
 /* ===========================================================================
  * INTERNAL DATA STRUCTURES
  * ===========================================================================*/
@@ -2088,6 +2550,180 @@ void FStat_GetFineSpecs(
     if (fine_bins) {
         *fine_bins = FSTAT_FINE_NUM_BINS;
     }
+}
+
+
+/**
+ * See f_statistic.h for the full contract.
+ */
+void FStat_Compute_FusedFine_U64(
+    void* handle,
+    const InputType* w_in,
+    unsigned long long* d_fine_power_out,
+    unsigned long long* d_power_out,
+    int* d_row_sums_out)
+{
+    clear_last_error();
+    FStatHandle* h = static_cast<FStatHandle*>(handle);
+    if (!h) {
+        record_api_error("handle is null.");
+        return;
+    }
+    if (d_fine_power_out == nullptr) {
+        record_api_error("fine power output pointer is null.");
+        return;
+    }
+    if (d_power_out == nullptr) {
+        record_api_error("power output pointer is null.");
+        return;
+    }
+    if (h->detector_rows_per_block % FSTAT_FINE_WINDOWS_PER_STREAM != 0) {
+        record_api_error(
+            "detector_rows_per_block must be a multiple of the frozen "
+            "fxfft256 window count (128).");
+        return;
+    }
+    if (FSTAT_FINE_WINDOWS_PER_STREAM % FSTAT_BLOCK_THREADS != 0) {
+        record_api_error("block size must divide the window count.");
+        return;
+    }
+
+    if (!fstat_upload_weights(h, w_in)) return;
+
+    const int num_streams = h->detector_rows_per_block / FSTAT_FINE_WINDOWS_PER_STREAM;
+    const size_t fine_bytes = static_cast<size_t>(h->batch)
+        * FSTAT_NUM_WEIGHT_TERMS * FSTAT_FINE_NUM_BINS
+        * sizeof(unsigned long long);
+    const size_t power_bytes = static_cast<size_t>(h->batch)
+        * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long);
+    CUDA_CHECK(cudaMemset(d_fine_power_out, 0, fine_bytes));
+    CUDA_CHECK(cudaMemset(d_power_out, 0, power_bytes));
+
+    dim3 grid(num_streams, h->batch, 1);
+    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS>>>(
+        h->d_in,
+        h->d_weights,
+        h->d_weight_lanes,
+        d_fine_power_out,
+        d_power_out,
+        d_row_sums_out,
+        NULL,            /* no decision epilogue: core 2.2.0 behavior */
+        0, 0, 0ULL, 0ULL, 0ULL, 0ULL, 0, 0ULL,
+        num_streams,
+        h->detector_rows_per_block,
+        h->batch);
+    CUDA_CHECK_LAST();
+    CUDA_CHECK_SYNC();
+}
+
+int FStat_Supports_FusedFine(void)
+{
+    return 1;
+}
+
+/**
+ * See f_statistic.h for the full contract.
+ */
+void FStat_Compute_FusedFineMask_U64(
+    void* handle,
+    const InputType* w_in,
+    int anchor_bin,
+    int designated_half_width,
+    const unsigned long long* bulk_mask_words,
+    int cfar_rank,
+    unsigned long long multiplier_q16,
+    unsigned long long* d_fine_power_out,
+    int* d_mask_out,
+    unsigned long long* d_power_out,
+    int* d_row_sums_out)
+{
+    clear_last_error();
+    FStatHandle* h = static_cast<FStatHandle*>(handle);
+    if (!h) {
+        record_api_error("handle is null.");
+        return;
+    }
+    if (d_fine_power_out == nullptr) {
+        record_api_error("fine power output pointer is null.");
+        return;
+    }
+    if (d_mask_out == nullptr) {
+        record_api_error("mask output pointer is null.");
+        return;
+    }
+    if (bulk_mask_words == nullptr) {
+        record_api_error("bulk mask words pointer is null.");
+        return;
+    }
+    if (anchor_bin < 0 || anchor_bin >= FSTAT_FINE_NUM_BINS) {
+        record_api_error("anchor_bin must be in [0, 256).");
+        return;
+    }
+    if (designated_half_width < 0
+        || designated_half_width >= FSTAT_FINE_NUM_BINS / 2) {
+        record_api_error("designated_half_width must be in [0, 128).");
+        return;
+    }
+    if (cfar_rank < 0 || cfar_rank >= FSTAT_FINE_NUM_BINS) {
+        record_api_error("cfar_rank must be in [0, 256).");
+        return;
+    }
+    if (h->detector_rows_per_block % FSTAT_FINE_WINDOWS_PER_STREAM != 0) {
+        record_api_error(
+            "detector_rows_per_block must be a multiple of the frozen "
+            "fxfft256 window count (128).");
+        return;
+    }
+    if (FSTAT_FINE_WINDOWS_PER_STREAM % FSTAT_BLOCK_THREADS != 0) {
+        record_api_error("block size must divide the window count.");
+        return;
+    }
+
+    if (!fstat_upload_weights(h, w_in)) return;
+
+    const int num_streams =
+        h->detector_rows_per_block / FSTAT_FINE_WINDOWS_PER_STREAM;
+    const size_t fine_bytes = static_cast<size_t>(h->batch)
+        * FSTAT_NUM_WEIGHT_TERMS * FSTAT_FINE_NUM_BINS
+        * sizeof(unsigned long long);
+    CUDA_CHECK(cudaMemset(d_fine_power_out, 0, fine_bytes));
+    /* The mask buffer doubles as the completion counter and must start
+     * at zero for every launch. */
+    CUDA_CHECK(cudaMemset(
+        d_mask_out, 0, static_cast<size_t>(h->batch) * sizeof(int)));
+    if (d_power_out != nullptr) {
+        const size_t power_bytes = static_cast<size_t>(h->batch)
+            * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long);
+        CUDA_CHECK(cudaMemset(d_power_out, 0, power_bytes));
+    }
+
+    dim3 grid(num_streams, h->batch, 1);
+    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS>>>(
+        h->d_in,
+        h->d_weights,
+        h->d_weight_lanes,
+        d_fine_power_out,
+        d_power_out,
+        d_row_sums_out,
+        d_mask_out,
+        anchor_bin,
+        designated_half_width,
+        bulk_mask_words[0],
+        bulk_mask_words[1],
+        bulk_mask_words[2],
+        bulk_mask_words[3],
+        cfar_rank,
+        multiplier_q16,
+        num_streams,
+        h->detector_rows_per_block,
+        h->batch);
+    CUDA_CHECK_LAST();
+    CUDA_CHECK_SYNC();
+}
+
+int FStat_Supports_FusedFineMask(void)
+{
+    return 1;
 }
 
 } // extern "C"

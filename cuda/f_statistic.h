@@ -559,6 +559,104 @@ void FStat_Compute_FinePowers_U64(
 int FStat_Supports_FinePowers(void);
 
 /**
+ * @brief Fused fine kernel (kernel core 2.2.0): one launch from packed
+ *        samples to exact fine and coarse power sums.
+ *
+ * The fused form of the deployed datapath (docs/DESIGN_DECISIONS.md,
+ * "one solid kernel"): each block computes one stream's 3 x 128 exact
+ * int32 row sums in shared memory, accumulates the exact uint64 coarse
+ * marginals from those same values --- making the bit-exact marginal
+ * identity an internal property of the launch --- and applies the frozen
+ * fxfft256 v1 transform in place with cooperative butterflies (identical
+ * arithmetic and stage order to the reference; butterflies within a
+ * stage write disjoint pairs, so the result is bit-identical for any
+ * thread schedule).
+ *
+ * Outputs (all zeroed by this call before accumulation):
+ *   d_fine_power_out : [batch x num_weight_terms x 256] uint64 ---
+ *                      identical layout and bits to
+ *                      FStat_Compute_FinePowers_U64 over the row sums;
+ *   d_power_out      : [batch x num_weight_terms] uint64 --- identical
+ *                      to FStat_Compute_Powers_U64;
+ *   d_row_sums_out   : optional debug tap (NULL in production); when
+ *                      bound, identical layout and bits to
+ *                      FStat_Compute_RowSums_I32. With the tap unbound,
+ *                      row sums never touch global memory.
+ *
+ * Requires detector_rows_per_block to be a multiple of the frozen window
+ * count (128). Acceptance: bit-equality with the composed path
+ * (tests/kernel/test_fused_fine_gpu.py). Policy-free: the fine
+ * statistic, CFAR, and designated-set decision form downstream.
+ */
+void FStat_Compute_FusedFine_U64(
+    void* handle,
+    const InputType* w_in,
+    unsigned long long* d_fine_power_out,
+    unsigned long long* d_power_out,
+    int* d_row_sums_out);
+
+/**
+ * @brief Runtime capability probe: returns 1 when the fused kernel exists.
+ */
+int FStat_Supports_FusedFine(void);
+
+/**
+ * @brief Fused fine kernel with decision epilogue (kernel core 2.3.0):
+ *        packed samples and per-channel bundle constants in, one mask
+ *        bit per aligned frame out.
+ *
+ * The deployed form of the fine designated-set CFAR
+ * (docs/DESIGN_DECISIONS.md): the fused datapath of
+ * FStat_Compute_FusedFine_U64, plus a last-block epilogue (per-batch
+ * completion counter; threadfence-then-atomic visibility) that forms
+ * the frozen fine decision v1 over the finalized exact fine power sums:
+ *
+ *   F2[bin] = 2 S_target[bin] / (S_ref_lo[bin] + S_ref_up[bin]),
+ *   bulk    = { bin : bulk_mask bit set and denominator > 0 },
+ *   F2_r    = value of rank cfar_rank in the ascending exact ordering
+ *             of the bulk F2 values (order-statistic CFAR estimate),
+ *   mask    = 1  iff some designated bin (anchor_bin +/-
+ *             designated_half_width, modulo 256) satisfies
+ *             F2[bin] > (multiplier_q16 / 2^16) * F2_r.
+ *
+ * All comparisons are exact 128/192-bit integer arithmetic; the
+ * decision is bit-identical to src/pilot_proxy/fine_decision.py by
+ * construction. Degenerate denominators never fire (zero-reference
+ * forced 0, per bin); a frame whose usable bulk is not deeper than
+ * cfar_rank writes mask = 0 (invalid). The calibration inputs
+ * (anchor, width, 256-bit bulk mask as 4 uint64 words in
+ * bulk_mask_words[0..3] with bin b at word b/64 bit b%64, rank,
+ * Q16 multiplier) are runtime-bundle data, not compiled constants.
+ *
+ * Outputs: d_mask_out ([batch] int32, 1 = reject; zeroed by this call
+ * --- it doubles as the completion counter) and d_fine_power_out
+ * (required working accumulator, identical to
+ * FStat_Compute_FusedFine_U64's; zeroed by this call). d_power_out and
+ * d_row_sums_out are optional debug taps (NULL in production; when
+ * bound they carry the exact coarse marginals and row sums as in the
+ * 2.2.0 entry). Acceptance: mask bit-equality against the Python
+ * reference over the same exact powers
+ * (tests/kernel/test_fused_mask_gpu.py).
+ */
+void FStat_Compute_FusedFineMask_U64(
+    void* handle,
+    const InputType* w_in,
+    int anchor_bin,
+    int designated_half_width,
+    const unsigned long long* bulk_mask_words,
+    int cfar_rank,
+    unsigned long long multiplier_q16,
+    unsigned long long* d_fine_power_out,
+    int* d_mask_out,
+    unsigned long long* d_power_out,
+    int* d_row_sums_out);
+
+/**
+ * @brief Runtime capability probe: returns 1 when the mask epilogue exists.
+ */
+int FStat_Supports_FusedFineMask(void);
+
+/**
  * @brief Query the frozen fine-reduction geometry (128 / 2 / 256).
  *
  * @note Any parameter can be NULL if not needed.

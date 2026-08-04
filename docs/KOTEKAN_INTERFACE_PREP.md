@@ -122,6 +122,13 @@ channels, coordinate convention, reference placement, and hashes.
 
 `pilot_profiles.json` maps each physical DTV channel to a profile index, byte
 offset, byte count, calibration fields, and positive-excess rational threshold.
+Each profile also carries a `fine_calibration` block (decision version,
+anchor bin, designated half width, 256-bit bulk mask as four hex uint64
+words, CFAR rank, Q16 multiplier, provenance) for the kernel core 2.3.0
+mask entry; the exporter writes it with `status = "pending_campaign"`
+and the validator range- and consistency-checks a `calibrated` block
+(designated and guard bins excluded from the bulk mask, rank below the
+bulk population).
 The current exporter writes `chime_channel_id = null`; a CHIME/Kotekan metadata
 mapping must populate and validate that field before first-frame selection can
 be implemented. Thus, the current bundle supports physical-channel identity but
@@ -214,8 +221,21 @@ rational half-threshold path remains bound for the recorded coarse flag
 and debug comparison. The target deployed form is a single fused kernel
 --- packed samples, packed weights, and bundle constants in; one mask
 bit per aligned frame out; row sums and exact powers as optional debug
-taps --- per the deployment section of `docs/DESIGN_DECISIONS.md`; the
-two-entry composition above is the validated intermediate.
+taps --- per the deployment section of `docs/DESIGN_DECISIONS.md`.
+Kernel core 2.2.0 lands the fused datapath
+(`FStat_Compute_FusedFine_U64`: packed samples and weights in, exact
+fine and coarse power sums out in one launch, row sums global only via
+the optional debug tap, bit-identical to the two-entry composition ---
+`tests/kernel/test_fused_fine_gpu.py`). Kernel core 2.3.0 completes
+the form: `FStat_Compute_FusedFineMask_U64` binds the per-channel
+`fine_calibration` bundle fields (anchor, designated width, 256-bit
+bulk mask, CFAR rank, Q16 multiplier) as arguments and emits the mask
+bit from the frozen fine decision v1 epilogue (bit-identical to
+`src/pilot_proxy/fine_decision.py`;
+`tests/kernel/test_fused_mask_gpu.py`). The stage binds this entry once
+the campaign flips the channel's `fine_calibration.status` to
+`calibrated`; a `pending_campaign` channel must not enable the fine
+mask path.
 
 The deployed CUDA comparison for that coarse flag is:
 

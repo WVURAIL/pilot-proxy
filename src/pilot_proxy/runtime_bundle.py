@@ -276,6 +276,151 @@ def _validate_runtime_profile_offsets(
             )
 
 
+FINE_CALIBRATION_STATUS_PENDING = "pending_campaign"
+FINE_CALIBRATION_STATUS_CALIBRATED = "calibrated"
+FINE_CALIBRATION_DECISION_VERSION = "fine_decision_v1"
+FINE_CALIBRATION_DEFAULT_HALF_WIDTH = 2  # survey window convention
+FINE_CALIBRATION_NUM_BINS = 256
+
+
+def _default_fine_calibration_block() -> dict[str, Any]:
+    """Per-channel fine decision calibration, exported pending-campaign.
+
+    The deployed kernel (core 2.3.0, ``FStat_Compute_FusedFineMask_U64``)
+    consumes these values as arguments: the decision arithmetic is frozen
+    (``fine_decision_v1``), the operating point is bundle data. The
+    calibration campaign replaces the null fields and flips ``status`` to
+    ``calibrated`` with provenance; until then a consumer must treat the
+    channel's fine mask path as not deployable.
+    """
+    return {
+        "status": FINE_CALIBRATION_STATUS_PENDING,
+        "decision_version": FINE_CALIBRATION_DECISION_VERSION,
+        "anchor_bin": None,
+        "designated_half_width": FINE_CALIBRATION_DEFAULT_HALF_WIDTH,
+        "bulk_mask_words_hex": None,
+        "cfar_rank": None,
+        "cfar_multiplier_q16": None,
+        "provenance": {
+            "epochs": [],
+            "null_quantile": None,
+            "source_product_sha256": [],
+            "note": (
+                "pending calibration campaign: anchors from survey "
+                "on-epochs; rank/multiplier from the verified-null "
+                "quantile program (docs/DESIGN_DECISIONS.md)"
+            ),
+        },
+    }
+
+
+def _validate_fine_calibration(
+    *,
+    profiles: list[Any],
+    errors: list[dict[str, str]],
+) -> None:
+    """Validate optional per-profile ``fine_calibration`` blocks.
+
+    Absent blocks are legal (legacy bundles). A present block must
+    declare the frozen decision version and a known status; a
+    ``calibrated`` block must carry complete, range-checked values whose
+    bulk mask is consistent with the designated set (designated bins and
+    their guard cannot be bulk bins) and deep enough for the rank.
+    """
+    for index, row in enumerate(profiles):
+        if not isinstance(row, dict) or "fine_calibration" not in row:
+            continue
+        block = row["fine_calibration"]
+        field = f"pilot_profiles.fine_calibration[{index}]"
+        if not isinstance(block, dict):
+            _add_error(errors, field, "fine_calibration is not an object")
+            continue
+        if block.get("decision_version") != FINE_CALIBRATION_DECISION_VERSION:
+            _add_error(
+                errors,
+                f"{field}.decision_version",
+                f"decision_version {block.get('decision_version')!r} does "
+                f"not match {FINE_CALIBRATION_DECISION_VERSION!r}",
+            )
+        status = block.get("status")
+        if status not in (
+            FINE_CALIBRATION_STATUS_PENDING,
+            FINE_CALIBRATION_STATUS_CALIBRATED,
+        ):
+            _add_error(
+                errors, f"{field}.status", f"unknown status {status!r}"
+            )
+            continue
+        if status == FINE_CALIBRATION_STATUS_PENDING:
+            continue
+        try:
+            anchor = int(block["anchor_bin"])
+            half_width = int(block["designated_half_width"])
+            rank = int(block["cfar_rank"])
+            mult = int(block["cfar_multiplier_q16"])
+            words_hex = list(block["bulk_mask_words_hex"])
+        except (KeyError, TypeError, ValueError) as exc:
+            _add_error(
+                errors, field, f"calibrated block has invalid fields: {exc}"
+            )
+            continue
+        if not 0 <= anchor < FINE_CALIBRATION_NUM_BINS:
+            _add_error(errors, f"{field}.anchor_bin", f"out of range: {anchor}")
+        if not 0 <= half_width < FINE_CALIBRATION_NUM_BINS // 2:
+            _add_error(
+                errors,
+                f"{field}.designated_half_width",
+                f"out of range: {half_width}",
+            )
+        if mult <= 0:
+            _add_error(
+                errors,
+                f"{field}.cfar_multiplier_q16",
+                f"must be positive: {mult}",
+            )
+        words: list[int] = []
+        if len(words_hex) != 4:
+            _add_error(
+                errors,
+                f"{field}.bulk_mask_words_hex",
+                "must contain exactly 4 hex words",
+            )
+        else:
+            try:
+                words = [int(str(w), 16) for w in words_hex]
+            except ValueError as exc:
+                _add_error(
+                    errors, f"{field}.bulk_mask_words_hex", f"bad hex: {exc}"
+                )
+                words = []
+            if words and any(not 0 <= w < (1 << 64) for w in words):
+                _add_error(
+                    errors,
+                    f"{field}.bulk_mask_words_hex",
+                    "words must fit in uint64",
+                )
+                words = []
+        if words and 0 <= anchor < FINE_CALIBRATION_NUM_BINS:
+            popcount = sum(bin(w).count("1") for w in words)
+            if not 0 <= rank < popcount:
+                _add_error(
+                    errors,
+                    f"{field}.cfar_rank",
+                    f"rank {rank} is not below the bulk population "
+                    f"{popcount}",
+                )
+            if 0 <= half_width < FINE_CALIBRATION_NUM_BINS // 2:
+                for k in range(-half_width, half_width + 1):
+                    b = (anchor + k) % FINE_CALIBRATION_NUM_BINS
+                    if (words[b >> 6] >> (b & 63)) & 1:
+                        _add_error(
+                            errors,
+                            f"{field}.bulk_mask_words_hex",
+                            f"designated bin {b} is set in the bulk mask",
+                        )
+                        break
+
+
 def _coerce_int_metadata(value: object, *, field: str) -> int:
     if isinstance(value, int):
         return value
@@ -543,6 +688,7 @@ def validate_runtime_weight_bundle(
         errors=errors,
     )
     _validate_chime_channel_ids(profiles=profiles, errors=errors)
+    _validate_fine_calibration(profiles=profiles, errors=errors)
     _validate_bundle_coordinate_systems(
         detector_contract=detector_contract,
         pilot_profiles=pilot_profiles,
@@ -630,6 +776,10 @@ def export_runtime_weight_bundle(
                     layout["reference_placement_status"]
                 ),
                 "placement_warnings": str(layout["placement_warnings"]),
+                # Fine decision calibration (kernel core 2.3.0): frozen
+                # arithmetic, data-driven operating point; exported
+                # pending until the campaign supplies measured values.
+                "fine_calibration": _default_fine_calibration_block(),
             }
         )
         offset += profile_nbytes

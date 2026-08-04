@@ -241,6 +241,46 @@ class FStatKernel:
         if self._has_supports_fine_powers:
             self._lib.FStat_Supports_FinePowers.argtypes = []
             self._lib.FStat_Supports_FinePowers.restype = ctypes.c_int
+        self._has_fused_fine_u64 = _has_symbol(
+            self._lib, "FStat_Compute_FusedFine_U64"
+        )
+        if self._has_fused_fine_u64:
+            self._lib.FStat_Compute_FusedFine_U64.argtypes = [
+                ctypes.c_void_p,  # handle
+                ctypes.c_void_p,  # weights pointer (host)
+                ctypes.c_void_p,  # device uint64 fine-power output pointer
+                ctypes.c_void_p,  # device uint64 marginal-power output pointer
+                ctypes.c_void_p,  # optional device int32 row-sum tap (or NULL)
+            ]
+        self._has_supports_fused_fine = _has_symbol(
+            self._lib, "FStat_Supports_FusedFine"
+        )
+        if self._has_supports_fused_fine:
+            self._lib.FStat_Supports_FusedFine.argtypes = []
+            self._lib.FStat_Supports_FusedFine.restype = ctypes.c_int
+        self._has_fused_fine_mask_u64 = _has_symbol(
+            self._lib, "FStat_Compute_FusedFineMask_U64"
+        )
+        if self._has_fused_fine_mask_u64:
+            self._lib.FStat_Compute_FusedFineMask_U64.argtypes = [
+                ctypes.c_void_p,   # handle
+                ctypes.c_void_p,   # weights pointer (host)
+                ctypes.c_int,      # anchor_bin
+                ctypes.c_int,      # designated_half_width
+                ctypes.POINTER(ctypes.c_uint64),  # bulk mask words (host, 4)
+                ctypes.c_int,      # cfar_rank
+                ctypes.c_ulonglong,  # multiplier_q16
+                ctypes.c_void_p,   # device uint64 fine-power accumulator
+                ctypes.c_void_p,   # device int32 mask output
+                ctypes.c_void_p,   # optional device uint64 marginals (or NULL)
+                ctypes.c_void_p,   # optional device int32 row-sum tap (or NULL)
+            ]
+        self._has_supports_fused_fine_mask = _has_symbol(
+            self._lib, "FStat_Supports_FusedFineMask"
+        )
+        if self._has_supports_fused_fine_mask:
+            self._lib.FStat_Supports_FusedFineMask.argtypes = []
+            self._lib.FStat_Supports_FusedFineMask.restype = ctypes.c_int
         self._has_get_fine_specs = _has_symbol(self._lib, "FStat_GetFineSpecs")
         if self._has_get_fine_specs:
             self._lib.FStat_GetFineSpecs.argtypes = [
@@ -514,6 +554,107 @@ class FStatKernel:
             int(windows_per_stream),
             int(batch),
             fine_powers_ptr,
+        )
+
+    def supports_fused_fine(self) -> bool:
+        """Return True when the fused fine kernel (core 2.2.0) is available."""
+        if not getattr(self, "_has_fused_fine_u64", False):
+            return False
+        if getattr(self, "_has_supports_fused_fine", False):
+            return bool(int(self._lib.FStat_Supports_FusedFine()) == 1)
+        return True
+
+    def compute_fused_fine_u64(
+        self,
+        handle,
+        weights_ptr: int,
+        fine_powers_ptr: int,
+        powers_ptr: int,
+        row_sums_tap_ptr: int = 0,
+    ):
+        """One launch from packed samples to exact fine and coarse powers.
+
+        The fused form of the deployed fine path (kernel core 2.2.0):
+        row sums live in shared memory, the exact uint64 coarse marginals
+        and the frozen fxfft256 v1 fine powers are accumulated in the same
+        launch, and the bit-exact marginal identity is internal to the
+        kernel. Output layouts match the composed path exactly:
+        fine_powers_ptr addresses batch * num_weight_terms * 256 uint64
+        and powers_ptr addresses batch * num_weight_terms uint64 (both
+        zeroed by the library before accumulation). row_sums_tap_ptr, when
+        nonzero, addresses the same device buffer layout
+        compute_row_sums_i32 fills and receives the identical bits; leave
+        it 0 in production so row sums never touch global memory.
+        """
+        if not getattr(self, "_has_fused_fine_u64", False):
+            raise RuntimeError(
+                "Kernel library does not expose FStat_Compute_FusedFine_U64."
+            )
+        self._lib.FStat_Compute_FusedFine_U64(
+            handle,
+            weights_ptr,
+            fine_powers_ptr,
+            powers_ptr,
+            row_sums_tap_ptr if row_sums_tap_ptr else None,
+        )
+
+    def supports_fused_fine_mask(self) -> bool:
+        """Return True when the decision epilogue (core 2.3.0) is available."""
+        if not getattr(self, "_has_fused_fine_mask_u64", False):
+            return False
+        if getattr(self, "_has_supports_fused_fine_mask", False):
+            return bool(int(self._lib.FStat_Supports_FusedFineMask()) == 1)
+        return True
+
+    def compute_fused_fine_mask_u64(
+        self,
+        handle,
+        weights_ptr: int,
+        anchor_bin: int,
+        designated_half_width: int,
+        bulk_mask_words,
+        cfar_rank: int,
+        multiplier_q16: int,
+        fine_powers_ptr: int,
+        mask_ptr: int,
+        powers_ptr: int = 0,
+        row_sums_tap_ptr: int = 0,
+    ):
+        """Deployed form: packed samples and bundle constants in, one
+        mask bit per aligned frame out (kernel core 2.3.0).
+
+        The fused datapath plus the frozen fine decision v1 epilogue
+        (bit-identical to ``pilot_proxy.fine_decision.fine_mask_decision``
+        over the same exact fine powers). ``bulk_mask_words`` is the
+        4-word packed 256-bit bulk mask (``fine_decision.pack_bulk_mask``).
+        ``mask_ptr`` must address ``batch`` int32 on the device (zeroed
+        by the library; doubles as the completion counter during the
+        launch). ``fine_powers_ptr`` is the required exact accumulator;
+        ``powers_ptr`` and ``row_sums_tap_ptr`` are optional debug taps
+        (0 in production). anchor/width/rank/multiplier are runtime
+        bundle data.
+        """
+        if not getattr(self, "_has_fused_fine_mask_u64", False):
+            raise RuntimeError(
+                "Kernel library does not expose "
+                "FStat_Compute_FusedFineMask_U64."
+            )
+        words = list(int(w) for w in bulk_mask_words)
+        if len(words) != 4:
+            raise ValueError("bulk_mask_words must contain 4 uint64 words.")
+        arr = (ctypes.c_uint64 * 4)(*words)
+        self._lib.FStat_Compute_FusedFineMask_U64(
+            handle,
+            weights_ptr,
+            int(anchor_bin),
+            int(designated_half_width),
+            arr,
+            int(cfar_rank),
+            int(multiplier_q16),
+            fine_powers_ptr,
+            mask_ptr,
+            powers_ptr if powers_ptr else None,
+            row_sums_tap_ptr if row_sums_tap_ptr else None,
         )
 
     def compute_numden_mask_rational_half(

@@ -163,6 +163,71 @@ refactor gateable against the existing golden vectors at any time; the
 decision epilogue lands after the calibration campaign supplies anchors
 and multipliers.
 
+Status (2026-08-04): fuse-through-powers landed in kernel core 2.2.0
+(`FStat_Compute_FusedFine_U64`): one launch, block-per-stream, row sums
+in shared memory with the marginal identity internal, cooperative
+fxfft256 butterflies (disjoint writes per stage, so bits are
+schedule-independent), row sums exposed only through an optional debug
+tap. Verified two ways: a threaded CPU emulation of the extracted device
+code (one pthread per CUDA thread, a real barrier for `__syncthreads`,
+runs bit-identical to the numpy/fxfft reference chain and stable across
+repeated concurrent runs), and the on-GPU gate
+`tests/kernel/test_fused_fine_gpu.py` (bit-equality against the composed
+2.0.0/2.1.0 chain and the reference, batch case, tap-optional case, and
+the footprint report: fused-vs-composed and tap-vs-no-tap timings). The
+decision epilogue remains the only unfused stage, still gated on the
+calibration campaign.
+
+Status (2026-08-05): the decision epilogue landed in kernel core 2.3.0
+(`FStat_Compute_FusedFineMask_U64`), completing the one-solid-kernel
+form: packed samples, packed weights, and bundle constants in; one mask
+bit per aligned frame out; marginals and row sums demoted to optional
+debug taps. The epilogue runs in the last-arriving block per frame
+(completion counter folded into the mask element itself;
+threadfence-then-atomic visibility) over the finalized exact fine sums.
+
+The decision arithmetic is frozen as **fine decision v1** (reference
+`src/pilot_proxy/fine_decision.py`, gated by
+`tests/core/test_fine_decision.py` against a `fractions.Fraction`
+oracle): `F2[b] = 2 S_t[b] / (S_l[b] + S_u[b])` held as exact rationals;
+null bulk = the bundle's 256-bit mask (built from the pre-registered
+`independent_bin_mask`: independent bins, guard- and census-excluded)
+intersected with live denominators; CFAR estimate = the bundle-specified
+*rank* of the ascending bulk F2 values (order-statistic CFAR; rank
+selection by counting, so the selected value is unique under ties and
+any representative yields the same decision); fire iff some designated
+bin (anchor +/- width, modulo 256 --- the survey's window convention)
+exceeds `multiplier_q16 / 2^16` times the rank value. Comparisons are
+exact 128/192-bit integer cross products (fuzz-gated, 2M trials vs
+Python big ints). Degenerate denominators never fire; a bulk not deeper
+than the rank forces mask 0.
+
+Rank-based rather than the survey's recorded location+scale CFAR, by
+the same reasoning that chose the fixed-point FFT: float medians and
+interpolated quantiles cannot be made bit-exact across
+numpy/nvcc/compiler versions, while the rank statistic is exact,
+needs no contamination fallback mode (order statistics reject the
+measured 0.29% bulk tail by construction), and is calibrated by the
+same null-quantile program --- the campaign picks (rank, multiplier)
+from measured off-epoch nulls to hit the target false-alarm rate, and
+the survey products' per-bin `fstat_fine` suffice to compute those
+quantiles. The operating point (anchor, width, bulk mask, rank,
+multiplier) is runtime-bundle data with provenance
+(`fine_calibration` block, exported `pending_campaign` and validated
+in both states by the bundle validator); the arithmetic is code. The
+deployed contract change still lands only at a survey epoch boundary.
+
+Verification: threaded CPU emulation of the extracted device code
+(real barrier concurrency; mask, fine, tap, and marginal outputs
+bit-identical to the Python reference chain across noise, injected
+pilot, wrap-anchor, degenerate-bulk, and tap-unbound scenarios; stable
+across repeated concurrent runs), and the on-GPU gate
+`tests/kernel/test_fused_mask_gpu.py` (reference bit-equality per
+frame, injection firing, device-side degenerate rules, production
+no-tap form, 20-repeat last-block determinism, and the epilogue-cost
+rate report). `FStat_Compute_FusedFine_U64` remains bit-identical to
+core 2.2.0.
+
 The gating requirement is a deterministic verification FFT. The project's
 validation standard is bit-exact agreement between the CUDA path and the
 Python reference; cuFFT and numpy cannot bit-match each other (different

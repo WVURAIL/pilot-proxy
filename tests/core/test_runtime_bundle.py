@@ -237,3 +237,104 @@ def test_validate_runtime_weight_bundle_reports_input_coordinate_mismatch(
     checks = {error["check"] for error in report["errors"]}
     assert "input_coordinate_system.consistency" in checks
     assert "pilot_profiles.input_coordinate_system" in checks
+
+
+def _export_reference_bundle(tmp_path):
+    output_dir = tmp_path / "bundle"
+    outputs = export_runtime_weight_bundle(
+        receiver_profile_path=(
+            CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
+        ),
+        detector_core_profile_path=(
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        ),
+        physical_channels=[14, 21],
+        weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+        output_dir=output_dir,
+    )
+    return output_dir, outputs
+
+
+def _rewrite_profiles(outputs, profiles) -> None:
+    outputs["pilot_profiles"].write_text(
+        json.dumps(profiles), encoding="utf-8"
+    )
+
+
+def test_exported_bundle_carries_pending_fine_calibration(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    for row in profiles["profiles"]:
+        block = row["fine_calibration"]
+        assert block["status"] == "pending_campaign"
+        assert block["decision_version"] == "fine_decision_v1"
+        assert block["anchor_bin"] is None
+        assert block["designated_half_width"] == 2
+        assert block["cfar_rank"] is None
+        assert block["cfar_multiplier_q16"] is None
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+    assert report["valid"] is True
+
+
+def test_calibrated_fine_block_validates_when_consistent(tmp_path) -> None:
+    from pilot_proxy.fine_decision import pack_bulk_mask
+    from pilot_proxy.fine_reduction import independent_bin_mask
+
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    bulk = independent_bin_mask(256, designated_bins=[62])
+    words = pack_bulk_mask(bulk)
+    profiles["profiles"][0]["fine_calibration"] = {
+        "status": "calibrated",
+        "decision_version": "fine_decision_v1",
+        "anchor_bin": 62,
+        "designated_half_width": 2,
+        "bulk_mask_words_hex": [f"0x{w:016x}" for w in words],
+        "cfar_rank": int(sum(bulk) // 2),
+        "cfar_multiplier_q16": int(1.5 * 65536),
+        "provenance": {
+            "epochs": ["2026Q1"],
+            "null_quantile": 0.999,
+            "source_product_sha256": ["deadbeef"],
+        },
+    }
+    _rewrite_profiles(outputs, profiles)
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+    # only the sha256sums entry fails (profiles were rewritten in place);
+    # the fine_calibration block itself must contribute no errors
+    checks = {e["check"] for e in report["errors"]}
+    assert not any("fine_calibration" in c for c in checks), checks
+
+
+def test_calibrated_fine_block_rejects_inconsistencies(tmp_path) -> None:
+    from pilot_proxy.fine_decision import pack_bulk_mask
+    from pilot_proxy.fine_reduction import independent_bin_mask
+
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    bulk = independent_bin_mask(256, designated_bins=[200])
+    words = pack_bulk_mask(bulk)
+    base = {
+        "status": "calibrated",
+        "decision_version": "fine_decision_v1",
+        "anchor_bin": 62,  # anchor INSIDE a mask that never excluded it
+        "designated_half_width": 2,
+        "bulk_mask_words_hex": [f"0x{w:016x}" for w in words],
+        "cfar_rank": 5000,  # deeper than the bulk population
+        "cfar_multiplier_q16": 0,  # not positive
+        "provenance": {},
+    }
+    profiles["profiles"][0]["fine_calibration"] = dict(base)
+    profiles["profiles"][1]["fine_calibration"] = {
+        "status": "unheard_of",
+        "decision_version": "fine_decision_v2",
+    }
+    _rewrite_profiles(outputs, profiles)
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+    assert report["valid"] is False
+    checks = {e["check"] for e in report["errors"]}
+    assert any("cfar_rank" in c for c in checks)
+    assert any("cfar_multiplier_q16" in c for c in checks)
+    assert any("bulk_mask_words_hex" in c for c in checks)
+    assert any("status" in c for c in checks)
+    assert any("decision_version" in c for c in checks)
