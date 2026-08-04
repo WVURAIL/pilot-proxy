@@ -56,10 +56,17 @@ The detector produces one binary rejection decision per aligned frame, well
 ahead of the correlator's processing of the same frame: on the v1 kernel, GPU
 resource measurements showed the detector completing with a large margin
 relative to the correlator's per-frame cadence. The added fine-power stage
-of kernel core 2.1.0 measures 1.4 ms per 2048-stream frame on an A100
+of kernel core 2.1.0 measured 1.4 ms per 2048-stream frame on an A100
 (x30 margin against the 41.9 ms cadence; `test_fine_powers_gpu.py`
-report); a combined row-sums-plus-fine-stage measurement on the deployment
-GPU remains a pre-integration item, with no significant change expected.
+report). The combined measurement is now direct: the fused kernel (core
+2.2.0) runs the complete samples-to-fine-and-coarse-powers datapath in
+0.77 ms per 2048-stream frame (x55 margin; 2.8x faster than the composed
+three-launch chain, and binding the row-sum debug tap adds ~5 us), and
+the full deployed mask form (core 2.3.0, decision epilogue included)
+measures 0.90 ms (x47 margin; the epilogue itself costs +0.13 ms) ---
+A100, `test_fused_fine_gpu.py` / `test_fused_mask_gpu.py` rate reports,
+2026-08-05. The deployed decision therefore occupies ~2% of the frame
+cadence end to end.
 
 The enqueued decision is the fine designated-set CFAR, computed on the
 device after the exact int32 row sums: padded window-axis FFT, incoherent

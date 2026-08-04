@@ -228,6 +228,13 @@ no-tap form, 20-repeat last-block determinism, and the epilogue-cost
 rate report). `FStat_Compute_FusedFine_U64` remains bit-identical to
 core 2.2.0.
 
+Measured (A100, 2026-08-05, all 19 kernel gates passing): fused
+production form 0.769 ms per 2048-stream frame (x55 margin against the
+41.9 ms cadence; composed three-launch chain 2.144 ms, so fusion saves
+1.375 ms; debug tap +5 us); deployed mask form 0.895 ms (x47 margin;
+decision epilogue +0.127 ms). The complete deployed decision costs ~2%
+of the frame cadence.
+
 The gating requirement is a deterministic verification FFT. The project's
 validation standard is bit-exact agreement between the CUDA path and the
 Python reference; cuFFT and numpy cannot bit-match each other (different
