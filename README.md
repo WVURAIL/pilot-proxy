@@ -250,6 +250,25 @@ The shipped receiver profiles have different roles and evidential status:
   currently deployed frame. The profile is frame-verified
   (`profile_status` in the file); still verify these values
   against the data product used for an operational run.
+- `chord_dtv_fengine.json` and `chord_pathfinder_dtv_fengine.json` are the
+  CHORD / CHORD-pathfinder adapter profiles for the kotekan (`chord` branch)
+  integration. Both share the CHORD channelization -- 3.2 GS/s ADC, first
+  Nyquist zone, 16384-point PFB, 8192 coarse channels of exactly 195312.5 Hz,
+  upright spectral sense, ascending channel order, channel RF center =
+  `coarse_channel_index * 195312.5 Hz` (the kotekan `freq_id` namespace) --
+  and differ only in stream count: 1024 dish-polarization streams (512
+  dishes) for full CHORD, 128 (64 dishes) for the pathfinder. The 16384-sample
+  detector frame spans exactly 2 kotekan GPU frames of 8192 samples and gives
+  the frozen 128-windows-per-stream fine-reduction geometry. The ATSC 14-36
+  pilots land in CHORD channels 2408-3084; channel 14 is the single adaptive
+  reference case (its upper reference shifts off the forbidden DC bin,
+  wrapping the frame edge). These profiles declare
+  `metadata.channel_id_map`, so exported runtime bundles carry a populated
+  `chord_channel_id` for kotekan first-frame profile selection. Both are
+  marked `example_requires_data_product_verification`: the grid matches the
+  kotekan chord-branch source, and the frame convention must still be
+  verified against CRS F-engine data before an operational run
+  (`docs/KOTEKAN_INTERFACE_PREP.md`).
 
 ---
 

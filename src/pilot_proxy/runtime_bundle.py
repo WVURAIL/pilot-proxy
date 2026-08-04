@@ -429,37 +429,125 @@ def _coerce_int_metadata(value: object, *, field: str) -> int:
     raise TypeError(f"{field} must be an integer-compatible value, got {value!r}")
 
 
-def _validate_chime_channel_ids(
+def _validate_receiver_namespace_channel_ids(
     *,
     profiles: list[Any],
+    field: str,
     errors: list[dict[str, str]],
 ) -> None:
+    """Check one receiver channel-id field for integer type and uniqueness."""
     seen: set[int] = set()
     for index, row in enumerate(profiles):
         if not isinstance(row, dict):
             continue
-        value = row.get("chime_channel_id")
+        value = row.get(field)
         if value is None:
             continue
         try:
             channel_id = _coerce_int_metadata(
                 value,
-                field="chime_channel_id",
+                field=field,
             )
         except (TypeError, ValueError):
             _add_error(
                 errors,
-                "pilot_profiles.chime_channel_id",
-                f"invalid chime_channel_id {value!r} at profile row {index}",
+                f"pilot_profiles.{field}",
+                f"invalid {field} {value!r} at profile row {index}",
             )
             continue
         if channel_id in seen:
             _add_error(
                 errors,
-                "pilot_profiles.chime_channel_id",
-                f"duplicate chime_channel_id {channel_id} at profile row {index}",
+                f"pilot_profiles.{field}",
+                f"duplicate {field} {channel_id} at profile row {index}",
             )
         seen.add(channel_id)
+
+
+RECEIVER_CHANNEL_ID_FIELDS = (
+    "chime_channel_id",
+    "chord_channel_id",
+    "receiver_channel_id",
+)
+# Receiver channel-id namespaces the exporter knows how to alias into a
+# telescope-specific field. The namespace string is declared by the receiver
+# profile (metadata.channel_id_map.namespace).
+CHANNEL_ID_NAMESPACE_FIELD_ALIASES = {
+    "chime_freq_id": "chime_channel_id",
+    "chord_freq_id": "chord_channel_id",
+}
+
+
+def _validate_chime_channel_ids(
+    *,
+    profiles: list[Any],
+    errors: list[dict[str, str]],
+) -> None:
+    for field in RECEIVER_CHANNEL_ID_FIELDS:
+        _validate_receiver_namespace_channel_ids(
+            profiles=profiles,
+            field=field,
+            errors=errors,
+        )
+    for index, row in enumerate(profiles):
+        if not isinstance(row, dict):
+            continue
+        receiver_id = row.get("receiver_channel_id")
+        if receiver_id is None:
+            continue
+        for alias_field in ("chime_channel_id", "chord_channel_id"):
+            alias_value = row.get(alias_field)
+            if alias_value is None:
+                continue
+            try:
+                same = _coerce_int_metadata(
+                    alias_value, field=alias_field
+                ) == _coerce_int_metadata(
+                    receiver_id, field="receiver_channel_id"
+                )
+            except (TypeError, ValueError):
+                continue
+            if not same:
+                _add_error(
+                    errors,
+                    f"pilot_profiles.{alias_field}",
+                    f"{alias_field} {alias_value!r} does not match "
+                    f"receiver_channel_id {receiver_id!r} at profile row "
+                    f"{index}",
+                )
+
+
+def _resolve_profile_channel_id_map(profile: Any) -> tuple[str, int] | None:
+    """Return (namespace, offset_from_coarse_channel_index) when declared.
+
+    A receiver profile opts into runtime-bundle channel-id population by
+    declaring ``metadata.channel_id_map`` with a ``namespace`` string and an
+    integer ``offset_from_coarse_channel_index`` such that::
+
+        receiver_channel_id = coarse_channel_index + offset
+
+    For the CHORD/kotekan integration the namespace is ``chord_freq_id`` with
+    offset 0 (kotekan ``chordMetadata.coarse_freq`` entries are
+    ``CHORDTelescope::to_freq_id`` values, which equal the profile's
+    coarse-channel index in the first Nyquist zone). Profiles without the
+    declaration keep the legacy behavior: channel-id fields exported as null
+    pending a verified metadata mapping.
+    """
+    metadata = getattr(profile, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    channel_id_map = metadata.get("channel_id_map")
+    if not isinstance(channel_id_map, dict):
+        return None
+    namespace = channel_id_map.get("namespace")
+    offset = channel_id_map.get("offset_from_coarse_channel_index")
+    if namespace is None or offset is None:
+        raise ValueError(
+            "receiver profile metadata.channel_id_map requires both "
+            "'namespace' and integer 'offset_from_coarse_channel_index'; "
+            f"got {channel_id_map!r}"
+        )
+    return str(namespace), int(offset)
 
 
 def _validate_bundle_coordinate_systems(
@@ -737,6 +825,14 @@ def export_runtime_weight_bundle(
     profile_nbytes = int(core.num_weight_terms) * int(core.detector_window_samples)
     profile_nbytes *= np.dtype(np.int8).itemsize
     weights_path = output / DEFAULT_WEIGHTS_FILENAME
+    channel_id_map = _resolve_profile_channel_id_map(profile)
+    channel_id_namespace = channel_id_map[0] if channel_id_map else None
+    channel_id_offset = channel_id_map[1] if channel_id_map else 0
+    channel_id_alias_field = (
+        CHANNEL_ID_NAMESPACE_FIELD_ALIASES.get(channel_id_namespace)
+        if channel_id_namespace is not None
+        else None
+    )
     profile_rows: list[dict[str, Any]] = []
     weight_chunks: list[bytes] = []
     offset = 0
@@ -753,11 +849,32 @@ def export_runtime_weight_bundle(
         weight_chunks.append(payload)
         row_nt, row_nl, row_nu = weight_term_norms_sq(weights)
         row_nrs = int(row_nl + row_nu)
+        receiver_channel_id = (
+            coarse_index + channel_id_offset if channel_id_map else None
+        )
+        channel_id_fields: dict[str, Any] = {
+            # Telescope channel identifiers for first-frame profile selection
+            # in a receiver pipeline stage (for example the kotekan
+            # cudaPilotProxyDetector). Populated only when the receiver
+            # profile declares metadata.channel_id_map; otherwise null,
+            # pending a verified metadata mapping.
+            "receiver_channel_id": receiver_channel_id,
+            "receiver_channel_id_namespace": channel_id_namespace,
+            "chime_channel_id": None,
+            "chord_channel_id": None,
+        }
+        if channel_id_alias_field is not None and receiver_channel_id is not None:
+            channel_id_fields[channel_id_alias_field] = receiver_channel_id
         profile_rows.append(
             {
                 "physical_channel": int(channel),
-                "chime_channel_id": None,
+                **channel_id_fields,
                 "pilot_frequency_hz": float(layout["dtv_pilot_hz"]),
+                # Neutral name; "chime_frequency_hz" is the legacy alias kept
+                # for existing consumers of CHIME bundles.
+                "coarse_channel_center_hz": float(
+                    layout["coarse_channel_center_hz"]
+                ),
                 "chime_frequency_hz": float(layout["coarse_channel_center_hz"]),
                 "coarse_channel_index": coarse_index,
                 "weight_bank_index": int(index),
@@ -841,6 +958,8 @@ def export_runtime_weight_bundle(
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": detector_contract["input_coordinate_system"],
         "input_preprocessing": detector_contract["input_preprocessing"],
+        "receiver_profile_id": profile.name,
+        "receiver_channel_id_namespace": channel_id_namespace,
         "detector_contract_sha256": contract_digest,
         "weights_sha256": weights_digest,
         "profiles": profile_rows,

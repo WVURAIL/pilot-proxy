@@ -3,8 +3,12 @@
 This note separates the tested PilotProxy runtime bundle from the proposed
 Kotekan integration. The repository exports and validates the bundle described
 below, and the CUDA library exposes a device mask API. It does not contain a
-Kotekan stage. The state machine, metadata binding, and frame alignment therefore
-remain interface requirements rather than implemented behavior.
+Kotekan stage; the CHORD stage lives in the kotekan repository (see Section 7).
+For CHIME, the state machine, metadata binding, and frame alignment remain
+interface requirements rather than implemented behavior. For CHORD, Section 7
+records the values that resolve this note's open questions against the kotekan
+`chord` branch, and the companion kotekan patch series implements the stage
+(`cudaPilotProxyDetector`) against this bundle contract.
 
 ## 1. Assumptions
 
@@ -129,6 +133,13 @@ channels, coordinate convention, reference placement, and hashes.
 
 `pilot_profiles.json` maps each physical DTV channel to a profile index, byte
 offset, byte count, calibration fields, and positive-excess rational threshold.
+When the receiver profile declares `metadata.channel_id_map` (namespace plus
+integer offset from `coarse_channel_index`), the exporter also populates
+per-row receiver channel identifiers: `receiver_channel_id`,
+`receiver_channel_id_namespace`, and -- for the `chord_freq_id` namespace --
+the `chord_channel_id` alias consumed by the kotekan stage. The bundle
+validator range-checks these fields, enforces uniqueness, and rejects
+alias/receiver-id mismatches.
 Each profile also carries a `fine_calibration` block (decision version,
 anchor bin, designated half width, 256-bit bulk mask as four hex uint64
 words, CFAR rank, Q16 multiplier, provenance) for the kernel core 2.3.0
@@ -263,7 +274,7 @@ interface value until the upgrade's Kotekan frame contract is published. A
 the integration must obtain the active value from authoritative metadata rather
 than infer it from this repository.
 
-## 6. Open Questions
+## 6. Open Questions (CHIME)
 
 - Which Kotekan metadata field carries the integer CHIME channel identifier?
 - How does that identifier map to `chime_channel_id` in the runtime bundle?
@@ -274,3 +285,95 @@ than infer it from this repository.
   carried in the Kotekan configuration or metadata?
 - Which debug deployment will compare device mask decisions and `uint64` powers
   against the Python path before the powers are removed from production output?
+
+For CHORD, Section 7 resolves each of these against the kotekan `chord`
+branch; the CHIME answers must still be confirmed against the CHIME/Kotekan
+deployment when that integration is scheduled.
+
+## 7. CHORD / kotekan `chord` branch resolution
+
+The CHORD integration (kotekan stage `cudaPilotProxyDetector`, vendored
+kernel under `lib/cuda/pilotproxy/`, packer `cudaPilotProxyPacker.cu`,
+kernel-level verification stage `testPilotProxyDetector`) binds this
+repository's runtime bundle with the following resolved interface values.
+
+### 7.1 Receiver parameters (kotekan `chord` branch source)
+
+| quantity | CHORD value | source |
+|---|---|---|
+| ADC sample rate | 3.2 GHz, first Nyquist zone | `config/fengine/include/fengine_chord.j2` |
+| PFB | 16384-point, 4 taps | same |
+| coarse channels | 8192 x 195312.5 Hz exactly | `sampling_rate / fft_length` |
+| channel RF center | `freq_id * 195312.5 Hz` (upright, ascending; channel 1536 = 300 MHz, 7680 = 1500 MHz) | `CHORDTelescope::FreqParams` (`freq0 = 0`, `df = +195312.5 Hz`) |
+| channelized cadence | 5.12 us/sample | 16384 / 3.2 GHz |
+| streams | 1024 dish-pol (512 dishes) full CHORD; 128 (64 dishes) pathfinder | `setup_chord.jl` / `setup_pathfinder.jl` |
+| voltage buffer | `[T, F, P, D]`, `int4x2_swapped_withoffset` (offset-8; imag low nibble, real high nibble) | `DataType.hpp`, `fengine_chord.j2` |
+| kotekan GPU frame | 8192 samples = 41.94304 ms | `num_times` |
+| detector block | 16384 samples = 2 GPU frames = 83.88608 ms; `windows_per_stream = 128` (the frozen fine transform length) | stage config `samples_per_detector_frame` |
+| fine bin width | 1525.87890625 Hz | 195312.5 / 128 |
+
+The corresponding receiver profiles in this repository are
+`configs/receiver_profiles/chord_dtv_fengine.json` and
+`chord_pathfinder_dtv_fengine.json`; the ATSC 14-36 pilots land in CHORD
+channels 2408-3084 (channel 14 is the single adaptive-reference case: its
+upper reference is DC-shifted, wrapping the frame edge).
+
+### 7.2 Answers to the Section 6 questions, for CHORD
+
+- **Channel identifier field**: `chordMetadata::coarse_freq` (a `vector<int>`
+  with one entry per local frequency), populated by the receive path from
+  `CHORDTelescope::to_freq_id`. Constant per run.
+- **Identifier mapping**: `freq_id == coarse_channel_index` in the CHORD
+  profiles (declared as `metadata.channel_id_map` with offset 0), so the
+  bundle's `chord_channel_id` is directly comparable to `coarse_freq`
+  entries. First-frame selection: bind every local frequency whose
+  `coarse_freq` entry appears in the bundle.
+- **Identifier stability**: treated as fixed for one run; the stage
+  FATAL-errors on a changed `coarse_freq` vector rather than rebinding.
+- **Non-pilot node behavior**: emit all-zero mask and power frames (uniform
+  product shape across nodes; DISABLED nodes stay cheap).
+- **Frame identity key**: the voltage ring-buffer read offset in channelized
+  samples (recorded as the output `fpga_seq_num`), plus the input metadata's
+  FPGA sequence base; one mask/power set per detector block.
+- **Frame length**: carried in kotekan config (`num_times` for the ring
+  advance; `samples_per_detector_frame` for the detector block). Not
+  inferred from this repository.
+- **Debug comparison**: the stage always emits the exact `uint64` coarse
+  power marginals (`dtv_powers`, `[F][3]`) alongside the mask byte
+  (`dtv_mask`, `[F]`), so Kotekan-vs-Python parity can be checked on real
+  data before any production trimming. At the kernel level,
+  `testPilotProxyDetector` bit-compares the full GPU datapath (packer, row
+  sums, coarse powers, fine powers, coarse rational mask, fine
+  designated-set CFAR mask) against CPU references, including a bit-exact
+  C++ port of `fine_decision.py` cross-validated against the Python
+  implementation.
+
+### 7.3 Input conversion
+
+`int4x2_swapped_withoffset` already stores the real component in the high
+nibble and the imaginary component in the low nibble, so the kotekan packer's
+entire conversion is a per-byte `XOR 0x88` (subtract 8 per nibble:
+offset-binary to two's-complement), identical in effect to
+`repack_chime_offset_binary_i4_to_twos_complement`. CHORD's upright spectral
+sense means no detector-window time reversal
+(`time_reverse_detector_windows_before_kernel = false` in CHORD bundles), and
+the post-spectral-sense and raw-input weight coordinate systems coincide
+(the generated banks are bit-identical).
+
+### 7.4 Remaining CHORD verification items
+
+- Verify the baseband frame convention (`channel_center_normalized = 0.0`,
+  upright sense, no per-parity twiddle) against CRS F-engine data; the
+  profiles are marked `example_requires_data_product_verification` until
+  then.
+- The vendored kernel API executes on the legacy default CUDA stream; the
+  kotekan stage brackets it with events. A stream-taking API variant is a
+  candidate upstream change if profiling ever shows the implicit
+  default-stream synchronization mattering at the 84 ms cadence.
+- The fine mask path stays disabled per channel until the calibration
+  campaign flips `fine_calibration.status` to `calibrated` (the stage's
+  `decision_mode: auto` rule); until then the coarse rational mask runs.
+- The proposed correlator-side FIFO handoff of Section 2a (decision consumed
+  by the correlator at integration boundaries, `exceedance_10s` counter) is
+  not yet wired; the current stage emits per-block products into ordinary
+  kotekan buffers.

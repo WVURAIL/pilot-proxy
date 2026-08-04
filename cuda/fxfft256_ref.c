@@ -114,6 +114,11 @@ void fxfft256(const int32_t in[FX_NIN][2], int32_t out[FX_N][2])
     }
 }
 
+/* Define FXFFT256_REF_NO_MAIN to compile only the fxfft256() transform,
+ * e.g. when this file is included/linked into a host test harness that
+ * has its own entry point (such as the Kotekan testPilotProxyDetector
+ * stage). The default standalone-harness behavior is unchanged. */
+#ifndef FXFFT256_REF_NO_MAIN
 int main(int argc, char **argv)
 {
     FILE *fi, *fo;
@@ -145,3 +150,4 @@ int main(int argc, char **argv)
     fclose(fi); fclose(fo); free(in); free(out);
     return 0;
 }
+#endif /* FXFFT256_REF_NO_MAIN */
