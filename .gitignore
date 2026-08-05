@@ -8,3 +8,12 @@ __pycache__/
 *.h5
 *.pdf
 *.png
+# pytest cache
+.pytest_cache/
+# PilotProxy CUDA kernel build artifacts (make build-kernel / test-kernel)
+cuda/*.o
+cuda/*.so
+cuda/test_c_header
+cuda/test_fstat_cuda
+cuda/test_fstat_reference
+cuda/.config_*.stamp
