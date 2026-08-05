@@ -1,6 +1,7 @@
 cff-version: 1.2.0
 message: "If you use pilot-proxy in your research, please cite it as below."
 title: "pilot-proxy: Pilot-Informed F-Statistic Detection of Sub-Noise RFI"
+version: "1.0.0"
 authors:
   - name: "WVU Radio Astronomy Instrumentation Lab"
     website: "https://github.com/WVURAIL"
