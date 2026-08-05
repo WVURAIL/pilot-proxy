@@ -1,71 +1,10 @@
 __pycache__/
 *.py[cod]
-.pytest_cache/
-.idea/
-
-build/
-dist/
+.venv/
 *.egg-info/
-
-generated/
-*.cfile
+*.npz
 *.npy
-*.csv
-
-*.so
-*.o
-cuda/test_c_header
-cuda/test_fstat_cuda
-cuda/test_fstat_reference
-cuda/.config_*.stamp
-
-docs/out
-docs/auxil
-docs/generated/
-
+*.mat
+*.h5
 *.pdf
 *.png
-
-*.ipynb_checkpoints*
-
-# run outputs, staging, and partial downloads (never commit)
-*.npz
-*.part
-_staging/
-lcd_run_*/
-smoke_out/
-pilot_proxy_runs/
-
-# run outputs, staging, and downloads (never commit)
-*.npz
-*.part
-_staging/
-lcd_run_*/
-smoke_out/
-pilot_proxy_runs/
-
-# survey inventories / enum caches (regenerable; keep on disk, never commit)
-data/*
-!data/census/
-
-# provenance snapshot exception (must be last: overrides *.csv/*.xlsx rules)
-!data/census/
-!data/census/**
-
-# provenance snapshot exception (must be last: overrides *.csv/*.xlsx rules)
-!data/census/
-!data/census/**
-results/
-
-!data/provenance/
-!data/provenance/**
-
-# committed evidence artifacts (deliberate exceptions to *.csv / *.png)
-!docs/evidence/
-!docs/evidence/**
-
-# frozen verification fixtures are committed despite *.npz (must follow those rules)
-!tests/data/fxfft256_golden_v1.npz
-
-# preserved kernel insurance copies stay out of source control
-cuda/libfstatistic.so.*
