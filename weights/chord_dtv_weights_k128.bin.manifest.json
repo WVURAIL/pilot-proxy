@@ -13,7 +13,7 @@
   },
   "input_coordinate_system": "post_spectral_sense_normalized",
   "input_preprocessing": {
-    "time_reverse_detector_windows_before_kernel": false
+    "time_reverse_detector_windows_before_kernel": true
   },
   "kernel_spec": {
     "detector_window_samples": 128,

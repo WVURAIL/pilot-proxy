@@ -20,7 +20,6 @@ from pilot_proxy.detector_contract import (
     normalize_weight_coordinate_system,
     weight_term_norms_sq,
 )
-from pilot_proxy.detector_geometry import spectral_sense_requires_time_reversal
 from pilot_proxy.integration import (
     load_detector_core_profile,
     load_receiver_profile,
@@ -29,6 +28,7 @@ from pilot_proxy.integration import (
 from pilot_proxy.integration.receiver_profile import receiver_profile_hash
 from pilot_proxy.integration.weight_generation import (
     generate_weight_table_from_receiver_profile,
+    profile_requires_window_time_reversal,
 )
 from pilot_proxy.json_utils import write_json_strict
 from pilot_proxy.provenance import file_sha256
@@ -919,8 +919,7 @@ def export_runtime_weight_bundle(
             coordinate_system
         ),
         time_reverse_detector_windows_before_kernel=(
-            coordinate_system == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
-            and spectral_sense_requires_time_reversal(profile.spectral_sense)
+            profile_requires_window_time_reversal(profile, coordinate_system)
         ),
         reference_placement_summary=reference_placement_summary,
     )

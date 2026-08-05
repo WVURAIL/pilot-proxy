@@ -352,13 +352,22 @@ upper reference is DC-shifted, wrapping the frame edge).
 
 `int4x2_swapped_withoffset` already stores the real component in the high
 nibble and the imaginary component in the low nibble, so the kotekan packer's
-entire conversion is a per-byte `XOR 0x88` (subtract 8 per nibble:
+value conversion is a per-byte `XOR 0x88` (subtract 8 per nibble:
 offset-binary to two's-complement), identical in effect to
-`repack_chime_offset_binary_i4_to_twos_complement`. CHORD's upright spectral
-sense means no detector-window time reversal
-(`time_reverse_detector_windows_before_kernel = false` in CHORD bundles), and
-the post-spectral-sense and raw-input weight coordinate systems coincide
-(the generated banks are bit-identical).
+`repack_chime_offset_binary_i4_to_twos_complement`. In addition the packer
+must time-reverse each K-sample detector window
+(`time_reverse_detector_windows_before_kernel = true` in CHORD bundles):
+the post-spectral-sense weight synthesis emits `exp(-2j*pi*f*k)` templates in
+the true-sense raw frame and assumes the adapter flip for every explicit-
+baseband-frame profile, upright receivers included. CHORD's upright sense
+only means the raw-frame pilot offsets need no sense conversion -- it does
+not remove the flip. (An earlier revision of this document claimed the
+opposite; the CHORD tone-injection test, which synthesizes pilots at the
+first-principles ATSC frequencies and runs the deployed bundle contract,
+is the guard: without the reversal the detector is blind to upright pilot
+tones.) The post-spectral-sense and raw-input weight coordinate systems
+still generate bit-identical banks for CHORD; only the preprocessing flag
+differs between those two contracts.
 
 ### 7.4 Remaining CHORD verification items
 

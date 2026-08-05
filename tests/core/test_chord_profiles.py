@@ -269,10 +269,15 @@ def test_chord_runtime_bundle_populates_chord_channel_ids(
             row["coarse_channel_index"] * float(CHORD_COARSE_WIDTH)
         )
     contract = json.loads(outputs["detector_contract"].read_text("utf-8"))
-    # Upright sense: the deployed coordinate system requests no reversal.
+    # Explicit-baseband-frame profile: the post-spectral-sense weight
+    # synthesis emits exp(-2j*pi*f*k) templates in the true-sense raw frame
+    # and assumes the adapter's detector-window time reversal regardless of
+    # spectral sense -- CHORD's upright sense does NOT exempt it. (A tone at
+    # the pilot frequency is only matched after the flip; see
+    # tests/core/test_chord_tone_injection.py for the signal-level proof.)
     assert contract["input_preprocessing"][
         "time_reverse_detector_windows_before_kernel"
-    ] is False
+    ] is True
 
 
 def test_chime_runtime_bundle_keeps_null_channel_ids(tmp_path) -> None:

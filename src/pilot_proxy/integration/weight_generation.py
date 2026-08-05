@@ -516,6 +516,36 @@ def target_layout(
 _target_layout = target_layout
 
 
+def profile_requires_window_time_reversal(
+    profile: ReceiverProfile,
+    weight_coordinate_system: str,
+) -> bool:
+    """Whether the deployed adapter must time-reverse each detector window.
+
+    The post-spectral-sense weight synthesis emits templates of the form
+    ``exp(-2j*pi*f*k)`` and the kernel computes ``x . conj(w)``, so a raw
+    baseband tone at ``+f`` (the true-sense frame) is only matched after the
+    adapter reverses each K-sample detector window. For explicit-baseband-
+    frame profiles (``channel_center_normalized`` declared) the synthesis is
+    performed in the raw data frame with the profile's true sense and
+    ASSUMES that adapter flip regardless of the sense (see
+    generate_weight_table_from_receiver_profile): reversal is required even
+    for upright receivers such as CHORD. Legacy profiles (no declared frame)
+    keep the historical sense-derived rule bit-for-bit, and raw-input-
+    coordinate banks never request reversal.
+    """
+    coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
+    if coordinate_system != WEIGHT_COORDINATE_POST_SPECTRAL_SENSE:
+        return False
+    profile_declares_frame = (
+        getattr(profile, "channel_center_normalized", None) is not None
+        or getattr(profile, "channel_center_normalized_odd", None) is not None
+    )
+    if profile_declares_frame:
+        return True
+    return spectral_sense_requires_time_reversal(profile.spectral_sense)
+
+
 def generate_weight_table_from_receiver_profile(
     *,
     profile: ReceiverProfile,
@@ -681,9 +711,8 @@ def write_weight_bank_from_receiver_profile(
             coordinate_system
         ),
         "input_preprocessing": {
-            "time_reverse_detector_windows_before_kernel": bool(
-                coordinate_system == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
-                and spectral_sense_requires_time_reversal(profile.spectral_sense)
+            "time_reverse_detector_windows_before_kernel": (
+                profile_requires_window_time_reversal(profile, coordinate_system)
             ),
         },
         "kernel_spec": {
