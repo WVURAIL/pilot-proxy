@@ -38,6 +38,10 @@ from pilot_proxy.detector_contract import (
     build_chime_detector_contract,
     positive_excess_mask_policy,
 )
+from pilot_proxy.provenance import (
+    detector_version_build_id,
+    detector_version_geometry,
+)
 import json
 
 
@@ -348,11 +352,12 @@ def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
 
 def _version_geometry(version: str) -> tuple:
     """The geometry-bearing tokens of a detector_version string: everything
-    except the `source=<tree hash>` token, which is build provenance. Patches
-    applied mid-survey change the source hash without touching detector math;
-    the kernel hash, K, and schema tag are what stacking correctness needs."""
-    return tuple(t for t in str(version).split()
-                 if not t.startswith("source="))
+    except the `pilot-proxy/<version>` and `source=<tree hash>` tokens, which
+    are build provenance. A release version bump, or patches applied
+    mid-survey, change those without touching detector math; the kernel hash,
+    K, and schema tag are what stacking correctness needs. Defined once in
+    pilot_proxy.provenance and shared with the detector's resume check."""
+    return detector_version_geometry(version)
 
 
 def _check_invariants(products: Sequence[Mapping[str, Any]],
@@ -364,11 +369,13 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
     (nfft, K, spectral sense, schema, sample rate), or stacking would silently fuse
     inconsistent products into one canonical output.
 
-    `detector_version` gets token-aware treatment: its `source=` component is
-    build provenance, not geometry, so products from different mid-survey
-    builds stack freely as long as every other token (kernel hash, K, schema)
-    matches. Returns provenance notes: {"detector_versions": [...]} when more
-    than one build contributed.
+    `detector_version` gets token-aware treatment: its `pilot-proxy/<version>`
+    and `source=` components are build provenance, not geometry, so products
+    from different mid-survey builds -- including builds either side of a
+    release version bump -- stack freely as long as every other token (kernel
+    hash, K, schema) matches. Returns provenance notes:
+    {"detector_versions": [...]} when more than one build contributed, so the
+    full stamps survive into the combined product.
     """
     notes: dict[str, Any] = {}
     ref = products[0]
@@ -392,13 +399,10 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
             distinct = sorted(set(versions))
             if len(distinct) > 1:
                 notes["detector_versions"] = distinct
-                short = ", ".join(
-                    next((t[len("source="):][:12] for t in v.split()
-                          if t.startswith("source=")), "?")
-                    for v in distinct)
+                short = ", ".join(detector_version_build_id(v) for v in distinct)
                 print(f"[combine] provenance: {len(distinct)} source builds "
                       f"with identical detector geometry contributed "
-                      f"(source={short}); stacking.", flush=True)
+                      f"(builds={short}); stacking.", flush=True)
             continue
         base = np.asarray(ref[key]).reshape(-1)
         for z in products[1:]:

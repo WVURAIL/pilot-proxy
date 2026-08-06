@@ -288,8 +288,8 @@ def test_scan_disjoint_inventory_soft_fails_terminal_combine(tmp_path, monkeypat
     assert "chime-combine --report" in printed
 
 
-def _ver(source, kernel="2548aef"):
-    return (f"pilot-proxy/0.2.0.dev0 source={source} kernel=1.0.0 "
+def _ver(source, kernel="2548aef", version="0.2.0.dev0"):
+    return (f"pilot-proxy/{version} source={source} kernel=1.0.0 "
             f"kernel_sha256={kernel} pilotproxy_detector_datatrawl_v2 K=128")
 
 
@@ -318,15 +318,42 @@ def test_invariants_identical_versions_add_no_note():
     assert _check_invariants([a, b], ("detector_version",), "g") == {}
 
 
+def test_invariants_allow_release_version_bump_same_geometry():
+    """A mid-survey release bump (0.3.0.dev0 -> 1.0.0) must not split the
+    stack. Pilots finished before the bump carry the old label; pilots
+    finished after carry the new one, and combine sees both in one run."""
+    from pilot_proxy.datatrawl_plugins.combine import _check_invariants
+    a = {"detector_version": np.asarray([_ver("02066f1d", version="0.3.0.dev0")]),
+         "nfft": np.asarray([16384])}
+    b = {"detector_version": np.asarray([_ver("0c66af82", version="1.0.0")]),
+         "nfft": np.asarray([16384])}
+    notes = _check_invariants([a, b], ("nfft", "detector_version"), "geometry")
+    assert len(notes["detector_versions"]) == 2
+
+
 def test_resume_provenance_token_policy():
-    """Specification of the resume identity rule (implemented inline in the
-    detector's resume check; combine's twins pin the same policy at the other
-    site): detector_version strings differing ONLY in the source= token are
-    geometry-identical and must not block resume; any other token difference
-    must. Tonight's production resume is the integration test."""
-    geom = lambda v: tuple(t for t in str(v).split()
-                           if not t.startswith("source="))
+    """Specification of the resume identity rule, shared by the detector's
+    resume check and combine's _check_invariants: detector_version strings
+    differing ONLY in build-identity tokens (`pilot-proxy/<version>` and
+    `source=`) are geometry-identical and must not block resume; any other
+    token difference must.
+
+    Both sites import detector_version_geometry, so this asserts against the
+    shipped helper rather than a re-implementation -- an earlier copy of this
+    test re-derived the rule inline and hardcoded one version on both sides,
+    which is exactly why the 1.0.0 release bump reached production before
+    anything caught it.
+    """
+    from pilot_proxy.provenance import detector_version_geometry as geom
+    from pilot_proxy.datatrawl_plugins import combine, detector
+
     a, b = _ver("aaa111"), _ver("bbb222")
-    assert a != b and geom(a) == geom(b)          # source-only: continue
-    c = _ver("aaa111", kernel="other")
-    assert geom(a) != geom(c)                     # kernel change: refuse
+    assert a != b and geom(a) == geom(b)                    # source-only: continue
+    c = _ver("aaa111", version="1.0.0")
+    assert a != c and geom(a) == geom(c)                    # version bump: continue
+    d = _ver("aaa111", kernel="other")
+    assert geom(a) != geom(d)                               # kernel change: refuse
+
+    # Both enforcement sites resolve to this one helper.
+    assert combine._version_geometry(a) == geom(a)
+    assert detector.detector_version_geometry is geom

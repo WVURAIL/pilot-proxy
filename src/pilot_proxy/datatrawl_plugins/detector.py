@@ -68,6 +68,8 @@ from pilot_proxy.detector_contract import (
     weight_term_norms_sq,
 )
 from pilot_proxy.provenance import (
+    detector_version_build_id,
+    detector_version_geometry,
     file_sha256,
     package_source_sha256,
     sidecar_manifest_path,
@@ -890,26 +892,20 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             key for key in current
             if saved.get(key) != current.get(key)
         ]
-        # detector_version gets token-aware treatment: its `source=` token is
-        # build provenance (patches applied mid-survey change the tree hash
-        # without touching detector math); the kernel hash, K, and schema
-        # tokens are what resume correctness needs. Same policy as combine's
-        # _check_invariants.
+        # detector_version gets token-aware treatment: its `pilot-proxy/<version>`
+        # and `source=` tokens are build provenance (a release version bump, or
+        # patches applied mid-survey, change them without touching detector
+        # math); the kernel hash, K, and schema tokens are what resume
+        # correctness needs. Single source of truth in pilot_proxy.provenance,
+        # shared with combine's _check_invariants.
         if "detector_version" in mismatches:
-            def _geom(v):
-                return tuple(t for t in str(v).split()
-                             if not t.startswith("source="))
-            def _src(v):
-                for t in str(v).split():
-                    if t.startswith("source="):
-                        return t[len("source="):][:12]
-                return "?"
             sv, cv = saved.get("detector_version"), current.get("detector_version")
-            if _geom(sv) == _geom(cv):
+            if detector_version_geometry(sv) == detector_version_geometry(cv):
                 mismatches.remove("detector_version")
                 print(
-                    "[resume] provenance: source build changed "
-                    f"({_src(sv)} -> {_src(cv)}); detector geometry "
+                    "[resume] provenance: build changed "
+                    f"({detector_version_build_id(sv)} -> "
+                    f"{detector_version_build_id(cv)}); detector geometry "
                     "identical, continuing.",
                     flush=True,
                 )

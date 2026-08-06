@@ -245,6 +245,54 @@ def test_analyzer_resume_rejects_changed_detector_contract(tmp_path):
         resumed.begin(changed_ctx, meta)
 
 
+def test_analyzer_resume_allows_release_version_bump(tmp_path, monkeypatch, capsys):
+    """A release cut mid-survey must not strand the checkpoints.
+
+    Bumping __version__ (0.3.0.dev0 -> 1.0.0) edits a file inside the package,
+    so BOTH build-identity tokens of detector_version move at once: the label
+    and the source tree hash. Every token that constrains the numbers -- kernel
+    hash, K, schema, and the separately compared weights hashes, contract,
+    mask rule and reference placement -- is unchanged, so the resume must
+    continue and say so.
+    """
+    import pilot_proxy
+    from pilot_proxy.datatrawl_plugins import detector as detector_mod
+
+    files = _make_files(tmp_path / "data", n_events=1)
+    path = files[("evt0", FREQ_ID)]
+    reader = ChimeBasebandPackedReader()
+    weights = np.ones((3, K), dtype=np.int8)
+    options = {
+        "detector_fn": _cpu_ref_detector_fn,
+        "kernel": _stub_kernel(K),
+        "weights": weights,
+    }
+    ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID],
+                     options=options)
+    meta = dict(reader.probe(str(path)))
+    meta["unit_key"] = "synth:0"
+
+    monkeypatch.setattr(pilot_proxy, "__version__", "0.3.0.dev0")
+    monkeypatch.setattr(detector_mod, "package_source_sha256", lambda *a, **k: "02066f1d" * 8)
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(ctx, meta)
+    first.consume_file(reader.iter_arrays(str(path), ctx), meta)
+    checkpoint = tmp_path / "release_bump.npz"
+    first.save(str(checkpoint))
+
+    # The release: new label, new tree hash, same detector.
+    monkeypatch.setattr(pilot_proxy, "__version__", "1.0.0")
+    monkeypatch.setattr(detector_mod, "package_source_sha256", lambda *a, **k: "0c66af82" * 8)
+    resumed = PilotProxyDetectorAnalyzer()
+    assert resumed.resume(str(checkpoint), ctx)
+    resumed.begin(ctx, meta)  # must not raise
+
+    note = capsys.readouterr().out
+    assert "[resume] provenance: build changed" in note
+    assert "0.3.0.dev0@02066f1d0206 -> 1.0.0@0c66af820c66" in note
+    assert resumed.processed_keys() == first.processed_keys()
+
+
 # -- scan level: relaunch through the real entry point ------------------------
 
 def _fake_fetch_factory(files):

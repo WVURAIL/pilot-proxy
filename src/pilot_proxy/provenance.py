@@ -74,7 +74,67 @@ def sidecar_manifest_path(path: Path | str | None) -> Path | None:
     return Path(f"{Path(path)}.manifest.json")
 
 
+# -- detector_version token policy -----------------------------------------
+#
+# A detector_version string is
+#
+#     pilot-proxy/<version> source=<tree hash> kernel=<v> kernel_sha256=<hash>
+#     <schema tag> K=<K>
+#
+# and its tokens fall into two classes. ``pilot-proxy/<version>`` and
+# ``source=<tree hash>`` both name the BUILD that produced a product: the
+# release label a maintainer typed, and the digest of the implementation that
+# actually ran. Neither constrains the numbers. A version bump made for a
+# release (0.3.0.dev0 -> 1.0.0) changes both tokens without touching detector
+# math, and conversely a tree can move many commits while staying at one
+# version -- so the label is the weaker of the two, and the source digest is
+# what genuinely identifies an implementation.
+#
+# The remaining tokens -- kernel version, kernel binary hash, schema tag and K
+# -- are geometry: they are what resume and cross-pilot stacking actually
+# depend on, alongside the separately compared weights hashes, detector
+# contract JSON, mask rule and reference placement.
+#
+# Both classes are recorded in full in every product, and combine reports the
+# distinct build strings it stacked, so relaxing the gate loses no provenance.
+DETECTOR_VERSION_BUILD_TOKEN_PREFIXES = ("pilot-proxy/", "source=")
+
+
+def detector_version_geometry(version: object) -> tuple[str, ...]:
+    """Return the geometry-bearing tokens of a ``detector_version`` string.
+
+    Build-identity tokens (see ``DETECTOR_VERSION_BUILD_TOKEN_PREFIXES``) are
+    dropped; everything else is preserved in order. Two products whose
+    geometries compare equal were produced by the same detector configuration
+    and may be resumed into or stacked together.
+    """
+    return tuple(
+        token
+        for token in str(version).split()
+        if not token.startswith(DETECTOR_VERSION_BUILD_TOKEN_PREFIXES)
+    )
+
+
+def detector_version_build_id(version: object, digest_chars: int = 12) -> str:
+    """Return a short human-readable build identity, ``<version>@<source>``.
+
+    Used in the operator-facing notes printed when products from different
+    builds are resumed into or stacked. Missing tokens render as ``?``.
+    """
+    label = "?"
+    source = "?"
+    for token in str(version).split():
+        if token.startswith("pilot-proxy/"):
+            label = token[len("pilot-proxy/"):] or "?"
+        elif token.startswith("source="):
+            source = token[len("source="):][:digest_chars] or "?"
+    return f"{label}@{source}"
+
+
 __all__ = [
+    "DETECTOR_VERSION_BUILD_TOKEN_PREFIXES",
+    "detector_version_build_id",
+    "detector_version_geometry",
     "file_sha256",
     "git_blob_sha1",
     "package_source_sha256",
