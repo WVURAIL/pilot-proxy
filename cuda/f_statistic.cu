@@ -1482,7 +1482,6 @@ kernel_fused_fine(
     }
 
     const int tid = threadIdx.x;
-    const int wpt = FSTAT_FINE_WINDOWS_PER_STREAM / blockDim.x;  /* windows per thread */
 
     __shared__ int s_z[FSTAT_NUM_WEIGHT_TERMS][FSTAT_FINE_WINDOWS_PER_STREAM][2];
     __shared__ int s_fft[FSTAT_FINE_NUM_BINS][2];
@@ -1500,9 +1499,19 @@ kernel_fused_fine(
     const int* weight_lanes = W_Lanes;
     #endif
 
-    /* Phase 1: row sums for this stream's windows (each thread owns
-     * `wpt` whole windows; no cross-thread reduction), accumulating the
-     * exact per-thread marginal partial from the same registers. */
+    /* Phase 1: row sums for this stream's windows (each thread owns whole
+     * windows; no cross-thread reduction), accumulating the exact per-thread
+     * marginal partial from the same registers.
+     *
+     * The window axis is walked with a thread-stride loop, matching the tap
+     * loop of the staged kernels and the RowSumsTap loop below. The previous
+     * form derived a per-thread window count by integer division, which
+     * silently truncated when the window count was not a multiple of the
+     * block size and computed nothing at all when it was smaller. Striding
+     * removes both requirements and leaves the emitted bits unchanged: s_z is
+     * indexed by window, so which thread produces a window does not affect
+     * shared-memory contents, and the marginal partials are reduced by integer
+     * addition, which is associative and commutative. */
     long long part[FSTAT_NUM_WEIGHT_TERMS];
     #pragma unroll
     for (int n = 0; n < FSTAT_NUM_WEIGHT_TERMS; ++n) {
@@ -1513,8 +1522,7 @@ kernel_fused_fine(
         static_cast<size_t>(detector_rows_per_block) * FSTAT_DETECTOR_WINDOW_SAMPLES;
     const InputType* Xb = X + batch_stride * static_cast<size_t>(b);
 
-    for (int q = 0; q < wpt; ++q) {
-        const int w = tid * wpt + q;                       /* window in stream */
+    for (int w = tid; w < FSTAT_FINE_WINDOWS_PER_STREAM; w += blockDim.x) {
         const int m = s * FSTAT_FINE_WINDOWS_PER_STREAM + w;  /* detector row */
 
         int2 dot[FSTAT_NUM_WEIGHT_TERMS];
