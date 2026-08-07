@@ -50,6 +50,7 @@ rounding itself, quantified in ``tools/fxfft_report.py``.
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import numpy as np
@@ -175,6 +176,177 @@ def fxfft256(x: Any, *, return_stage_maxima: bool = False):
     if return_stage_maxima:
         return result, maxima
     return result
+
+
+# ---------------------------------------------------------------------------
+# Transform family: one master twiddle table, every size by decimation
+# ---------------------------------------------------------------------------
+#
+# A radix-2 DIT of length n needs W_n[k] = e^{-2 pi i k / n} for k < n/2 only.
+# Because W_n[k] = W_M[k * M / n] whenever n divides M, and the Q15 rounding is
+# applied to the same real value either way, the length-n table is an *exact*
+# decimation of a length-M master -- identical integers, not an approximation.
+# One master therefore serves the whole family, and the tie analysis and
+# exact-rounding argument are established once on it and inherited by every
+# member.
+#
+# MASTER_N is the largest transform the master serves. The deployed range needs
+# L_F = 2 * N / K: with K = 128 on a CHIME-class raster and K = 64 on a
+# CHORD-class one, frame sizes 2**13..2**16 give L_F in {256 .. 2048}. Raising
+# MASTER_N is a one-constant change; the per-size no-overflow bound below is
+# what actually limits usable sizes.
+
+MASTER_N = 2048
+MASTER_TWIDDLE_SHA256 = (
+    "fec7f22309f4689a1a4a26258dc562487a02e33698a5e0341e2db1928f58d197"
+)
+
+
+def _generate_twiddle_half(n: int) -> tuple[tuple[int, int], ...]:
+    """W_n[k] in Q15 for k < n/2, by exact nearest rounding.
+
+    Used to build the master once at import. No entry sits at a rounding tie
+    (the closest approach across the master is 5.8e-4, ~2.6e8 times the double
+    epsilon at that scale), so every IEEE-754 libm produces the same integers;
+    the hash check below turns that from an argument into an assertion.
+    """
+    import math
+
+    out = []
+    for k in range(n // 2):
+        ang = 2.0 * math.pi * k / n
+        out.append((round(32768.0 * math.cos(ang)), round(-32768.0 * math.sin(ang))))
+    return tuple(out)
+
+
+MASTER_TWIDDLE_Q15 = _generate_twiddle_half(MASTER_N)
+
+
+def master_twiddle_sha256() -> str:
+    """Hash of the master table (the family's single frozen artifact)."""
+    import hashlib
+
+    return hashlib.sha256(str(list(MASTER_TWIDDLE_Q15)).encode()).hexdigest()
+
+
+def twiddle_table(n: int) -> tuple[tuple[int, int], ...]:
+    """Q15 twiddles for a length-``n`` radix-2 DIT: ``n // 2`` entries.
+
+    Returned by decimating the master with stride ``MASTER_N // n``; the
+    values are bit-identical to generating length ``n`` directly.
+    """
+    if n < 2 or (n & (n - 1)) != 0:
+        raise ValueError(f"transform length must be a power of two >= 2; got {n}")
+    if n > MASTER_N:
+        raise ValueError(
+            f"transform length {n} exceeds the master table (MASTER_N={MASTER_N}); "
+            "raise MASTER_N and refresh MASTER_TWIDDLE_SHA256."
+        )
+    stride = MASTER_N // n
+    return tuple(MASTER_TWIDDLE_Q15[k * stride] for k in range(n // 2))
+
+
+# The frozen fxfft256 v1 literal must be exactly what the family produces at
+# n = 256. This is the join between the frozen artifact and the general
+# construction; if it ever fails, the family is wrong, not the literal.
+assert master_twiddle_sha256() == MASTER_TWIDDLE_SHA256, (
+    "master twiddle table does not match its frozen hash; the host libm "
+    "disagrees with the recorded rounding, which would break bit-reproducibility"
+)
+assert twiddle_table(N) == TWIDDLE_Q15, (
+    "master-table decimation does not reproduce the frozen fxfft256 twiddles"
+)
+
+_BUTTERFLY_GROWTH = 1.0 + 1.41422 + (1.0 / 32768.0)
+
+
+def input_abs_max(n: int) -> int:
+    """Largest input infinity-norm with a proven no-overflow closure at ``n``.
+
+    One butterfly maps the working norm ``M`` to at most
+    ``(1 + sqrt(2) + 2**-15) M + 1``; applying that ``log2(n)`` times and
+    requiring the result below ``2**31`` gives the bound, floored to a power
+    of two. The bound *tightens* as ``n`` grows, so the eight-stage contract
+    (``2**20``) is not reusable at nine stages -- which is precisely the
+    failure mode this function exists to prevent.
+    """
+    stages = n.bit_length() - 1
+    norm = 1.0
+    for _ in range(stages):
+        norm = _BUTTERFLY_GROWTH * norm + 1.0
+    return 1 << int(math.floor(math.log2((2 ** 31) / norm)))
+
+
+def fxfft(x: Any, *, n_out: int = N, return_stage_maxima: bool = False):
+    """Frozen fixed-point FFT generalized over the transform length.
+
+    Same specification as :func:`fxfft256` -- bit-reversed load, radix-2 DIT,
+    Q15 twiddles from the master table, ``round15`` per butterfly, no scaling
+    -- with the length as a parameter. ``x`` is an integer array
+    ``[..., n_out // 2, 2]``; the pad factor is fixed at two.
+
+    At ``n_out = 256`` this is bit-identical to :func:`fxfft256`, which the
+    test suite asserts.
+    """
+    if n_out < 2 or (n_out & (n_out - 1)) != 0:
+        raise ValueError(f"n_out must be a power of two; got {n_out}")
+    n_in = n_out // 2
+    stages = n_out.bit_length() - 1
+    limit = input_abs_max(n_out)
+
+    a = np.asarray(x)
+    if a.dtype.kind not in "iu":
+        raise TypeError("fxfft input must be an integer array (re/im).")
+    if a.ndim < 2 or a.shape[-1] != 2 or a.shape[-2] != n_in:
+        raise ValueError(f"fxfft input must have shape [..., {n_in}, 2]; got {a.shape}")
+    a = a.astype(np.int64, copy=False)
+    peak_in = int(np.abs(a).max(initial=0))
+    if peak_in > limit:
+        raise OverflowError(
+            f"fxfft input exceeds the |.| <= {limit} contract for n_out={n_out} "
+            f"(max {peak_in}); the bound tightens with transform length."
+        )
+
+    width = stages
+    bitrev = np.asarray(
+        [int(format(i, "0%db" % width)[::-1], 2) for i in range(n_out)], dtype=np.int64
+    )
+    tw = np.asarray(twiddle_table(n_out), dtype=np.int64)
+
+    lead = a.shape[:-2]
+    buf = np.zeros(lead + (n_out, 2), dtype=np.int64)
+    buf[..., :n_in, :] = a
+    work = buf[..., bitrev, :]
+
+    maxima = []
+    for s in range(1, stages + 1):
+        m = 1 << s
+        half = m >> 1
+        blocks = n_out >> s
+        w = work.reshape(lead + (blocks, m, 2))
+        ap = w[..., :half, :]
+        bp = w[..., half:, :]
+        k = (np.arange(half, dtype=np.int64)) << (stages - s)
+        c = tw[k, 0]
+        sn = tw[k, 1]
+        br = bp[..., 0]
+        bi = bp[..., 1]
+        t_re = (br * c - bi * sn + ROUND_CONST) >> SHIFT
+        t_im = (bi * c + br * sn + ROUND_CONST) >> SHIFT
+        out = np.empty_like(w)
+        out[..., :half, 0] = ap[..., 0] + t_re
+        out[..., :half, 1] = ap[..., 1] + t_im
+        out[..., half:, 0] = ap[..., 0] - t_re
+        out[..., half:, 1] = ap[..., 1] - t_im
+        work = out.reshape(lead + (n_out, 2))
+        peak = int(np.abs(work).max(initial=0))
+        maxima.append(peak)
+        if peak > INT32_MAX:
+            raise OverflowError(
+                f"fxfft(n_out={n_out}) stage {s} exceeded int32 (peak {peak})."
+            )
+    result = work.astype(np.int32)
+    return (result, maxima) if return_stage_maxima else result
 
 
 def fxfft256_scalar(x_in) -> list[tuple[int, int]]:
