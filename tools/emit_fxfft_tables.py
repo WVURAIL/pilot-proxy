@@ -78,17 +78,35 @@ def render() -> str:
         "",
         f"#define FX_MASTER_N {MASTER_N}",
         f"#define FX_MASTER_LOG2 {log2_master}",
+        f"#define FX_MASTER_HALF {half}",
         f'#define FX_MASTER_SHA256 "{MASTER_TWIDDLE_SHA256}"',
         "",
-        f"static const int32_t FX_TW_MASTER[{half}][2] = {{",
+        "/* The table as a bare initializer, so host and device storage classes can",
+        " * share one emitted artifact: plain C uses the static array below, while",
+        " * CUDA declares __device__ __constant__ ... = FX_TW_MASTER_INIT. */",
+        "#define FX_TW_MASTER_INIT \\",
     ]
     per_line = 4
+    body_lines = []
     for start in range(0, half, per_line):
         chunk = MASTER_TWIDDLE_Q15[start : start + per_line]
-        body = ", ".join("{%d, %d}" % (c, s) for c, s in chunk)
-        lines.append(f"    {body},")
-    lines[-1] = lines[-1].rstrip(",")
-    lines += ["};", "", "#endif /* FXFFT_MASTER_TWIDDLE_H */", ""]
+        body_lines.append("    " + ", ".join("{%d, %d}" % (c, s) for c, s in chunk))
+    lines.append("{ \\")
+    for i, bl in enumerate(body_lines):
+        sep = "," if i < len(body_lines) - 1 else ""
+        lines.append(f"{bl}{sep} \\")
+    lines.append("}")
+    lines += [
+        "",
+        "/* Host-side array. Define FX_TW_MASTER_NO_HOST_ARRAY to suppress it when",
+        " * only the initializer is wanted (e.g. a CUDA translation unit). */",
+        "#ifndef FX_TW_MASTER_NO_HOST_ARRAY",
+        f"static const int32_t FX_TW_MASTER[{half}][2] = FX_TW_MASTER_INIT;",
+        "#endif",
+        "",
+        "#endif /* FXFFT_MASTER_TWIDDLE_H */",
+        "",
+    ]
     return "\n".join(lines)
 
 

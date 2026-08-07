@@ -93,6 +93,17 @@
     (FSTAT_FINE_PAD_FACTOR * FSTAT_FINE_WINDOWS_PER_STREAM)
 
 /**
+ * Radix-2 stage count of the fine transform, log2(FSTAT_FINE_NUM_BINS).
+ *
+ * Set alongside FSTAT_FINE_WINDOWS_PER_STREAM; the relation is asserted below.
+ * The transform reads twiddles from the shared master table, so a stage indexes
+ * it as `t << (FX_MASTER_LOG2 - stage)`: the decimation stride folds into the
+ * shift, and at FSTAT_FINE_NUM_BINS = 256 that selects exactly the entries the
+ * frozen fxfft256 v1 table held.
+ */
+#define FSTAT_FINE_LOG2 8
+
+/**
  * Reference-bin offset used to construct the three detector weight terms.
  *
  * The weight terms are:
@@ -266,6 +277,10 @@ static_assert(
 static_assert(
     FSTAT_FINE_NUM_BINS == FSTAT_FINE_PAD_FACTOR * FSTAT_FINE_WINDOWS_PER_STREAM,
     "Fine bin count must be pad_factor * windows_per_stream.");
+static_assert(
+    (1 << FSTAT_FINE_LOG2) == FSTAT_FINE_NUM_BINS,
+    "FSTAT_FINE_LOG2 must equal log2(FSTAT_FINE_NUM_BINS); update it whenever "
+    "the fine transform length changes.");
 
 /* --- no-overflow closure, derived per geometry ---------------------------- */
 static_assert(
