@@ -142,8 +142,17 @@ $(CUDA_TEST): $(TARGET) $(CUDA_TEST_SOURCES) $(CUDA_TEST_HEADERS) $(CONFIG_STAMP
 test_cuda: $(CUDA_TEST)
 	./$(CUDA_TEST)
 
+# Runs the CUDA regression at a deliberately tiny launch capacity to exercise
+# the grid-stride paths. That build overwrites libfstatistic.so with a library
+# whose capacity is 4 blocks, which then fails any later test needing more
+# streams (the Python GPU suite uses 2048) with "num_streams exceeds the launch
+# capacity" -- a confusing failure far from its cause. Restore the default
+# build afterwards so the target cannot leave a degraded artifact behind.
 test_cuda_grid_stride:
 	$(MAKE) test_cuda GRID_MAX_BLOCKS=4
+	@echo "Restoring default build (GRID_MAX_BLOCKS=$(GRID_MAX_BLOCKS))"
+	$(MAKE) clean
+	$(MAKE) all
 
 test: test_c_header test_ref test_cuda
 
