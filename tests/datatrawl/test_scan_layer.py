@@ -198,11 +198,11 @@ def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):
     assert seen["ckpt"] == 50
 
 
-# -- --source-channel-regex reaches the current datatrawl local source --------
+# -- --source-freq-id-regex reaches the datatrawl local source ----------------
 
-def test_local_scan_channel_regex_reaches_source(tmp_path, monkeypatch):
+def test_local_scan_freq_id_regex_reaches_source(tmp_path, monkeypatch):
     """The flag must populate source_freq_id_regex (what the paired
-    LocalDirectorySource reads), not only the legacy key."""
+    LocalDirectorySource reads)."""
     monkeypatch.chdir(REPO_ROOT)
     data = tmp_path / "data"
     data.mkdir()
@@ -213,7 +213,7 @@ def test_local_scan_channel_regex_reaches_source(tmp_path, monkeypatch):
     out = tmp_path / "out"
     run_chime_scan(output_dir=out, source="local", input_dir=data,
                    analyzer="pilot-proxy-detector", select="844",
-                   source_channel_regex=r"freq(\d+)\.h5$",
+                   source_freq_id_regex=r"freq(\d+)\.h5$",
                    analyzer_options=_cpu_detector_options(), verbose=False)
     assert (out / "_per_pilot" / "844.npz").exists()
 
@@ -231,6 +231,6 @@ def test_local_scan_set_regex_overrides_flag(tmp_path, monkeypatch):
     out = tmp_path / "out"
     run_chime_scan(output_dir=out, source="local", input_dir=data,
                    analyzer="pilot-proxy-detector", select="844",
-                   source_channel_regex=r"nomatch(\d+)$",  # flag must NOT win
+                   source_freq_id_regex=r"nomatch(\d+)$",  # flag must NOT win
                    analyzer_options=opts, verbose=False)
     assert (out / "_per_pilot" / "844.npz").exists()

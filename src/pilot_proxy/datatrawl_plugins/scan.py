@@ -57,16 +57,6 @@ def _named_inventory_path(name: str, source_root: str | Path | None = None) -> P
         return Path.cwd() / "data" / str(name).strip() / "inventory.jsonl"
 
 
-def _inventory_path_from_options(options: Mapping[str, Any], instrument_name: str) -> Path:
-    """The inventory path the cadc-datatrail source will read, mirrored here so
-    the scan layer can consult the same file (freq_id derivation, sidecar meta)
-    without instantiating the source."""
-    p = options.get("inventory")
-    if p:
-        return Path(p)
-    return Path(options.get("root", ".")) / "data" / str(instrument_name) / "inventory.jsonl"
-
-
 def _read_inventory_meta(inventory_path: Path) -> dict | None:
     """The survey's sidecar meta (``<inventory>.meta.json``), or None when it is
     absent or unreadable. Best-effort by design, matching datatrawl's own
@@ -195,7 +185,7 @@ def run_chime_scan(
     max_chunks_per_file: int | None = None,
     work_dir: str | Path | None = None,
     source_glob: str = "*.h5",
-    source_channel_regex: str | None = None,
+    source_freq_id_regex: str | None = None,
     inventory: str | Path | None = None,
     inventory_name: str | None = None,
     source_root: str | Path | None = None,
@@ -218,9 +208,7 @@ def run_chime_scan(
     * ``--inventory-name <name>`` for a datatrawl named inventory, resolved
       through datatrawl's inventory root (default
       ``~/datatrawl-inventories/<name>/``); with ``--source-root <r>`` it
-      resolves as ``<r>/data/<name>/inventory.jsonl`` instead;
-    * ``--source-root <dir>`` alone for the legacy
-      ``<root>/data/<instrument>/inventory.jsonl`` layout.
+      resolves as ``<r>/data/<name>/inventory.jsonl`` instead.
 
     ``--select`` scopes the run to specific freq_ids; for the archive source it
     defaults to every freq_id the inventory contains (echoed before any
@@ -250,7 +238,8 @@ def run_chime_scan(
     # -- source: infer from the flags that name it ---------------------------
     # --inventory/--inventory-name only mean anything for the archive source, so
     # their presence names it; everything else keeps the historic local default
-    # (--source-root alone legitimately serves both layouts and never infers).
+    # (--source-root serves both sources -- the local input dir, or the survey
+    # root for --inventory-name -- and never infers).
     # Conflicting pairings are errors, not silent ignores.
     has_inventory_flags = inventory is not None or inventory_name is not None
     if source is None:
@@ -294,12 +283,11 @@ def run_chime_scan(
             )
         options["source_root"] = str(input_dir if input_dir is not None else source_root)
         options["source_glob"] = source_glob
-        if source_channel_regex:
+        if source_freq_id_regex:
             # The paired datatrawl LocalDirectorySource reads
-            # ``source_freq_id_regex``; older source plugins read the legacy
-            # key. Set both, but let an explicit --set of either key win.
-            options.setdefault("source_freq_id_regex", source_channel_regex)
-            options.setdefault("source_channel_regex", source_channel_regex)
+            # ``source_freq_id_regex``; an explicit --set of the key wins
+            # over this flag.
+            options.setdefault("source_freq_id_regex", source_freq_id_regex)
         if _selection_is_empty(select):
             raise SystemExit(
                 "chime-scan: --select is required for --source local (e.g. "
@@ -308,11 +296,9 @@ def run_chime_scan(
                 "--select defaults to every freq_id in the inventory."
             )
     elif source == "cadc-datatrail":
-        # datatrawl's CADC source reads ctx.options["inventory"] (explicit path)
-        # or ctx.options["root"] (the <root>/data/<instrument>/inventory.jsonl
-        # layout). Named inventories resolve through datatrawl's inventory root,
-        # so support them directly here by resolving to an explicit inventory
-        # path before calling the source.
+        # datatrawl's CADC source reads ctx.options["inventory"]; named
+        # inventories resolve through datatrawl's inventory root, so resolve
+        # everything to an explicit inventory path before calling the source.
         if inventory is not None and inventory_name is not None:
             raise SystemExit(
                 "chime-scan: pass either --inventory <inventory.jsonl> or "
@@ -322,18 +308,15 @@ def run_chime_scan(
             options["inventory"] = str(inventory)
         elif inventory_name is not None:
             options["inventory"] = str(_named_inventory_path(inventory_name, source_root))
-        elif source_root is not None:
-            options["root"] = str(source_root)
         else:
             raise SystemExit(
                 "chime-scan: --source cadc-datatrail needs --inventory "
-                "<inventory.jsonl>, --inventory-name <name> (resolved through "
-                "datatrawl's inventory root), or --source-root <dir> alone for "
-                "the <dir>/data/<instrument>/inventory.jsonl layout. Build the "
-                "inventory with `datatrawl survey` first; pass --source-root "
-                "only for --root-style surveys."
+                "<inventory.jsonl> or --inventory-name <name> (resolved through "
+                "datatrawl's inventory root; with --source-root <r> the name "
+                "resolves as <r>/data/<name>/inventory.jsonl). Build the "
+                "inventory with `datatrawl survey` first."
             )
-        inv_path = _inventory_path_from_options(options, inst.name)
+        inv_path = Path(options["inventory"])
         meta = _read_inventory_meta(inv_path)
         if meta and meta.get("telescope") and str(meta["telescope"]) != str(inst.name):
             raise SystemExit(

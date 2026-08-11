@@ -167,9 +167,8 @@ interrupt/resume check are listed at the end of that section.
 
 For a local scan, provide CHIME HDF5 baseband files whose names end in the
 selected `freq_id`, such as `baseband_<event>_844.h5`. For other layouts, pass
-`--source-channel-regex '<regex-with-one-capturing-group>'`; the value is
-stored as `source_freq_id_regex` for the current datatrawl source (the legacy
-key is also set for older plugins), and an explicit
+`--source-freq-id-regex '<regex-with-one-capturing-group>'`; the value is
+stored as `source_freq_id_regex` for the datatrawl source, and an explicit
 `--set 'source_freq_id_regex=...'` takes precedence over the flag.
 
 For a CADC/CANFAR scan, provide:
@@ -537,12 +536,11 @@ If the filenames do not end in `_<freq_id>.h5`, pass the parser override with
 one capturing group:
 
 ```bash
---source-channel-regex '<regex-with-one-capturing-group>'
+--source-freq-id-regex '<regex-with-one-capturing-group>'
 ```
 
-The flag is stored as `source_freq_id_regex` for the current datatrawl
-`LocalDirectorySource` (the legacy `source_channel_regex` key is also set for
-older plugins); an explicit `--set 'source_freq_id_regex=...'` takes
+The flag is stored as `source_freq_id_regex` for the datatrawl
+`LocalDirectorySource`; an explicit `--set 'source_freq_id_regex=...'` takes
 precedence over the flag.
 
 ---

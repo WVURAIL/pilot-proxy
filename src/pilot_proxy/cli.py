@@ -469,7 +469,7 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
         source_root=args.source_root,
         work_dir=args.work_dir,
         source_glob=args.source_glob,
-        source_channel_regex=args.source_channel_regex,
+        source_freq_id_regex=args.source_freq_id_regex,
         analyzer_options=analyzer_options,
     )
 
@@ -1264,15 +1264,13 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan.add_argument("--source-root", type=Path, default=None,
                             help="For --source local, an input directory alternative "
                                  "to --input-dir. For --source cadc-datatrail, the "
-                                 "datatrawl survey root used with --inventory-name, "
-                                 "or the legacy root containing "
-                                 "data/<instrument>/inventory.jsonl.")
+                                 "datatrawl survey root used with --inventory-name.")
     chime_scan.add_argument("--source", choices=["local", "cadc-datatrail"],
                             default=None,
                             help="local: files on disk; cadc-datatrail: stream from "
                                  "the archive. Default: inferred -- cadc-datatrail "
                                  "when --inventory/--inventory-name is given, local "
-                                 "otherwise (--source-root alone serves both layouts "
+                                 "otherwise (--source-root alone serves both sources "
                                  "and keeps the local default). An explicit value "
                                  "that conflicts with the flags is an error.")
     chime_scan.add_argument("--analyzer", choices=["pilot-proxy-detector"],
@@ -1302,14 +1300,13 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Per-pilot products + staging (default: <output-dir>/_per_pilot).")
     chime_scan.add_argument("--source-glob", default="*.h5")
     chime_scan.add_argument(
-        "--source-channel-regex",
+        "--source-freq-id-regex",
         default=None,
         help=(
-            "Filename->freq_id regex (one capturing group) for --source local. "
-            "Stored as source_freq_id_regex for the current paired datatrawl "
-            "source; the legacy source_channel_regex key is also set for older "
-            "plugins. An explicit --set 'source_freq_id_regex=...' takes "
-            "precedence over this flag."
+            "Filename->freq_id regex (one capturing group) for --source local, "
+            "stored as source_freq_id_regex for the paired datatrawl source. "
+            "An explicit --set 'source_freq_id_regex=...' takes precedence "
+            "over this flag."
         ),
     )
     chime_scan.add_argument("--weights-path", type=Path, default=None)

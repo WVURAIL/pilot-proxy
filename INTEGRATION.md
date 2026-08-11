@@ -117,9 +117,8 @@ baseband_<event>_844.h5
 baseband_<event>_829.h5
 ```
 
-The `chime-scan` flag `--source-channel-regex` stores its value as both
-`source_freq_id_regex` (read by the current paired datatrawl local source) and
-the legacy `source_channel_regex` key (read by older source plugins), so the
+The `chime-scan` flag `--source-freq-id-regex` stores its value as
+`source_freq_id_regex` (read by the paired datatrawl local source), so the
 flag overrides the filename parser directly. An explicit
 `--set 'source_freq_id_regex=...'` takes precedence over the flag. The
 equivalent explicit form remains available:
