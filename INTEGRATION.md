@@ -74,7 +74,7 @@ used in the test suite are fixtures for parity and orchestration tests.
 
 ---
 
-## Selection: CHIME `freq_id`, not ATSC channel
+## Selection: CHIME `freq_id` instead of ATSC channel
 
 `pilot-proxy chime-scan --select` accepts CHIME coarse-channel identifiers,
 called `freq_id`s. It does not accept ATSC physical-channel numbers. For

@@ -124,7 +124,7 @@ command -v nvidia-smi && nvidia-smi --query-gpu=name,compute_cap --format=csv
 command -v nvcc && nvcc --version
 ```
 
-If `nvidia-smi` is unavailable (it ships with the NVIDIA driver -- on WSL,
+If `nvidia-smi` is unavailable (it ships with the NVIDIA driver; on WSL,
 through the Windows driver's WSL CUDA support), use `make test-python` instead
 of `make test` or `make test-kernel`. The
 `make release-check` target adds CPU C/C++ reference checks, profile and layout
@@ -246,13 +246,13 @@ The shipped receiver profiles have different roles and evidential status:
 - `chime_dtv_fengine.json` is the target CHIME DTV adapter profile used by the
   current integration: 2048 feed-polarization streams, inverted spectral sense,
   descending RF channel order, and `frame_size_samples=16384`. The 16384-sample
-  frame is the target for the CHIME F-engine upgrade, not a claim about the
+  frame is the target for the CHIME F-engine upgrade rather than a claim about the
   currently deployed frame. The profile is frame-verified
   (`profile_status` in the file); still verify these values
   against the data product used for an operational run.
 - `chord_dtv_fengine.json` and `chord_pathfinder_dtv_fengine.json` are the
   CHORD / CHORD-pathfinder adapter profiles for the kotekan (`chord` branch)
-  integration. Both share the CHORD channelization -- 3.2 GS/s ADC, first
+  integration. Both share the CHORD channelization: 3.2 GS/s ADC, first
   Nyquist zone, 16384-point PFB, 8192 coarse channels of exactly 195312.5 Hz,
   upright spectral sense, ascending channel order, channel RF center =
   `coarse_channel_index * 195312.5 Hz` (the kotekan `freq_id` namespace) --
@@ -415,7 +415,7 @@ print(kernel.version.as_string())
 PY
 ```
 
-This output describes the CUDA kernel, not the complete receiver frame.
+This output describes the CUDA kernel rather than the complete receiver frame.
 `detector_window_samples=128` is `K`. It is both the detector-row length and the
 number of coefficients in each packed weight vector: target, lower reference,
 and upper reference. It is **not** the receiver frame length.
@@ -450,7 +450,7 @@ pilot-proxy check-layout \
     --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
-This command checks the configuration, not a CHIME file. Because the CHIME
+This command checks the configuration rather than a CHIME file. Because the CHIME
 profile is marked as requiring data-product verification, compare its frame
 size, stream count, and ordering with the operational data product separately.
 
@@ -475,8 +475,8 @@ the per-pilot products and defers stacking until a compatible channel subset is
 chosen with `pilot-proxy chime-combine`. Two constraints determine how we run
 it:
 
-- **Selection uses the CHIME `freq_id` coarse-channel namespace**, not ATSC
-  physical-channel numbers. For `--source cadc-datatrail`, omitting `--select`
+- **Selection uses the CHIME `freq_id` coarse-channel namespace** instead
+  of ATSC physical-channel numbers. For `--source cadc-datatrail`, omitting `--select`
   scans each `freq_id` present in the inventory. The command prints that set
   before staging begins. Pass `--select` to restrict it. The
   `--inventory` and `--inventory-name` flags also let `chime-scan` infer the

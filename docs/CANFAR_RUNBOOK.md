@@ -368,7 +368,7 @@ Before spending GPU time on the full archive, test the detector on a channel
 that should approximate the no-pilot hypothesis, H0. Choose a DTV pilot
 frequency that lies inside the selected CHIME coarse channel but whose physical
 channel has no station listed in the 500-mile census. This is a census-based
-control selection, not a propagation prediction. Do not choose an arbitrary
+control selection rather than a propagation prediction. Do not choose an arbitrary
 coarse channel with no nominal ATSC pilot in band: the analyzer marks that case
 invalid and does not form an F-statistic.
 
@@ -394,7 +394,7 @@ with a known pilot. Then:
 2. Over frames with `valid = 1`, compare the mean `fstat_raw` with `mu0`. Also
    inspect the valid-frame mask fraction. Under the tested white-noise model,
    the corrected threshold gives a fraction near one half; on real data this is
-   a diagnostic expectation, not a pass condition by itself.
+   a diagnostic expectation rather than a pass condition by itself.
 3. If the control result is strongly displaced, check the weight bank,
    `mask_rule`, channel selection, and structured interference before expanding
    the scan.
@@ -406,14 +406,14 @@ instrument and archive path that the synthetic regression cannot cover.
 ## Definitive-run pre-flight
 
 For a run intended to process the archive once and never again, hold the
-launch to this checklist. Every item is a real failure mode, not a
-hypothetical.
+launch to this checklist. Every item is a real failure mode rather than
+a hypothetical one.
 
 1. **All gates, in full.** S2.1--S2.5 with no shortcuts. The S2.5
-   interrupt/resume rehearsal is doubly mandatory: a multi-day run WILL
+   interrupt/resume rehearsal is mandatory, since a multi-day run will
    cross session restarts, and resume is the mechanism that makes a
    session death cost minutes instead of days.
-2. **Binary insurance at launch, not later.** The survey pins
+2. **Binary insurance at launch.** The survey pins
    `kernel_sha256`, and kernel builds are not byte-reproducible: identical
    sources, flags, and toolkit produce different bytes on each invocation
    (nvcc embeds per-invocation artifacts). The copy is the insurance,
@@ -426,12 +426,12 @@ hypothetical.
 
    Any resume after any rebuild passes the detector option
    `lib_path=<preserved copy>`.
-3. **Inventory completeness before, not after.** Confirm the survey
+3. **Inventory completeness before the run.** Confirm the survey
    inventory covers every selected `freq_id` (all 23 for the DTV band)
-   and explain any channel whose unit selection looks anomalous ---
+   and explain any channel whose unit selection looks anomalous;
    sparse channels and late-starting spans are only acceptable when the
    archive genuinely holds no more data, and that should be established
-   before the run, not discovered after it.
+   before the run rather than discovered after it.
 4. **Session-lifetime plan.** Know why the previous scan session ended
    (expiry vs crash) and budget the relaunch cadence around the session
    lifetime. Checkpointing (`--checkpoint-every 50`) plus unit-level
