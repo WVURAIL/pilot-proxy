@@ -3,8 +3,8 @@
 
 Consumes two declared inputs and produces the paper's two case-study figures
 plus their supporting tables. Nothing here touches the archive; both inputs
-already exist (the scan's per-pilot high-resolution spectra -- or a
-pre-detected line CSV -- and the FCC/ISED 500-mile census).
+already exist: the scan's per-pilot high-resolution spectra or a
+pre-detected line CSV, and the FCC/ISED 500-mile census.
 
 Input schemas (CSV with a header row; extra columns are ignored)
 -----------------------------------------------------------------
@@ -25,10 +25,10 @@ lines:   rf_channel:int, offset_hz:float (about the channel's nominal
          from a scan work dir's per-pilot products: each carries the
          high-resolution time-averaged spectrum of its coarse channel
          (integrated_spectrum_before/after_mask; natural FFT order, bin 0
-         at the coarse-channel centre, `sense` flipping the frequency
+         at the coarse-channel center, `sense` flipping the frequency
          axis). The spectrum's bin spacing is fs/nfft, derived from the
          product as bin_enbw_hz * detector_window_samples / nfft --
-         `bin_enbw_hz` itself is the DETECTOR's bin width (fs/K), not the
+         `bin_enbw_hz` itself is the DETECTOR's bin width (fs/K) rather than the
          spectrum's.
 
 Association rule (pluggable, recorded per line in association.csv)
@@ -138,7 +138,7 @@ def load_census(path: Path) -> list[Transmitter]:
 def _bin_offsets_hz(nfft: int, sense: int, center_hz: float,
                     pilot_hz: float, bin_spacing_hz: float) -> np.ndarray:
     """Offset from the nominal pilot for every spectrum bin (natural FFT
-    order: bin 0 = DC = coarse-channel centre, upper half negative)."""
+    order: bin 0 = DC = coarse-channel center, upper half negative)."""
     k = np.arange(int(nfft))
     f_bb = np.where(k < nfft // 2, k, k - nfft).astype(np.float64) * bin_spacing_hz
     return center_hz + sense * f_bb - pilot_hz
@@ -208,7 +208,7 @@ def extract_lines_from_run(work_dir: Path, *, spectrum: str = "before",
         spacing = enbw * kwin / nfft
         offs = _bin_offsets_hz(nfft, sense, center, pilot, spacing)
         sel = np.abs(offs) <= float(search_window_hz)
-        # DC guard: the coarse-channel centre bin carries the known DC spur
+        # DC guard: the coarse-channel center bin carries the known DC spur
         # (dominant on the translator-oscillator channels); never call it a
         # carrier line
         k = np.arange(nfft)
@@ -414,7 +414,7 @@ def _figures(records, chan_stats, rho, ci, out_dir: Path,
     fig, ax = plt.subplots(figsize=(5.2, 3.4))
     ax.plot(xs[qual], ys[qual], "o", ms=5)
     excl = finite & ~qual
-    if excl.any():   # pre-registered exclusions shown, not hidden
+    if excl.any():   # pre-registered exclusions are shown rather than hidden
         ax.plot(xs[excl], ys[excl], "o", ms=4, mfc="none", color="0.6")
     for c, q, f in zip(chan_stats, qual, finite):
         if f:

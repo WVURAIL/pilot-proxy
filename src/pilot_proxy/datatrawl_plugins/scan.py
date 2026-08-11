@@ -73,7 +73,7 @@ def _read_inventory_meta(inventory_path: Path) -> dict | None:
 def _freq_ids_in_inventory(inventory_path: Path) -> list[int]:
     """Sorted distinct freq_ids across the inventory's rows.
 
-    Rows without a freq_id (companion shapes: gains, N2) are skipped -- they are
+    Rows without a freq_id (companion shapes: gains, N2) are skipped, since they are
     exactly the rows the source's freq_id filter never serves to a per-pilot
     run. Malformed lines are skipped too, matching the source's tolerant
     ``enumerate``."""
@@ -216,7 +216,7 @@ def run_chime_scan(
     with the rows). Local scans have no inventory and still require it.
 
     The detector analyzer's CUDA kernel is GPU-only, so ``--analyzer pilot-proxy-detector``
-    requires a GPU node -- a missing ``cupy`` is caught up front (rather than
+    requires a GPU node. A missing ``cupy`` is caught up front (rather than
     surfacing as every file failing to analyze). There is no CPU detector path for
     production (the CPU reference exists only as a test fixture), so there is no
     GPU/CPU toggle here.
@@ -240,7 +240,7 @@ def run_chime_scan(
     # their presence names it; everything else keeps the historic local default
     # (--source-root serves both sources -- the local input dir, or the survey
     # root for --inventory-name -- and never infers).
-    # Conflicting pairings are errors, not silent ignores.
+    # Conflicting pairings are errors rather than silent ignores.
     has_inventory_flags = inventory is not None or inventory_name is not None
     if source is None:
         source = "cadc-datatrail" if has_inventory_flags else "local"
@@ -346,16 +346,17 @@ def run_chime_scan(
     rdr = registry.get("reader", reader_name)()
     analyzer_cls = registry.get("analyzer", analyzer)
 
-    # Fail fast on missing runtime artifacts -- for pilot-proxy-detector that is cupy,
-    # the CUDA kernel library, and the weight bank -- before any file is staged,
-    # instead of quarantining every unit or dying with a raw error mid-scan.
+    # Fail fast on missing runtime artifacts before any file is staged, instead
+    # of quarantining every unit or dying with a raw error mid-scan. For
+    # pilot-proxy-detector, that means cupy, the CUDA kernel library, and the
+    # weight bank.
     _ok, _problems = analyzer_cls().preflight(ctx)
     if not _ok:
         raise SystemExit(
             f"chime-scan: {analyzer} preflight failed:\n  - "
             + "\n  - ".join(_problems)
             + "\n  (a detector run needs a GPU node with a built "
-            "cuda/libfstatistic.so and the weight bank -- run setup_env.sh on a "
+            "cuda/libfstatistic.so and the weight bank; run setup_env.sh on a "
             "GPU node.)")
 
     runs = analyzer_cls().plan_runs(ctx, select)
@@ -375,7 +376,7 @@ def run_chime_scan(
                 if isinstance(sub_sel, (list, tuple)) else str(sub_sel))
         if not units:
             if verbose:
-                print(f"  [chime-scan] select={sub_sel}: no files matched -- skipping",
+                print(f"  [chime-scan] select={sub_sel}: no files matched; skipping",
                       flush=True)
             continue
         out = str(work / f"{stem}.npz")
@@ -395,15 +396,16 @@ def run_chime_scan(
         # The engine only writes the product if at least one unit was accumulated;
         # if every unit failed/quarantined there is no product (or it has zero
         # frames). Treat that as an error rather than silently feeding an absent/
-        # empty product to combine -- it usually signals a systemic problem
-        # (missing GPU, a bad inventory) that would hit every channel, not just
+        # empty product to combine, since it usually signals a systemic problem
+        # (missing GPU, a bad inventory) that would hit every channel rather than
         # bad input for this one. Use n_done (total accumulated, this run plus any
-        # resumed), not n_new, so a relaunch that finds a channel already complete
-        # (n_new == 0) is recognised as produced rather than mistaken for a failure.
+        # resumed) instead of n_new, so a relaunch that finds a channel already
+        # complete (n_new == 0) is recognized as produced rather than mistaken
+        # for a failure.
         produced = Path(out).exists() and int(getattr(result, "n_done", 0)) > 0
         if not produced:
             raise SystemExit(
-                f"chime-scan: freq_id {sub_sel}: no usable product -- "
+                f"chime-scan: freq_id {sub_sel}: no usable product; "
                 f"{int(getattr(result, 'n_failed', 0))} of {len(units)} unit(s) "
                 f"failed, {int(getattr(result, 'n_quarantined', 0))} quarantined "
                 f"(see {quarantine_path}). For pilot-proxy-detector this is most often a "
@@ -413,7 +415,7 @@ def run_chime_scan(
 
     if not product_paths:
         raise SystemExit(
-            "chime-scan: no products produced -- no files matched the selection "
+            "chime-scan: no products produced; no files matched the selection "
             f"(source={source}, select={select})"
         )
 

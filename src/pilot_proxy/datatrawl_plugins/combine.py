@@ -2,12 +2,12 @@
 """Combine per-pilot datatrawl analyzer products into PilotProxy's canonical products.
 
 The detector analyzer fans out one ``<channel>.npz`` per coarse channel.
-This step stacks those per-pilot products along the pilot axis -- aligning
+This step stacks those per-pilot products along the pilot axis, aligning
 frames by (event, frame-in-file) identity, so pilots that processed different
 event sets stack over exactly their common identities with drops reported --
 and feeds the SAME writer functions ``run_chime_analysis`` uses, so the combined
 ``chime_detector_outputs`` / ``chime_spectrogram_cache`` / ``chime_reductions_10s``
-/ ``mask_summary`` are byte-identical to a single-process run -- which is what
+/ ``mask_summary`` are byte-identical to a single-process run, which is what
 keeps the existing plots and ``validate-products`` working unchanged on datatrawl
 output.
 
@@ -108,7 +108,7 @@ def _align_frames(
             for z, s in zip(products, sets))
         raise CombineEmptyIntersectionError(
             f"combine: the {len(products)} per-pilot products share no common "
-            f"(event, frame) identity -- there is nothing every pilot saw, so an "
+            f"(event, frame) identity; there is nothing every pilot saw, so an "
             f"event-keyed stack over all of them is empty. Per-pilot inventory: "
             f"{counts}. Stack a channel subset instead (`pilot-proxy "
             f"chime-combine --report` shows the presence histogram and the "
@@ -273,11 +273,11 @@ def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
     Each product's ``frame_index`` is a 0-based *positional* counter (the analyzer
     writes ``arange(n_frames)``), so it is only comparable across pilots when they
     processed the *same files in the same order*. A length/grid mismatch therefore
-    means the pilots saw different files -- typically a quarantined or missing file
-    for one channel -- which shifts every subsequent frame in time. Stacking then
-    would silently fuse time-misaligned frames, so we refuse and explain instead of
-    intersecting (a positional intersection across differing file sets is a
-    footgun, not a fix).
+    means the pilots saw different files (typically a quarantined or missing
+    file for one channel), which shifts every subsequent frame in time. Stacking
+    then would silently fuse time-misaligned frames, so we refuse and explain
+    instead of intersecting. A positional intersection across differing file
+    sets would hide the misalignment rather than fix it.
     """
     ref_fi = np.asarray(products[0]["frame_index"], dtype=np.int64)
     grids = [np.asarray(z["frame_index"], dtype=np.int64) for z in products]
@@ -329,22 +329,22 @@ def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
         ev = (f", events={events[i]}" if events is not None else "")
         lines.append(f"  {_label(z)}: {g.size} frames {rng}{ev}")
     if not grids_match:
-        why = ("different frame counts -- the pilots processed different numbers "
+        why = ("different frame counts: the pilots processed different numbers "
                "of files")
     elif not events_match:
-        why = ("equal frame counts but different source events -- the pilots "
+        why = ("equal frame counts but different source events: the pilots "
                "processed different acquisitions, so frame N is a different time "
                "in each")
     else:
         why = ("equal frame counts and event order but different per-frame unit "
-               "positions -- a file has a different number of frames for at least "
+               "positions: a file has a different number of frames for at least "
                "one pilot")
     raise ValueError(
         "combine: per-pilot products are not time-aligned and cannot be stacked "
         f"({why}). Because frame_index is a 0-based positional counter, frames only "
         "align when every pilot saw the same events in the same order; a "
         "quarantined/missing file for one channel shifts every later frame in "
-        "time. Fix the inputs -- re-pull the missing file(s) for the short "
+        "time. Fix the inputs: re-pull the missing file(s) for the short "
         "channel(s), or drop the affected channel(s) from this combine.\n"
         "Per-pilot frame inventory:\n" + "\n".join(lines)
     )
@@ -370,9 +370,9 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
     inconsistent products into one canonical output.
 
     `detector_version` gets token-aware treatment: its `pilot-proxy/<version>`
-    and `source=` components are build provenance, not geometry, so products
-    from different mid-survey builds -- including builds either side of a
-    release version bump -- stack freely as long as every other token (kernel
+    and `source=` components are build provenance rather than geometry, so products
+    from different mid-survey builds (including builds on either side of a
+    release version bump) stack freely as long as every other token (kernel
     hash, K, schema) matches. Returns provenance notes:
     {"detector_versions": [...]} when more than one build contributed, so the
     full stamps survive into the combined product.
@@ -573,7 +573,7 @@ def combine_detector_products(
 
     # per-channel diagnostic paired with the integrated spectra, which are
     # accumulated at analyzer time over each pilot's FULL processed frame set
-    # and cannot be re-subset here -- computed over the full set to match.
+    # and cannot be re-subset here, so it is computed over the full set to match.
     def _masked_fraction(z: Mapping[str, Any]) -> float:
         rej = np.asarray(z["reject_mask"]).reshape(-1).astype(np.float64)
         n_valid = float(np.asarray(z["valid"]).reshape(-1).sum())
@@ -585,7 +585,7 @@ def combine_detector_products(
     physical_channel = _scalars(products, "physical_channel", np.int32)
     pilot_frequency_hz = _scalars(products, "pilot_frequency_hz", np.float64)
     chime_frequency_hz = _scalars(products, "chime_frequency_hz", np.float64)
-    # freq_id is recorded by the analyzer (derived from the centre frequency); it
+    # freq_id is recorded by the analyzer (derived from the center frequency); it
     # is the coarse-channel handle the deferred 6 MHz mask-expansion needs to find
     # a detected pilot's sibling channels. Guard for older products without it.
     freq_id = (
@@ -602,7 +602,7 @@ def combine_detector_products(
     snr_shelf_db = _stack_cols(products, "snr_shelf_db", np.float64)
     # per-channel products renamed `mask` -> `reject_mask` at schema v2 (1 = discard,
     # positive excess); the canonical combined outputs keep the `mask` field name, so
-    # only this read changes -- write_* below stays byte-identical.
+    # only this read changes; write_* below stays byte-identical.
     mask = _stack_cols(products, "reject_mask", np.uint8)
     valid = _stack_cols(products, "valid", np.uint8)
     baseband_power_linear = _stack_cols(products, "baseband_power_linear", np.float64)
@@ -707,7 +707,7 @@ def combine_detector_products(
 
     # run_config / stats / input_manifest, so validate-products accepts scan output.
     # These carry the schema-gated fields (detector_contract, mask_policy, geometry)
-    # honestly labelled as chime-scan provenance -- not a byte-faithful imitation of
+    # honestly labeled as chime-scan provenance rather than a byte-faithful imitation of
     # a single run_chime_analysis run.
     contract = _detector_contract_from(products, nfft)
     reference_placement = _combined_reference_placement_summary(products)

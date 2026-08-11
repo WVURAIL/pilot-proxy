@@ -41,7 +41,7 @@ def package_source_sha256(package_root: Path | str | None = None) -> str:
 
     Development versions can span many commits while retaining the same package
     version.  This digest makes checkpoint compatibility depend on the actual
-    implementation that produced the product, not only ``__version__``.
+    implementation that produced the product rather than only ``__version__``.
 
     The digest is memoized per process: a long-running scan stamps every
     product with the tree as first observed, even if source files change on
@@ -87,11 +87,11 @@ def sidecar_manifest_path(path: Path | str | None) -> Path | None:
 # actually ran. Neither constrains the numbers. A version bump made for a
 # release (0.3.0.dev0 -> 1.0.0) changes both tokens without touching detector
 # math, and conversely a tree can move many commits while staying at one
-# version -- so the label is the weaker of the two, and the source digest is
+# version. Thus the label is the weaker of the two, and the source digest is
 # what genuinely identifies an implementation.
 #
-# The remaining tokens -- kernel version, kernel binary hash, schema tag and K
-# -- are geometry: they are what resume and cross-pilot stacking actually
+# The remaining tokens (kernel version, kernel binary hash, schema tag and K)
+# are geometry: they are what resume and cross-pilot stacking actually
 # depend on, alongside the separately compared weights hashes, detector
 # contract JSON, mask rule and reference placement.
 #

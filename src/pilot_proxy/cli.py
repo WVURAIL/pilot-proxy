@@ -440,7 +440,7 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
                 "chime-scan needs datatrawl installed (it is not on PyPI): "
                 "pip install -e path/to/datatrawl, then pip install -e . here."
             )
-        raise  # a real import error inside pilot-proxy -- don't mask it as 'install datatrawl'
+        raise  # a real import error inside pilot-proxy; do not mask it as 'install datatrawl'
     analyzer_options = _parse_chime_scan_set_options(args.set_option)
     for key, value in {
         "weights_path": args.weights_path,
@@ -1172,9 +1172,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     census_cmd = _add_command(
         "analyze-transmitter-census",
-        "Case-study analysis over a detected-carrier line list -- or "
+        "Case-study analysis over a detected-carrier line list (or one "
         "extracted directly from a scan's per-pilot high-resolution spectra "
-        "(--lines-from-run) -- and the FCC/ISED transmitter census: "
+        "with --lines-from-run) and the FCC/ISED transmitter census: "
         "carrier-offset dispersion by service class "
         "(association table, class-split and spread-vs-composition figures, "
         "Spearman rank correlation with bootstrap CI).",
@@ -1268,7 +1268,7 @@ def build_parser() -> argparse.ArgumentParser:
     chime_scan.add_argument("--source", choices=["local", "cadc-datatrail"],
                             default=None,
                             help="local: files on disk; cadc-datatrail: stream from "
-                                 "the archive. Default: inferred -- cadc-datatrail "
+                                 "the archive. Default: inferred; cadc-datatrail "
                                  "when --inventory/--inventory-name is given, local "
                                  "otherwise (--source-root alone serves both sources "
                                  "and keeps the local default). An explicit value "

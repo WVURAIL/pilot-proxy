@@ -1,7 +1,7 @@
 # coding=utf-8
 """Event-keyed combine: frames align by (event, frame-in-file) identity.
 
-The archive is ragged -- not every channel holds every event -- so positional
+The archive is ragged (not every channel holds every event), so positional
 frame stacking cannot work at production scale. These tests cover:
 
   * the alignment core: pass-through parity on fully aligned inputs, reference
@@ -88,7 +88,7 @@ def test_align_ragged_intersects_in_reference_order():
     aligned, frame_index, info = _align_frames([a, b])
     assert info["n_frames_common"] == 2 and info["n_events_common"] == 2
     assert info["frame_event_key"] == ["200", "300"]  # reference (a) order
-    # b's frames gathered by identity, not position
+    # b's frames gathered by identity rather than position
     assert np.array_equal(aligned[1]["fstat_raw"].reshape(-1),
                           b["fstat_raw"].reshape(-1)[[0, 1]])
     assert np.array_equal(aligned[0]["fstat_raw"].reshape(-1),
@@ -339,7 +339,7 @@ def test_resume_provenance_token_policy():
     token difference must.
 
     Both sites import detector_version_geometry, so this asserts against the
-    shipped helper rather than a re-implementation -- an earlier copy of this
+    shipped helper rather than a re-implementation. An earlier copy of this
     test re-derived the rule inline and hardcoded one version on both sides,
     which is exactly why the 1.0.0 release bump reached production before
     anything caught it.

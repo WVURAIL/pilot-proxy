@@ -3,7 +3,7 @@
 
 ``cuda/fxfft_ref.c`` is the C companion to :func:`pilot_proxy.fxfft.fxfft`.
 This suite compiles it at every supported length and requires bit-identical
-output against the Python reference -- the same standard the frozen
+output against the Python reference, the same standard the frozen
 ``fxfft256_ref.c`` is held to, extended across the family.
 
 Two properties matter beyond "it computes an FFT":

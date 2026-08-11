@@ -2,15 +2,17 @@
 """Resume / relaunch safety for the ``pilot-proxy-detector`` analyzer.
 
 A multi-day CANFAR detector run outlives a single interactive session, so
-correctness on relaunch is load-bearing: a killed run must continue from its
-checkpoint, not start over (scarce GPU) and not corrupt the product. These
+correctness on relaunch is essential: a killed run must continue from its
+checkpoint without starting over (scarce GPU) and without corrupting the
+product. These
 tests drive the analyzer and the real scan entry point with an injected CPU
 detector (no GPU) and assert:
 
   * a stream interrupted mid-way, resumed from its checkpoint, yields a product
     byte-identical to one consumed in a single pass (no reprocessing, no drift);
-  * relaunching a scan whose channel is already complete is a no-op, not an
-    error (the produced-check counts resumed units, not just new ones);
+  * relaunching a scan whose channel is already complete is a no-op rather
+    than an error (the produced-check counts resumed units, not just new
+    ones);
   * a product built with a per-file cap refuses to be silently "completed" by an
     uncapped run.
 """
@@ -250,9 +252,9 @@ def test_analyzer_resume_allows_release_version_bump(tmp_path, monkeypatch, caps
 
     Bumping __version__ (0.3.0.dev0 -> 1.0.0) edits a file inside the package,
     so BOTH build-identity tokens of detector_version move at once: the label
-    and the source tree hash. Every token that constrains the numbers -- kernel
+    and the source tree hash. Every token that constrains the numbers (kernel
     hash, K, schema, and the separately compared weights hashes, contract,
-    mask rule and reference placement -- is unchanged, so the resume must
+    mask rule and reference placement) is unchanged, so the resume must
     continue and say so.
     """
     import pilot_proxy

@@ -67,7 +67,7 @@ def resolve_baseband_frequency_hz(
     """Resolve the injected tone's baseband frequency from one specification.
 
     Exactly one of ``baseband_frequency_hz`` (relative to the file's channel
-    centre), ``pilot_frequency_hz`` (absolute RF), or ``physical_channel``
+    center), ``pilot_frequency_hz`` (absolute RF), or ``physical_channel``
     (ATSC channel, nominal pilot) must be given.
     """
     provided = [
@@ -89,7 +89,7 @@ def resolve_baseband_frequency_hz(
     if abs(baseband_frequency_hz) > limit:
         raise ValueError(
             f"baseband tone frequency {baseband_frequency_hz:.1f} Hz is outside "
-            f"+/-{limit:.1f} Hz of this file's channel centre "
+            f"+/-{limit:.1f} Hz of this file's channel center "
             f"({center_hz/1e6:.6f} MHz); wrong freq_id for this pilot?"
         )
     return float(baseband_frequency_hz)
@@ -316,7 +316,7 @@ def build_parser() -> argparse.ArgumentParser:
                         ))
     frequency = parser.add_mutually_exclusive_group(required=True)
     frequency.add_argument("--baseband-frequency-hz", type=float,
-                           help="Tone frequency relative to each file's channel centre.")
+                           help="Tone frequency relative to each file's channel center.")
     frequency.add_argument("--pilot-frequency-hz", type=float,
                            help="Absolute RF pilot frequency; converted per file.")
     frequency.add_argument("--physical-channel", type=int,

@@ -5,7 +5,7 @@ datatrawl survey writes inventory metadata with the telescope's canonical
 reader. For CHIME that canonical reader is ``chime-baseband`` (complex64), but
 the detector analyzer needs the PilotProxy-specific ``chime-baseband-packed``
 reader so it can losslessly repack native uint8 samples.
-These tests make wrong reader pairings fail loudly instead of silently producing
+These tests make wrong reader pairings fail with a clear error instead of silently producing
 nonsense.
 """
 from __future__ import annotations

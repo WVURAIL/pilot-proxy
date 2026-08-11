@@ -6,7 +6,7 @@ artifact; this suite gates the generalization that serves other transform
 lengths, and in particular the two properties the generalization rests on:
 
 1. the length-n table is an *exact* decimation of the master (identical
-   integers, not a re-derivation), so the tie analysis and exact-rounding
+   integers rather than a re-derivation), so the tie analysis and exact-rounding
    argument established on the master are inherited by every member; and
 2. the general transform reproduces the frozen one bit-for-bit at n = 256.
 

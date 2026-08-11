@@ -312,7 +312,7 @@ def test_provenance_and_reject_mask_rename(tmp_path):
     a.save(str(out))
     got = np.load(out)
 
-    # rename propagated: the per-channel product uses reject_mask, not mask
+    # rename propagated: the per-channel product uses reject_mask rather than mask
     assert "reject_mask" in got.files
     assert "mask" not in got.files
 

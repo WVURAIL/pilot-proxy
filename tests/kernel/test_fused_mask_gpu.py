@@ -17,7 +17,7 @@ exact fine powers --- no tolerances, every frame. Gates:
 4. last-block determinism: 20 repeated launches produce identical mask
    and fine-power bits (exercises the completion-counter epilogue under
    real grid scheduling, the property the CPU emulation cannot probe);
-5. rate report (printed, not asserted): deployed mask form vs the
+5. rate report (printed rather than asserted): deployed mask form vs the
    fused-powers form at 2048 streams.
 
 The CPU-side verification (threaded emulation, pthread barrier, 2M-trial

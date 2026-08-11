@@ -16,7 +16,7 @@ Acceptance is bit-equality with the composed path --- no tolerances:
 3. production form: tap pointer NULL, fine + marginal outputs unchanged
    (the tap is genuinely optional; row sums never touch global memory).
 
-The timing report (printed, not asserted) gives the deployment-footprint
+The timing report (printed rather than asserted) gives the deployment-footprint
 numbers: fused without tap (production), fused with tap, and the
 composed three-launch chain, against the ~41.9 ms CHIME frame cadence.
 

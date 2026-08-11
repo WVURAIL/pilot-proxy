@@ -9,7 +9,7 @@ two referee-facing results:
 * **Recovery linearity** --- mean corrected pilot excess
   ``rho_hat = mean(pilot_excess_corrected[valid])`` per point, with standard
   errors, and the weighted linear fit ``rho_hat = floor + gain * a^2`` against
-  injected tone power. Slope-one behaviour in the signal-dominated regime is
+  injected tone power. Slope-one behavior in the signal-dominated regime is
   the "recovered tracks injected" claim; the intercept is the channel's
   ambient floor, anchored by the mandatory ``a = 0`` control point (which the
   injection harness guarantees is byte-identical to the source data).

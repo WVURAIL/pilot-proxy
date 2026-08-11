@@ -11,10 +11,10 @@ Data path (per coarse channel / pilot, fanned out one ``<channel>.npz`` each):
 
 * the ``chime-baseband-packed`` reader yields one raw ``uint8 [nfft, n_feeds]``
   frame per chunk (native offset-binary 4+4-bit);
-* the analyzer reshapes it to PilotProxy's normalised ``(n_feeds, 1, nfft)`` block and
+* the analyzer reshapes it to PilotProxy's normalized ``(n_feeds, 1, nfft)`` block and
   calls ``pack_chime_block_for_detector`` with ``sample_encoding`` =
   native-offset-binary, which takes the LOSSLESS repack route (no calibration
-  scale / requantisation -- the native int4 grid passes straight through);
+  scale or requantization; the native int4 grid passes straight through);
 * ``detector_fn(packed=packed.packed, weights=weights, kernel=kernel)`` yields
   per-frame target/reference powers; the positive-excess mask + dB metrics come
   from ``dtv_units`` exactly as ``_append_detection_rows`` computes them.
@@ -270,9 +270,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
 
     # -- selection / fan-out (per CHIME coarse channel / freq_id) -----------
     def resolve_selection(self, ctx: RunContext, spec: Any) -> Any:
-        # --select is CHIME freq_id (coarse-channel indices) -- the namespace the
+        # --select is CHIME freq_id (coarse-channel indices), the namespace the
         # CADC inventory and filenames key on. One freq_id is one pilot; the
-        # product is labelled with the ATSC channel that pilot falls in.
+        # product is labeled with the ATSC channel that pilot falls in.
         if spec is None:
             return None
         if isinstance(spec, (list, tuple)):
@@ -311,7 +311,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
 
         Returns False when there is no prior product (fresh build). Raises
         SystemExit when a prior product exists but was built with incompatible
-        parameters -- so a capped smoke product is never silently "completed"
+        parameters, so a capped smoke product is never silently "completed"
         by a full run, and a different channel's product is never resumed into
         this one.
         """
@@ -345,7 +345,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             raise SystemExit(
                 f"pilot-proxy-detector: product {path} was built with "
                 f"max_chunks_per_file={_s}, but this run requests {_r}. A capped "
-                f"product cannot be completed by a different cap -- use a clean "
+                f"product cannot be completed by a different cap; use a clean "
                 f"--output-dir."
             )
         saved_fid = int(data["freq_id"][0])
@@ -528,7 +528,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 and not weights_path.exists()
             ):
                 problems.append(f"detector weight bank not found: {weights_path}")
-        except Exception as exc:  # noqa: BLE001 - preflight should report, not crash.
+        except Exception as exc:  # noqa: BLE001 - preflight should report rather than crash.
             problems.append(f"detector preflight failed: {type(exc).__name__}: {exc}")
         return (not problems), problems
 
@@ -546,7 +546,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             SPECTRAL_SENSE_INVERTED if sense == -1 else SPECTRAL_SENSE_NORMAL
         )
 
-        # pilot / channel geometry from the channel-centre frequency
+        # pilot / channel geometry from the channel-center frequency
         f_center_hz = float(first_meta["f_center_hz"])
         self._coarse_center_hz = f_center_hz
         meta_streams = first_meta.get("num_input_streams")
@@ -563,16 +563,16 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         physical_channel = nearest_atsc_physical_channel(f_center_hz)
         if physical_channel is None:
             raise ValueError(
-                f"detector analyzer: coarse centre {f_center_hz:.0f} Hz is not near "
+                f"detector analyzer: coarse center {f_center_hz:.0f} Hz is not near "
                 "any ATSC pilot"
             )
         self._physical_channel = int(physical_channel)
         self._f0_hz = float(getattr(inst, "f0_mhz", 800.0)) * 1e6
         self._freq_id = chime_freq_id_from_hz(f_center_hz, self._f0_hz)
         self._pilot_rf_hz = float(physical_channel_to_pilot_hz(self._physical_channel))
-        # Validate the *first* file against the requested freq_id -- begin() fixes
+        # Validate the *first* file against the requested freq_id. begin() fixes
         # the product identity here, and the per-file guard only protects later
-        # files against this. A mislabelled filename / wrong inventory record would
+        # files against this. A mislabeled filename or wrong inventory record would
         # otherwise silently redefine the product's freq_id.
         sel = list(getattr(ctx, "selection", None) or [])
         if sel:
@@ -580,12 +580,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             if self._freq_id != requested:
                 raise ValueError(
                     f"detector analyzer: --select requested freq_id {requested}, but "
-                    f"the first file's centre {f_center_hz:.0f} Hz implies freq_id "
+                    f"the first file's center {f_center_hz:.0f} Hz implies freq_id "
                     f"{self._freq_id}. Refusing to build a {self._freq_id} product "
-                    f"under a {requested} request -- check the file naming / inventory."
+                    f"under a {requested} request; check the file naming and inventory."
                 )
         # In-band test: the detector's weights target the pilot bin *inside* this
-        # coarse channel. If the pilot is more than fs/2 from centre it lives in a
+        # coarse channel. If the pilot is more than fs/2 from center it lives in a
         # different coarse channel (a wrong --select freq_id), so the detection is
         # meaningless. Flag it; consume_file then emits an explicitly invalid
         # product (mask=0, valid=0) instead of fabricating detections.
@@ -594,12 +594,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._pilot_in_band = abs(_expected_offset) < (_coarse_width / 2.0)
         if not self._pilot_in_band:
             warnings.warn(
-                f"detector analyzer: freq_id {self._freq_id} (centre "
+                f"detector analyzer: freq_id {self._freq_id} (center "
                 f"{f_center_hz / 1e6:.4f} MHz) does not contain ATSC ch"
-                f"{self._physical_channel}'s pilot -- nominal offset "
+                f"{self._physical_channel}'s pilot; the nominal offset "
                 f"{_expected_offset / 1e3:.0f} kHz exceeds +/-{_coarse_width / 2e3:.0f} "
                 f"kHz. Emitting an all-invalid product (no in-band pilot); pick the "
-                f"freq_id whose centre is within fs/2 of the pilot.",
+                f"freq_id whose center is within fs/2 of the pilot.",
                 RuntimeWarning,
                 stacklevel=2,
             )
@@ -762,7 +762,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         )
 
         # If this run resumed a prior product, the identity begin() just derived
-        # from the first NEW file must match the restored one -- otherwise new
+        # from the first NEW file must match the restored one. Otherwise new
         # frames would be appended under a different channel/kernel geometry (or
         # dB calibration) than the existing ones, silently corrupting the
         # product. Refuse rather than mix.
@@ -786,7 +786,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         # cupy when a GPU runtime is present (keeps the per-frame FFT inside the
         # download-idle GPU time on CANFAR); numpy otherwise and in tests, with
         # identical arithmetic. A fresh run allocates zeros; a resumed run has
-        # had host spectra restored by resume() -- move them onto the backend.
+        # had host spectra restored by resume(), so move them onto the backend.
         self._xp = _detector_fft_backend()
         if self._spec_before is None:
             self._spec_before = self._xp.zeros(int(self._nfft), dtype=self._xp.float64)
@@ -933,7 +933,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             fid = chime_freq_id_from_hz(float(fc), self._f0_hz)
             if fid != self._freq_id:
                 raise ValueError(
-                    f"detector analyzer: file centre {float(fc):.0f} Hz is coarse "
+                    f"detector analyzer: file center {float(fc):.0f} Hz is coarse "
                     f"channel freq_id {fid}, but this product is freq_id "
                     f"{self._freq_id} (ATSC ch{self._physical_channel}). Refusing "
                     f"to mix coarse channels in one product -- check the --select "
@@ -1320,7 +1320,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             reference_placement_json=np.asarray(
                 json.dumps(self._reference_placement, sort_keys=True, separators=(",", ":"))
             ),
-            # dB-calibration constants -- recorded so a callable combine can refuse
+            # dB-calibration constants, recorded so a callable combine can refuse
             # to stack products reduced with different snr_shelf calibration.
             pilot_below_data_db=np.asarray(self._pilot_below_data_db, dtype=np.float64),
             bin_enbw_hz=np.asarray(self._bin_enbw_hz, dtype=np.float64),

@@ -4,7 +4,7 @@
 datatrawl's bundled ``chime-baseband`` reader unpacks each chunk to complex64.
 The F-statistic detector instead needs the original 4-bit nibbles so they can be
 re-packed *losslessly* into the kernel's two's-complement int4 layout (via
-``pack_chime_block_for_detector``) with no float requantisation. This reader is
+``pack_chime_block_for_detector``) with no float requantization. This reader is
 identical to the bundled one except it yields the raw ``uint8 [nfft, n_feeds]``
 block instead of unpacking it.
 

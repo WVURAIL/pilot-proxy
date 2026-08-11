@@ -5,7 +5,7 @@ Covers source/plumbing and failure handling:
   #3  cadc-datatrail source plumbing (--inventory / --source-root) + freq_id
       enumeration, exercised offline with a fake inventory and a mocked fetch;
   #4  a GPU/cupy preflight for pilot-proxy-detector before any staging;
-  #6  an all-units-failed / all-quarantined scan is surfaced, not silently turned
+  #6  an all-units-failed / all-quarantined scan is surfaced rather than silently turned
       into an absent/empty product fed to combine.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ K = 128
 
 
 def _stub_detector_fn(*, packed, weights, kernel):
-    """Trivial CPU detector: valid-schema per-block sums (plumbing only, not parity)."""
+    """Trivial CPU detector: valid-schema per-block sums (plumbing only; no parity claim)."""
     pk = np.asarray(packed)
     if pk.ndim == 2:
         pk = pk[None, ...]
@@ -72,7 +72,7 @@ def _cpu_detector_options():
         "kernel": _stub_kernel(K),
         "weights_by_channel": weights_by_channel,
     }
-# freq_id -> coarse-channel centre (MHz)
+# freq_id -> coarse-channel center (MHz)
 CHAN_MHZ = {844: 470.3125, 829: 476.171875, 752: 506.171875}
 
 _HAS_CUPY = importlib.util.find_spec("cupy") is not None
@@ -219,7 +219,7 @@ def test_local_scan_freq_id_regex_reaches_source(tmp_path, monkeypatch):
 
 
 def test_local_scan_set_regex_overrides_flag(tmp_path, monkeypatch):
-    """An explicit --set source_freq_id_regex=... wins over the flag."""
+    """An explicit --set source_freq_id_regex=... takes precedence over the flag."""
     monkeypatch.chdir(REPO_ROOT)
     data = tmp_path / "data"
     data.mkdir()

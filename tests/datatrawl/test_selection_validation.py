@@ -174,10 +174,10 @@ def test_combine_rejects_contract_mismatch(tmp_path):
         combine_detector_products([a, b], tmp_path / "out")
 
 
-# #2: the FIRST file must match the requested freq_id, not just later files.
+# #2: the FIRST file must match the requested freq_id rather than only later files.
 def test_detector_rejects_first_file_freq_id_mismatch():
     red = PilotProxyDetectorAnalyzer()
-    # ctx requests freq_id 844, but the first file's centre is a different channel
+    # ctx requests freq_id 844, but the first file's center is a different channel
     with pytest.raises(ValueError, match="requested freq_id 844"):
         red.begin(_detector_ctx(), {"f_center_hz": CH20_HZ, "nfft": 16384})
 
@@ -194,7 +194,7 @@ def test_detector_out_of_band_emits_invalid_without_kernel(tmp_path):
         "weights": np.zeros((3, K), dtype=np.int8),
     })
     red = PilotProxyDetectorAnalyzer()
-    # freq_id 400 (643.75 MHz) -> nearest ATSC 43, whose pilot is 559 kHz off-centre
+    # freq_id 400 (643.75 MHz) -> nearest ATSC 43, whose pilot is 559 kHz off-center
     with pytest.warns(RuntimeWarning, match="does not contain"):
         red.begin(ctx, {"f_center_hz": 643.75e6, "nfft": 16384})
     chunk = np.zeros((16384, 4), dtype=np.uint8)

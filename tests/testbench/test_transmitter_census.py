@@ -188,10 +188,10 @@ def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096,
     """Per-pilot npz with just the spectrum keys the extractor reads.
 
     Encodes REAL product semantics: fs = 390625 Hz, bin_enbw_hz = fs/K (the
-    DETECTOR bin, not the spectrum spacing), detector_window_samples = K,
+    DETECTOR bin rather than the spectrum spacing), detector_window_samples = K,
     spectrum spacing = fs/nfft. ``spikes``: [(offset_hz, snr_db), ...] about
-    the nominal pilot; the pilot can sit off-centre so the full
-    centre/sense/spacing mapping is exercised.
+    the nominal pilot; the pilot can sit off-center so the full
+    center/sense/spacing mapping is exercised.
     """
     fs = 390625.0
     spacing = fs / nfft
@@ -217,7 +217,7 @@ def _fake_spectrum_product(dirpath, ch, freq_id, spikes, sense=1, nfft=4096,
 
 def test_extract_matches_real_product_convention(tmp_path):
     """Regression pinned to production numbers: ch26 (freq_id 660) has
-    sense=-1 and pilot 121941 Hz above centre; the dominant carrier observed
+    sense=-1 and pilot 121941 Hz above center; the dominant carrier observed
     at spectrum bin 11270 of 16384 must decode to about -16 Hz offset."""
     from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
     fs, nfft = 390625.0, 16384
@@ -241,7 +241,7 @@ def test_extract_matches_real_product_convention(tmp_path):
 
 def test_extract_never_calls_the_dc_spur_a_carrier(tmp_path):
     from pilot_proxy.testbench.transmitter_census import extract_lines_from_run
-    # pilot 18.7 kHz from centre (the ch25 geometry): a huge DC spike sits
+    # pilot 18.7 kHz from center (the ch25 geometry): a huge DC spike sits
     # inside the search window but must be guarded out; the true pilot line
     # next to it must survive
     _fake_spectrum_product(tmp_path, 25, 675,

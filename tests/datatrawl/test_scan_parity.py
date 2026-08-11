@@ -10,7 +10,7 @@ GPU-free: the detector / stub kernel / weights are injected via ``analyzer_optio
 Files are named ``*_<freq_id>.h5`` so datatrawl's local source maps each file to
 its CHIME coarse channel (its default ``_(\\d+)\\.h5$`` regex), exactly like a real
 CADC baseband file; the analyzer derives the ATSC channel label from the freq-attr
-centre. ``--select`` is therefore the freq_id list, while the weights and the
+center. ``--select`` is therefore the freq_id list, while the weights and the
 runner reference stay keyed on ATSC channel (one pilot per ATSC channel, so the
 combine's ATSC ordering is a well-defined bijection with the selected freq_ids).
 """
@@ -45,8 +45,8 @@ NFFT = 16384
 K = 128
 N_FRAMES = 2
 N_FEEDS = 4
-CHANNELS = {14: 470.3125, 15: 476.3125}  # ATSC channel -> coarse-channel centre (MHz)
-# what those centres are as CHIME freq_id (the on-disk / inventory namespace)
+CHANNELS = {14: 470.3125, 15: 476.3125}  # ATSC channel -> coarse-channel center (MHz)
+# what those centers are as CHIME freq_id (the on-disk / inventory namespace)
 FREQ_IDS = {ch: chime_freq_id_from_hz(mhz * 1e6) for ch, mhz in CHANNELS.items()}
 
 

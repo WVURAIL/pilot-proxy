@@ -13,7 +13,7 @@ equality, no tolerances. Three gates plus a rate-margin report:
    the deployed composition with no host round-trip in between;
 3. geometry probe: ``FStat_GetFineSpecs`` returns the frozen 128/2/256.
 
-The timing report (printed, not asserted) is the first rate-margin
+The timing report (printed rather than asserted) is the first rate-margin
 datapoint for the fine stage: ms per 2048-stream frame against the
 ~41.9 ms CHIME frame cadence.
 """

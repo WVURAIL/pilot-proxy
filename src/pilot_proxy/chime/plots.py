@@ -714,7 +714,7 @@ def plot_baseband_spectrum(run_dir: Path) -> list[Path]:
     ax.set_ylabel(r"$10\log_{10}P_{\mathrm{bb}}\;[\mathrm{dB}]$")
     title = (r"Integrated baseband power at ATSC pilot coarse channels"
              + "\n" + r"Per-frame means: 'before' over valid frames, 'after' "
-             r"over unmasked frames -- reweighting can move either way")
+             r"over unmasked frames; reweighting can move either way")
     mask_label = _mask_label_for_run(Path(run_dir))
     if mask_label:
         title += "\n" + mask_label
@@ -755,8 +755,8 @@ def _event_boundaries(run_dir: Path):
     product's frame-identity sidecar (written by event-keyed combines), plus
     the event count. None when the sidecar is absent (chime-run products, or
     combines of identity-less legacy products). On stitched products the
-    frame axis concatenates acquisitions, so 'relative time' is data seconds,
-    not wall clock -- the boundaries make that visible."""
+    frame axis concatenates acquisitions, so 'relative time' is data seconds
+    rather than wall clock; the boundaries make that visible."""
     path = Path(run_dir) / "chime_frame_identity.npz"
     if not path.exists():
         return None

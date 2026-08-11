@@ -272,7 +272,7 @@ def test_chord_runtime_bundle_populates_chord_channel_ids(
     # Explicit-baseband-frame profile: the post-spectral-sense weight
     # synthesis emits exp(-2j*pi*f*k) templates in the true-sense raw frame
     # and assumes the adapter's detector-window time reversal regardless of
-    # spectral sense -- CHORD's upright sense does NOT exempt it. (A tone at
+    # spectral sense; CHORD's upright sense does NOT exempt it. (A tone at
     # the pilot frequency is only matched after the flip; see
     # tests/core/test_chord_tone_injection.py for the signal-level proof.)
     assert contract["input_preprocessing"][

@@ -8,7 +8,7 @@ supported size (``test_fxfft_ref_family.py``), so if the CUDA source computes
 its twiddle index and stage bound with the same expressions against the same
 table, the index arithmetic is covered by that proof.
 
-This is a cheap standing guard, not a substitute for the golden-vector run: it
+This is a cheap standing guard rather than a substitute for the golden-vector run: it
 catches one side being edited without the other, which is the failure mode a
 GPU-only gate would only reveal on a machine with a device attached.
 """
@@ -38,7 +38,7 @@ def test_both_read_the_shared_master_table():
 
 def test_twiddle_index_expression_matches_the_reference():
     """Both must fold the decimation stride into the shift by FX_MASTER_LOG2."""
-    # Match the array access itself, not the prose in the header comments.
+    # Match the array access itself rather than the prose in the header comments.
     kernel_idx = re.findall(
         r"fstat_fxfft_twiddle_q15\[t << \(\(unsigned\)FX_MASTER_LOG2 - stage\)\]", KERNEL
     )

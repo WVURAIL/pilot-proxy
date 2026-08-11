@@ -65,7 +65,7 @@ INPUT_ABS_MAX = 1 << 20
 INT32_MAX = (1 << 31) - 1
 
 # Frozen Q15 twiddle table: W[k] = (C[k], S[k]) ~ e^{-2 pi i k/256}.
-# Source of truth is this literal table, not runtime trigonometry.
+# The source of truth is this literal table rather than runtime trigonometry.
 TWIDDLE_Q15 = (
     (32768, 0), (32758, -804), (32729, -1608), (32679, -2411),
     (32610, -3212), (32522, -4011), (32413, -4808), (32286, -5602),
@@ -185,7 +185,8 @@ def fxfft256(x: Any, *, return_stage_maxima: bool = False):
 # A radix-2 DIT of length n needs W_n[k] = e^{-2 pi i k / n} for k < n/2 only.
 # Because W_n[k] = W_M[k * M / n] whenever n divides M, and the Q15 rounding is
 # applied to the same real value either way, the length-n table is an *exact*
-# decimation of a length-M master -- identical integers, not an approximation.
+# decimation of a length-M master: identical integers rather than an
+# approximation.
 # One master therefore serves the whole family, and the tie analysis and
 # exact-rounding argument are established once on it and inherited by every
 # member.
@@ -248,7 +249,7 @@ def twiddle_table(n: int) -> tuple[tuple[int, int], ...]:
 
 # The frozen fxfft256 v1 literal must be exactly what the family produces at
 # n = 256. This is the join between the frozen artifact and the general
-# construction; if it ever fails, the family is wrong, not the literal.
+# construction; if it ever fails, the fault is in the family rather than the literal table.
 assert master_twiddle_sha256() == MASTER_TWIDDLE_SHA256, (
     "master twiddle table does not match its frozen hash; the host libm "
     "disagrees with the recorded rounding, which would break bit-reproducibility"
@@ -267,7 +268,7 @@ def input_abs_max(n: int) -> int:
     ``(1 + sqrt(2) + 2**-15) M + 1``; applying that ``log2(n)`` times and
     requiring the result below ``2**31`` gives the bound, floored to a power
     of two. The bound *tightens* as ``n`` grows, so the eight-stage contract
-    (``2**20``) is not reusable at nine stages -- which is precisely the
+    (``2**20``) is not reusable at nine stages, which is precisely the
     failure mode this function exists to prevent.
     """
     stages = n.bit_length() - 1
@@ -280,9 +281,9 @@ def input_abs_max(n: int) -> int:
 def fxfft(x: Any, *, n_out: int = N, return_stage_maxima: bool = False):
     """Frozen fixed-point FFT generalized over the transform length.
 
-    Same specification as :func:`fxfft256` -- bit-reversed load, radix-2 DIT,
-    Q15 twiddles from the master table, ``round15`` per butterfly, no scaling
-    -- with the length as a parameter. ``x`` is an integer array
+    Same specification as :func:`fxfft256` (bit-reversed load, radix-2 DIT,
+    Q15 twiddles from the master table, ``round15`` per butterfly, no
+    scaling), with the length as a parameter. ``x`` is an integer array
     ``[..., n_out // 2, 2]``; the pad factor is fixed at two.
 
     At ``n_out = 256`` this is bit-identical to :func:`fxfft256`, which the

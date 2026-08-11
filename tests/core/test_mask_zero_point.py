@@ -5,7 +5,7 @@ int4 quantization of the steering vectors leaves the three weight-term norms
 unequal, so under a flat noise floor E[F] = mu0 = 2*target_norm_sq/
 ref_norm_sum_sq differs from 1 per channel (~0.985..1.011 across the shipped
 ATSC 14-36 bank). The legacy ``F > 1`` mask therefore pinned the H0 mask
-fraction toward 0 or 1 per channel. These tests pin the corrected behaviour:
+fraction toward 0 or 1 per channel. These tests pin the corrected behavior:
 
 * ``weight_term_norms_sq`` matches a brute-force unpack exactly;
 * the corrected rule reduces to the legacy rule when norms are 1:2, and is
@@ -142,7 +142,7 @@ def test_shipped_rom_h0_zero_point_and_corrected_mask(channel: int) -> None:
         seed=_MC_SEED + channel,
     )
     sem = fstats.std(ddof=1) / np.sqrt(len(fstats))
-    # E[F] under H0 is mu0, not 1: the bias is detected at >5 sigma and the
+    # E[F] under H0 is mu0 rather than 1: the bias is detected at >5 sigma and the
     # measured mean agrees with mu0 within 6 sigma.
     assert abs(fstats.mean() - mu0) < 6.0 * sem
     assert abs(fstats.mean() - 1.0) > 5.0 * sem

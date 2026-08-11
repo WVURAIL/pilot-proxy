@@ -224,7 +224,7 @@ def write_integrated_spectra(
 
     ``integrated_spectrum_*`` are ``[n_pilots, nfft]`` (rectangular-window |FFT|^2
     summed over feeds, accumulated over frames): ``before`` over every valid frame,
-    ``after`` over kept (not-rejected) frames -- so ``before - after`` is the
+    ``after`` over kept (not-rejected) frames, so ``before - after`` is the
     spectrum the positive-excess mask removed. Bin ``k`` maps to baseband frequency
     ``((k + nfft//2) % nfft - nfft//2) * sample_rate_hz / nfft``.
 

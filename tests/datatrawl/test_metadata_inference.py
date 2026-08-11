@@ -43,7 +43,7 @@ NFFT = 16384
 N_FEEDS = 4
 K = 128
 
-# freq_id -> coarse-channel centre (MHz)
+# freq_id -> coarse-channel center (MHz)
 CHAN_MHZ = {844: 470.3125, 829: 476.171875, 752: 506.171875}
 
 

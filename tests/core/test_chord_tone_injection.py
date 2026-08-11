@@ -10,10 +10,10 @@ These tests close that gap from first principles:
 * synthesize channelized baseband ``amp * exp(+2j*pi*f*n)`` for a tone at
   the exact ATSC pilot RF (``physical_channel_to_pilot_hz``) in the coarse
   channel the bundle binds (``chord_channel_id * 195312.5 Hz`` center,
-  upright/true-sense frame -- the kotekan chord data-product convention);
+  upright/true-sense frame, the kotekan chord data-product convention);
 * quantize to packed int4, apply the bundle's declared input preprocessing
   (``time_reverse_detector_windows_before_kernel``), and run the exact
-  integer power sums plus the rational half-threshold mask -- the deployed
+  integer power sums plus the rational half-threshold mask, the deployed
   kernel decision, computed independently with numpy integers;
 * require the pilot tone to assert the mask with the target term dominant
   on every ATSC channel 14-36; require a sense-flipped tone to collapse
@@ -28,8 +28,8 @@ integration exported bundles with
 ``time_reverse_detector_windows_before_kernel = false`` (derived from the
 upright spectral sense). The explicit-baseband-frame weight synthesis
 assumes the adapter flip for any sense, so that chain was blind to upright
-pilot tones -- every bit-exact test passed while a real ATSC pilot would
-have sailed through undetected. A2/A3 below fail loudly on that regression.
+pilot tones: every bit-exact test passed while a real ATSC pilot would
+have sailed through undetected. A2/A3 below fail on that regression.
 """
 from __future__ import annotations
 
