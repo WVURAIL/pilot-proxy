@@ -20,8 +20,9 @@ These tests close that gap from first principles:
   the target response (this is the check that catches spectral-sense and
   window-reversal regressions); require tones at the manifest's reference
   placements to drive the matching reference term and deassert the mask
-  (including channel 14's DC-shifted, edge-wrapped upper reference); and
-  require a weak pilot in unit-sigma noise to still assert the mask.
+  (including channel 14's edge-wrapped upper reference and channel 21's
+  DC-shifted, edge-wrapped lower reference); and require a weak pilot in
+  unit-sigma noise to still assert the mask.
 
 History: this suite was added after the first CHORD end-to-end kotekan
 integration exported bundles with
@@ -34,6 +35,7 @@ have sailed through undetected. A2/A3 below fail on that regression.
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import numpy as np
@@ -55,16 +57,31 @@ PATHFINDER_PROFILE = (
     CONFIGS_DIR / "receiver_profiles" / "chord_pathfinder_dtv_fengine.json"
 )
 CORE_PROFILE = CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
-CHORD_BANK = REPO_ROOT / "weights" / "chord_dtv_weights_k128.bin"
+CHORD_BANK = REPO_ROOT / "weights" / "chord_dtv_weights_k64.bin"
 
 COARSE_WIDTH_HZ = 195312.5  # CHORD coarse width == channelized sample rate
-K = 128                     # detector window samples
+K = 64                      # detector window samples
 WINDOWS = 64                # synthesized windows per case (plenty of SNR)
 BITS = 4
 ATSC_CHANNELS = list(range(14, 37))
 TONE_AMP = 5.5              # LSB; comfortably inside the int4 range
 DOMINANCE = 100             # required tone-term power dominance factor
-FLIP_COLLAPSE = 1000        # required target collapse under a sense flip
+FLIP_COLLAPSE = 1000        # flip-collapse requirement cap
+FLIP_QUANTIZATION_MARGIN = 4.0  # power headroom for int4 weight leakage
+
+
+def dirichlet_power_collapse(separation_bins: float) -> float:
+    """Predicted pilot/flip target-power ratio for the unquantized filter.
+
+    The K-tap matched filter responds to a tone ``s`` fine bins away with
+    the Dirichlet ratio ``sin(pi*s) / (K*sin(pi*s/K))``. The collapse is
+    the inverse power ratio; it is infinite on exact bin multiples.
+    """
+    s = float(separation_bins)
+    numerator = math.sin(math.pi * s)
+    if abs(numerator) < 1e-12:
+        return float("inf")
+    return (K * math.sin(math.pi * s / K) / numerator) ** 2
 
 
 @pytest.fixture(scope="module")
@@ -203,11 +220,16 @@ def test_pilot_tone_asserts_mask(chord_bundle, channel) -> None:
 def test_sense_flipped_tone_is_rejected(chord_bundle, channel) -> None:
     # A conjugated (sense-flipped) pilot must not look like a pilot: this is
     # the discriminating check for spectral-sense/window-reversal errors.
-    # The required collapse factor depends on how far -f sits from +f on the
-    # channelized frequency circle: for a pilot near the coarse-channel edge
-    # (channel 30, offset -96.8 kHz of the +/-97.66 kHz half-width) the
-    # flipped tone lands only ~1.1 fine bins from the true pilot, so only
-    # near-lobe leakage suppression is physically available there.
+    # The achievable collapse depends on how far -f sits from +f on the
+    # channelized frequency circle, measured in K=64 fine bins. The bound is
+    # the unquantized Dirichlet prediction with 6 dB of headroom for int4
+    # weight leakage, capped at FLIP_COLLAPSE. For a pilot near the
+    # coarse-channel edge (channel 30, offset -96.8 kHz of the +/-97.66 kHz
+    # half-width) the flipped tone lands only ~0.56 fine bins away, inside
+    # the main lobe, so only a factor of about 3 is physically available and
+    # the bound falls to its floor of 2. A sense regression puts the full
+    # pilot response in p_flip and the collapsed response in p_pilot, so
+    # even the floor fails loudly.
     row, weight_bytes, _, _, f_norm = _channel_case(chord_bundle, channel)
     p_pilot = deployed_powers(
         synth_packed(f_norm, TONE_AMP, 1000 + channel),
@@ -221,7 +243,11 @@ def test_sense_flipped_tone_is_rejected(chord_bundle, channel) -> None:
     )
     circular = (2.0 * f_norm) % 1.0
     separation_bins = min(circular, 1.0 - circular) * K
-    required = FLIP_COLLAPSE if separation_bins >= 2.0 else 20
+    predicted = dirichlet_power_collapse(separation_bins)
+    required = min(
+        float(FLIP_COLLAPSE),
+        max(2.0, predicted / FLIP_QUANTIZATION_MARGIN),
+    )
     assert p_flip[0] * required <= p_pilot[0]
 
 
@@ -230,9 +256,9 @@ def test_reference_tones_drive_reference_terms(
     chord_bundle, chord_bank, channel
 ) -> None:
     # Tones at the manifest's reference placements (target +/- offset bins;
-    # channel 14's upper reference is DC-shifted to +3 bins and wraps the
-    # coarse-channel edge) must drive the matching reference term and
-    # deassert the mask.
+    # channel 14's upper reference wraps the coarse-channel edge and channel
+    # 21's lower reference is DC-shifted to -3 bins) must drive the matching
+    # reference term and deassert the mask.
     row, weight_bytes, _, _, f_norm = _channel_case(chord_bundle, channel)
     layout = chord_bank.layout_for_physical_channel(channel)
     lower_off = int(layout["lower_reference_offset_bins"])

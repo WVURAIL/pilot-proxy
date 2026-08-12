@@ -36,10 +36,10 @@
     }
   },
   "framing": {
-    "frame_size_samples": 16384,
+    "frame_size_samples": 8192,
     "frame_size_unit": "channelized complex samples per input stream",
     "frame_size_samples_may_be_overridden_per_run": true,
-    "kotekan_frame_note": "The kotekan chord_pathfinder configs advance the voltage ring buffer in GPU frames of num_times=8192 samples (41.94304 ms). One 16384-sample detector block spans exactly 2 kotekan GPU frames (83.88608 ms) and yields windows_per_stream = 128, the frozen fine-reduction transform length."
+    "kotekan_frame_note": "The kotekan chord_pathfinder configs advance the voltage ring buffer in GPU frames of num_times=8192 samples (41.94304 ms). One detector block is one GPU frame: 8192 samples at K=64 yield windows_per_stream = 128, the frozen fine-reduction transform length, and the block aligns 1:1 with the 8192-sample n2k visibility integration."
   },
   "input_streams": {
     "num_input_streams": 128,
@@ -60,11 +60,11 @@
   },
   "detector_adapter": {
     "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
-    "detector_window_samples": 128,
+    "detector_window_samples": 64,
     "windows_per_stream_formula": "frame_size_samples / detector_window_samples",
     "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
-    "fine_bin_width_hz": 1525.87890625,
-    "fine_bin_enbw_hz": 1525.87890625,
+    "fine_bin_width_hz": 3051.7578125,
+    "fine_bin_enbw_hz": 3051.7578125,
     "dtv_bandwidth_hz": 6000000.0,
     "pilot_below_data_db": 11.3,
     "pilot_capture_efficiency": 1.0

@@ -257,11 +257,12 @@ The shipped receiver profiles have different roles and evidential status:
   upright spectral sense, ascending channel order, channel RF center =
   `coarse_channel_index * 195312.5 Hz` (the kotekan `freq_id` namespace) --
   and differ only in stream count: 1024 dish-polarization streams (512
-  dishes) for full CHORD, 128 (64 dishes) for the pathfinder. The 16384-sample
-  detector frame spans exactly 2 kotekan GPU frames of 8192 samples and gives
-  the frozen 128-windows-per-stream fine-reduction geometry. The ATSC 14-36
-  pilots land in CHORD channels 2408-3084; channel 14 is the single adaptive
-  reference case (its upper reference shifts off the forbidden DC bin,
+  dishes) for full CHORD, 128 (64 dishes) for the pathfinder. The 8192-sample
+  detector frame is exactly one kotekan GPU frame (41.94304 ms) and, at
+  K=64, gives the frozen 128-windows-per-stream fine-reduction geometry.
+  The ATSC 14-36 pilots land in CHORD channels 2408-3084; channels 14 and
+  21 are the adaptive reference cases (ch14's upper reference wraps the
+  frame edge; ch21's lower reference shifts off the forbidden DC bin,
   wrapping the frame edge). These profiles declare
   `metadata.channel_id_map`, so exported runtime bundles carry a populated
   `chord_channel_id` for kotekan first-frame profile selection. Both are
@@ -297,7 +298,7 @@ pilot-proxy chime-run --weights-path weights/chime_dtv_weights_k128.bin --help
 
 `list-channels` reports the reference placement for each physical channel.
 Adaptive cases also print an explanatory `NOTE` without changing the CSV
-output. The shipped K=128 bank uses `reference_offset_bins=2` and
+output. The shipped banks use `reference_offset_bins=2` and
 `skipped_guard_bins=1`. We skip one fine bin on each side of the target and use
 the next fine bin as the lower or upper reference. A reference that crosses a
 coarse-channel edge wraps around the circular coarse-channel FFT. A reference

@@ -309,14 +309,15 @@ repository's runtime bundle with the following resolved interface values.
 | streams | 1024 dish-pol (512 dishes) full CHORD; 128 (64 dishes) pathfinder | `setup_chord.jl` / `setup_pathfinder.jl` |
 | voltage buffer | `[T, F, P, D]`, `int4x2_swapped_withoffset` (offset-8; imag low nibble, real high nibble) | `DataType.hpp`, `fengine_chord.j2` |
 | kotekan GPU frame | 8192 samples = 41.94304 ms | `num_times` |
-| detector block | 16384 samples = 2 GPU frames = 83.88608 ms; `windows_per_stream = 128` (the frozen fine transform length) | stage config `samples_per_detector_frame` |
-| fine bin width | 1525.87890625 Hz | 195312.5 / 128 |
+| detector block | 8192 samples = 1 GPU frame = 41.94304 ms; K=64 gives `windows_per_stream = 128` (the frozen fine transform length) | stage config `samples_per_detector_frame` |
+| fine bin width | 3051.7578125 Hz | 195312.5 / 64 |
 
 The corresponding receiver profiles in this repository are
 `configs/receiver_profiles/chord_dtv_fengine.json` and
 `chord_pathfinder_dtv_fengine.json`; the ATSC 14-36 pilots land in CHORD
-channels 2408-3084 (channel 14 is the single adaptive-reference case: its
-upper reference is DC-shifted, wrapping the frame edge).
+channels 2408-3084 (channels 14 and 21 are the adaptive-reference cases:
+ch14's upper reference wraps the frame edge; ch21's lower reference is
+DC-shifted, wrapping the frame edge).
 
 ### 7.2 Answers to the Section 6 questions, for CHORD
 

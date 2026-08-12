@@ -9,10 +9,11 @@ computed expectations:
   ``coarse_channel_index * 195312.5 Hz`` (upright spectral sense, ascending
   order, kotekan ``freq_id == coarse_channel_index``);
 * ATSC 14-36 pilot placement: 23 unique coarse channels 2408..3084 with
-  exact half-Hz fine offsets; physical channel 14 is the single adaptive
-  reference case (upper reference wraps through the forbidden DC bin);
-* framing: 16384-sample detector blocks give windows_per_stream = 128, the
-  frozen fine-reduction transform length, and detector row counts
+  exact half-Hz fine offsets; channel 14's upper reference wraps the frame
+  edge and channel 21's lower reference is DC-shifted, the two adaptive
+  cases at K=64;
+* framing: 8192-sample detector blocks at K=64 give windows_per_stream =
+  128, the frozen fine-reduction transform length, and detector row counts
   131072 (CHORD, 1024 streams) / 16384 (pathfinder, 128 streams);
 * runtime bundles: the declared ``chord_freq_id`` channel-id map populates
   ``chord_channel_id`` / ``receiver_channel_id`` for kotekan first-frame
@@ -65,7 +66,7 @@ CHORD_ADC_HZ = 3_200_000_000
 CHORD_PFB_FFT_SIZE = 16_384
 CHORD_NUM_COARSE_CHANNELS = CHORD_PFB_FFT_SIZE // 2
 CHORD_COARSE_WIDTH = Fraction(CHORD_ADC_HZ, CHORD_PFB_FFT_SIZE)  # 195312.5 Hz
-CHORD_DETECTOR_WINDOW = 128
+CHORD_DETECTOR_WINDOW = 64
 CHORD_FINE_BIN_WIDTH = CHORD_COARSE_WIDTH / CHORD_DETECTOR_WINDOW
 
 ATSC_PHYSICAL_CHANNELS = list(range(14, 37))
@@ -101,7 +102,7 @@ def test_chord_profile_channelizer_grid(profile_path, num_streams) -> None:
     assert profile.num_coarse_channels == CHORD_NUM_COARSE_CHANNELS
     assert profile.coarse_channel_width_hz == float(CHORD_COARSE_WIDTH)
     assert profile.center_offset_hz == 0.0
-    assert profile.frame_size_samples == 16_384
+    assert profile.frame_size_samples == 8_192
     assert profile.num_input_streams == num_streams
     assert profile.detector_window_samples == CHORD_DETECTOR_WINDOW
     assert profile.bin_enbw_hz == float(CHORD_FINE_BIN_WIDTH)
@@ -156,33 +157,50 @@ def test_chord_detector_layout_matches_frozen_fine_geometry(
     # (FSTAT_FINE_WINDOWS_PER_STREAM = 128) for the fused fine/mask kernels.
     assert layout.windows_per_block == 128
     assert layout.detector_rows_per_block == expected_rows
-    # One detector block = 2 kotekan GPU frames of 8192 samples.
-    assert profile.frame_size_samples == 2 * 8192
+    # One detector block = one kotekan GPU frame of 8192 samples (41.94304
+    # ms), aligned 1:1 with the 8192-sample n2k visibility integration.
+    assert profile.frame_size_samples == 8192
 
 
-def test_chord_reference_placement_channel14_is_only_adaptive_case() -> None:
+def test_chord_reference_placement_adaptive_cases() -> None:
     profile = load_receiver_profile(CHORD_PROFILE)
-    core = load_detector_core_profile(CORE_PROFILE)
+    core = load_detector_core_profile(CORE_PROFILE).with_detector_window_samples(
+        CHORD_DETECTOR_WINDOW
+    )
     for channel in ATSC_PHYSICAL_CHANNELS:
         layout = target_layout(
             physical_channel=channel, profile=profile, core=core
         )
         assert layout["baseband_frame_mode"] == "explicit_profile_frame"
         assert layout["strict_reference_offset_pass"] is True
-        assert layout["lower_reference_offset_bins"] == -2
         if channel == 14:
-            # The ch14 pilot sits 2.005 fine bins below the coarse-channel
-            # center, so the requested +2 upper reference lands on the
-            # forbidden DC bin and shifts one bin farther, wrapping through
-            # the frame edge (DC is the wrap point for a center-at-DC frame).
+            # The ch14 pilot sits 1.002 fine bins below the coarse-channel
+            # center, so the +2 upper reference wraps through the frame edge
+            # (DC is the wrap point for a center-at-DC frame) and lands one
+            # bin above DC. The DC bin itself falls inside the upper skipped
+            # guard.
+            assert layout["reference_placement_status"] == "edge_wrapped"
+            assert layout["lower_reference_offset_bins"] == -2
+            assert layout["upper_reference_offset_bins"] == 2
+            assert layout["upper_reference_edge_wrapped"] is True
+            assert layout["upper_reference_dc_shifted"] is False
+            assert layout["forbidden_tone_in_skipped_guard"] is True
+        elif channel == 21:
+            # The ch21 pilot sits 1.558 fine bins above the coarse-channel
+            # center, so the requested -2 lower reference lands within half
+            # a bin of the forbidden DC bin and shifts one bin farther to
+            # -3, wrapping through the frame edge.
             assert layout["reference_placement_status"] == (
                 "edge_wrapped_and_dc_shifted"
             )
-            assert layout["upper_reference_offset_bins"] == 3
-            assert layout["upper_reference_dc_shifted"] is True
+            assert layout["lower_reference_offset_bins"] == -3
+            assert layout["upper_reference_offset_bins"] == 2
+            assert layout["lower_reference_dc_shifted"] is True
+            assert layout["lower_reference_edge_wrapped"] is True
             assert layout["forbidden_tone_in_skipped_guard"] is True
         else:
             assert layout["reference_placement_status"] == "nominal"
+            assert layout["lower_reference_offset_bins"] == -2
             assert layout["upper_reference_offset_bins"] == 2
             assert layout["adaptive_reference_placement"] is False
 
@@ -323,6 +341,32 @@ def test_runtime_bundle_validator_rejects_duplicate_chord_channel_ids(
     assert not report["valid"]
     checks = {error["check"] for error in report["errors"]}
     assert "pilot_profiles.chord_channel_id" in checks
+
+
+def test_runtime_bundle_validator_rejects_window_length_mismatch(
+    tmp_path,
+) -> None:
+    # The window length is a per-receiver quantity, so a manifest whose
+    # weight-profile shape disagrees with the bundle's own detector contract
+    # mixes two geometries and must be rejected.
+    export_runtime_weight_bundle(
+        receiver_profile_path=CHORD_PROFILE,
+        detector_core_profile_path=CORE_PROFILE,
+        physical_channels=[14],
+        weight_coordinate_system="post_spectral_sense_normalization",
+        output_dir=tmp_path / "bundle",
+    )
+    manifest_path = tmp_path / "bundle" / "weights.manifest.json"
+    payload = json.loads(manifest_path.read_text("utf-8"))
+    payload["weight_profile_shape"] = [3, 128]
+    manifest_path.write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
+    report = validate_runtime_weight_bundle(bundle_dir=tmp_path / "bundle")
+    assert not report["valid"]
+    checks = {error["check"] for error in report["errors"]}
+    assert "weights_manifest.weight_profile_shape" in checks
+    assert "weights_manifest.weight_profile_nbytes" in checks
 
 
 def test_runtime_bundle_validator_rejects_alias_mismatch(tmp_path) -> None:
