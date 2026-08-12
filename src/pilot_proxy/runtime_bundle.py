@@ -177,6 +177,56 @@ def _validate_expected_sha256sums(
             )
 
 
+def _validate_weight_profile_geometry(
+    *,
+    detector_contract: dict[str, Any],
+    weights_manifest: dict[str, Any],
+    errors: list[dict[str, str]],
+) -> None:
+    """Check manifest weight-profile geometry against the detector contract.
+
+    The window length is a per-receiver quantity, so a bundle whose manifest
+    shape disagrees with its own detector contract mixes two geometries and
+    must be rejected.
+    """
+    shape = weights_manifest.get("weight_profile_shape")
+    if not (
+        isinstance(shape, list)
+        and len(shape) == 2
+        and all(isinstance(value, int) for value in shape)
+    ):
+        return
+    num_weight_terms = detector_contract.get("num_weight_terms")
+    if num_weight_terms is not None and int(shape[0]) != int(num_weight_terms):
+        _add_error(
+            errors,
+            "weights_manifest.weight_profile_shape",
+            f"weight_profile_shape terms {shape[0]} does not match "
+            f"detector_contract num_weight_terms {num_weight_terms}",
+        )
+    detector_window_samples = detector_contract.get("detector_window_samples")
+    if detector_window_samples is not None and int(shape[1]) != int(
+        detector_window_samples
+    ):
+        _add_error(
+            errors,
+            "weights_manifest.weight_profile_shape",
+            f"weight_profile_shape window length {shape[1]} does not match "
+            f"detector_contract detector_window_samples "
+            f"{detector_window_samples}",
+        )
+    profile_nbytes = weights_manifest.get("weight_profile_nbytes")
+    if profile_nbytes is not None and int(shape[0]) * int(shape[1]) != int(
+        profile_nbytes
+    ):
+        _add_error(
+            errors,
+            "weights_manifest.weight_profile_nbytes",
+            f"weight_profile_nbytes {profile_nbytes} does not match "
+            f"weight_profile_shape {shape[0]}x{shape[1]} int8 profiles",
+        )
+
+
 def _validate_runtime_profile_offsets(
     *,
     bundle_dir: Path,
@@ -715,6 +765,11 @@ def validate_runtime_weight_bundle(
             f"schema_version {weights_manifest.get('schema_version')!r} does not "
             f"match {RUNTIME_WEIGHT_MANIFEST_SCHEMA_VERSION!r}",
         )
+    _validate_weight_profile_geometry(
+        detector_contract=detector_contract,
+        weights_manifest=weights_manifest,
+        errors=errors,
+    )
 
     contract_digest = detector_contract_sha256(detector_contract)
     weights_path = bundle / DEFAULT_WEIGHTS_FILENAME
@@ -807,6 +862,9 @@ def export_runtime_weight_bundle(
     """Write a compact runtime detector bundle for selected DTV pilots."""
     profile = load_receiver_profile(receiver_profile_path)
     core = load_detector_core_profile(detector_core_profile_path)
+    # The receiver profile owns the deployed window length (K); the core
+    # declares which lengths the compiled kernel family supports.
+    core = core.with_detector_window_samples(int(profile.detector_window_samples))
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
     channels = [int(channel) for channel in physical_channels]
     if not channels:

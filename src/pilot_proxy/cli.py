@@ -504,9 +504,14 @@ def _cmd_check_layout(args: argparse.Namespace) -> None:
     )
     if stream_map is not None:
         num_input_streams = int(stream_map.num_streams)
+    detector_window_samples = int(
+        profile.detector_window_samples
+        if args.detector_window_samples is None
+        else args.detector_window_samples
+    )
     check = layout_uint64_bound_check(
         frame_size_samples=frame_size_samples,
-        detector_window_samples=int(args.detector_window_samples),
+        detector_window_samples=detector_window_samples,
         num_input_streams=num_input_streams,
         num_selected_channels=int(args.num_selected_channels),
     )
@@ -944,7 +949,9 @@ def build_parser() -> argparse.ArgumentParser:
     check_layout.add_argument(
         "--detector-window-samples",
         type=int,
-        default=DETECTOR_WINDOW_SAMPLES,
+        default=None,
+        help="Detector-window samples; defaults to the receiver profile's "
+             "declared value.",
     )
     check_layout.add_argument("--output-json", default=None)
     check_layout.set_defaults(func=_cmd_check_layout)

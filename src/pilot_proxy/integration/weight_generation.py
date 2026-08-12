@@ -351,6 +351,21 @@ def target_layout(
     profile: ReceiverProfile,
     core: DetectorCoreLayout | DetectorCoreProfile,
 ) -> dict[str, Any]:
+    # A file-backed core profile must agree with the receiver profile on the
+    # deployed window length; select it with with_detector_window_samples
+    # first. A bare DetectorCoreLayout stays an explicit geometry override
+    # for what-if analysis.
+    if isinstance(core, DetectorCoreProfile):
+        core_window = int(core.detector_window_samples)
+        profile_window = int(profile.detector_window_samples)
+        if core_window != profile_window:
+            raise ValueError(
+                "receiver profile and detector core disagree on "
+                f"detector_window_samples: profile={profile_window}, "
+                f"core={core_window}. Select the receiver window length on "
+                "the core first "
+                "(DetectorCoreProfile.with_detector_window_samples)."
+            )
     pilot_hz = physical_channel_to_pilot_hz(int(physical_channel))
     selection = receiver_frequency_to_channel(pilot_hz, profile)
     frame_center, forbidden_dc, frame_mode = _resolve_frame_convention(
@@ -554,6 +569,12 @@ def generate_weight_table_from_receiver_profile(
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Return the weight table and manifest target-layout entries."""
+    # The receiver profile owns the deployed window length (K); the core
+    # declares which lengths the compiled kernel family supports.
+    # DetectorCoreProfile validates the selection in __post_init__.
+    core = replace(
+        core, detector_window_samples=int(profile.detector_window_samples)
+    )
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
     # Frame semantics:
     #  - Explicit baseband frame (profile declares channel_center_normalized):
@@ -685,6 +706,7 @@ def write_weight_bank_from_receiver_profile(
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
 ) -> dict[str, Any]:
     """Write a packed weight bank plus the adjacent manifest and return manifest."""
+    core = core.with_detector_window_samples(int(profile.detector_window_samples))
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)

@@ -3,6 +3,7 @@
   "detector_core_id": "pilotproxy_cuda_fstat_v1",
   "kernel_contract": {
     "detector_window_samples": 128,
+    "supported_detector_window_samples": [64, 128],
     "num_weight_terms": 3,
     "skipped_guard_bins": 1,
     "packed_complex_bits": 8,

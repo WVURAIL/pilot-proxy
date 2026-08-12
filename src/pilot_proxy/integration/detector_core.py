@@ -1,11 +1,11 @@
 # coding=utf-8
-"""Detector-core profile for the locked CUDA F-statistic contract."""
+"""Detector-core profile for the CUDA F-statistic kernel contract."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,13 @@ from .schemas import (
     DETECTOR_CORE_PROFILE_SCHEMA_VERSION,
 )
 
-LOCKED_DETECTOR_WINDOW_SAMPLES = 128
+# The detector window length (K) is a per-receiver compile-time parameter of
+# the CUDA core (FSTAT_DETECTOR_WINDOW_SAMPLES). It scales with the receiver
+# coarse-channel width to hold the fine-bin width near 3.05 kHz: CHIME uses
+# K=128 on 390.625 kHz channels; CHORD uses K=64 on 195.3125 kHz channels.
+# The window count per detector block stays frozen at 128 for every receiver.
+DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
+SUPPORTED_DETECTOR_WINDOW_SAMPLES = frozenset({64, 128})
 LOCKED_NUM_WEIGHT_TERMS = 3
 LOCKED_SKIPPED_GUARD_BINS = 1
 LOCKED_REFERENCE_OFFSET_BINS = LOCKED_SKIPPED_GUARD_BINS + 1
@@ -108,7 +114,8 @@ class DetectorCoreProfile:
 
     schema_version: str = DETECTOR_CORE_PROFILE_SCHEMA_VERSION
     detector_core_id: str = DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1
-    detector_window_samples: int = LOCKED_DETECTOR_WINDOW_SAMPLES
+    detector_window_samples: int = DEFAULT_DETECTOR_WINDOW_SAMPLES
+    supported_detector_window_samples: tuple[int, ...] = (64, 128)
     num_weight_terms: int = LOCKED_NUM_WEIGHT_TERMS
     skipped_guard_bins: int = LOCKED_SKIPPED_GUARD_BINS
     packed_complex_bits: int = LOCKED_PACKED_COMPLEX_BITS
@@ -139,8 +146,28 @@ class DetectorCoreProfile:
             )
         if self.detector_core_id != DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1:
             raise ValueError(f"unsupported detector_core_id: {self.detector_core_id!r}")
-        if self.detector_window_samples != LOCKED_DETECTOR_WINDOW_SAMPLES:
-            raise ValueError("detector_window_samples must be locked to 128.")
+        supported = tuple(
+            sorted({int(value) for value in self.supported_detector_window_samples})
+        )
+        if not supported:
+            raise ValueError(
+                "supported_detector_window_samples must not be empty."
+            )
+        for value in supported:
+            if value not in SUPPORTED_DETECTOR_WINDOW_SAMPLES:
+                raise ValueError(
+                    "unsupported detector window length in "
+                    f"supported_detector_window_samples: {value}; the core "
+                    "supports "
+                    f"{sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES)}."
+                )
+        object.__setattr__(self, "supported_detector_window_samples", supported)
+        if self.detector_window_samples not in supported:
+            raise ValueError(
+                "detector_window_samples must be one of the supported window "
+                f"lengths {list(supported)}; got "
+                f"{self.detector_window_samples}."
+            )
         if self.num_weight_terms != LOCKED_NUM_WEIGHT_TERMS:
             raise ValueError("num_weight_terms must be locked to 3.")
         if self.skipped_guard_bins < MIN_SKIPPED_GUARD_BINS:
@@ -155,6 +182,19 @@ class DetectorCoreProfile:
     @property
     def reference_offset_bins(self) -> int:
         return int(self.skipped_guard_bins) + 1
+
+    def with_detector_window_samples(
+        self, detector_window_samples: int
+    ) -> "DetectorCoreProfile":
+        """Return a copy of this profile with the given window length selected.
+
+        The receiver profile owns the deployed window length (K); the core
+        profile declares which lengths the compiled kernel family supports.
+        Selection re-runs the membership validation in __post_init__.
+        """
+        return replace(
+            self, detector_window_samples=int(detector_window_samples)
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DetectorCoreProfile":
@@ -180,8 +220,17 @@ class DetectorCoreProfile:
                     kernel_contract,
                     raw,
                     "detector_window_samples",
-                    LOCKED_DETECTOR_WINDOW_SAMPLES,
+                    DEFAULT_DETECTOR_WINDOW_SAMPLES,
                 ),
+            ),
+            supported_detector_window_samples=tuple(
+                int(value)
+                for value in _contract_value(
+                    kernel_contract,
+                    raw,
+                    "supported_detector_window_samples",
+                    sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES),
+                )
             ),
             num_weight_terms=int(
                 _contract_value(
@@ -267,6 +316,10 @@ class DetectorCoreProfile:
             "detector_core_id": self.detector_core_id,
             "kernel_contract": {
                 "detector_window_samples": int(self.detector_window_samples),
+                "supported_detector_window_samples": [
+                    int(value)
+                    for value in self.supported_detector_window_samples
+                ],
                 "num_weight_terms": int(self.num_weight_terms),
                 "skipped_guard_bins": int(self.skipped_guard_bins),
                 "packed_complex_bits": int(self.packed_complex_bits),
@@ -319,10 +372,11 @@ def _reject_deprecated_threshold_contract_fields(data: dict[str, Any]) -> None:
 
 
 __all__ = [
+    "DEFAULT_DETECTOR_WINDOW_SAMPLES",
     "DEPRECATED_DETECTOR_SPACING_FIELDS",
     "DERIVED_DETECTOR_SPACING_INPUT_FIELDS",
     "DetectorCoreProfile",
-    "LOCKED_DETECTOR_WINDOW_SAMPLES",
+    "SUPPORTED_DETECTOR_WINDOW_SAMPLES",
     "LOCKED_NUM_WEIGHT_TERMS",
     "LOCKED_REFERENCE_OFFSET_BINS",
     "LOCKED_SKIPPED_GUARD_BINS",

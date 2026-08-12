@@ -61,11 +61,12 @@ def statistic_contract() -> dict[str, str]:
 
 def fixed_point_contract(
     *,
+    detector_window_samples: int = LOCKED_DETECTOR_WINDOW_SAMPLES,
     reference_offset_bins: int = LOCKED_REFERENCE_OFFSET_BINS,
 ) -> dict[str, Any]:
-    """Return the locked fixed-point detector contract."""
+    """Return the fixed-point detector contract for one run's geometry."""
     return {
-        "detector_window_samples": int(LOCKED_DETECTOR_WINDOW_SAMPLES),
+        "detector_window_samples": int(detector_window_samples),
         "num_weight_terms": int(LOCKED_NUM_WEIGHT_TERMS),
         "skipped_guard_bins": int(max(0, int(reference_offset_bins) - 1)),
         "reference_offset_bins": int(reference_offset_bins),
@@ -194,6 +195,7 @@ def result_schema_object(
         ),
         "threshold": threshold_contract(threshold),
         "fixed_point_contract": fixed_point_contract(
+            detector_window_samples=int(detector_window_samples),
             reference_offset_bins=int(reference_offset_bins),
         ),
         "mask_convention": mask_convention(),
