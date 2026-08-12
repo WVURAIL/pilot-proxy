@@ -25,6 +25,7 @@ CXX                   ?= g++
 # compile device code require it. Override for cross-compiles: make SM=90
 SM                    ?= $(shell nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -n1 | tr -d '. \r')
 DP4A                  ?= 1
+DETECTOR_WINDOW_SAMPLES ?= 128
 BLOCK_THREADS         ?= 64
 GRID_MAX_BLOCKS       ?= 4096
 CONSTANT_WEIGHT_LANES ?= 0
@@ -44,6 +45,7 @@ WARN_FLAGS  := -Xcompiler -Wall
 # Configuration defines shared by the library and CUDA regression test.
 CONFIG_DEFS := \
 	-DFSTAT_USE_DP4A=$(DP4A) \
+	-DFSTAT_DETECTOR_WINDOW_SAMPLES=$(DETECTOR_WINDOW_SAMPLES) \
 	-DFSTAT_BLOCK_THREADS=$(BLOCK_THREADS) \
 	-DFSTAT_GRID_MAX_BLOCKS=$(GRID_MAX_BLOCKS) \
 	-DFSTAT_USE_CONSTANT_WEIGHT_LANES=$(CONSTANT_WEIGHT_LANES) \
@@ -100,7 +102,7 @@ endif
 # timestamp check, so changing them used to reuse stale objects silently.
 # Encode them in a stamp filename: switching any knob invalidates the old
 # stamp and forces a rebuild; rebuilds with unchanged flags stay incremental.
-CONFIG_STAMP := .config_sm$(SM)_dp4a$(DP4A)_bt$(BLOCK_THREADS)_gmb$(GRID_MAX_BLOCKS)_cwl$(CONSTANT_WEIGHT_LANES)_swl$(SHARED_WEIGHT_LANES).stamp
+CONFIG_STAMP := .config_sm$(SM)_dp4a$(DP4A)_k$(DETECTOR_WINDOW_SAMPLES)_bt$(BLOCK_THREADS)_gmb$(GRID_MAX_BLOCKS)_cwl$(CONSTANT_WEIGHT_LANES)_swl$(SHARED_WEIGHT_LANES).stamp
 
 $(CONFIG_STAMP):
 	@rm -f .config_*.stamp
@@ -121,12 +123,12 @@ debug: $(SOURCES) $(HEADERS)
 	$(NVCC) $(DEBUG_BUILD) -o $(TARGET) $(SOURCES)
 	@echo "Built $(TARGET) (DEBUG) for SM $(SM)"
 
-$(REF_TEST): $(REF_TEST_SOURCES) $(REF_TEST_HEADERS)
-	$(CXX) -std=c++14 -O2 -Wall -I. -o $@ $(REF_TEST_SOURCES)
+$(REF_TEST): $(REF_TEST_SOURCES) $(REF_TEST_HEADERS) $(CONFIG_STAMP)
+	$(CXX) -std=c++14 -O2 -Wall $(CONFIG_DEFS) -I. -o $@ $(REF_TEST_SOURCES)
 	@echo "Built $(REF_TEST)"
 
-$(C_HEADER_TEST_OBJ): tests/test_c_header.c f_statistic.h config.h
-	$(CC) -std=c11 -Wall -I. -c tests/test_c_header.c -o $@
+$(C_HEADER_TEST_OBJ): tests/test_c_header.c f_statistic.h config.h $(CONFIG_STAMP)
+	$(CC) -std=c11 -Wall $(CONFIG_DEFS) -I. -c tests/test_c_header.c -o $@
 	@echo "Compiled C header smoke test"
 
 test_c_header: $(C_HEADER_TEST_OBJ)
@@ -170,6 +172,7 @@ info:
 	@echo "Target:       $(TARGET)"
 	@echo "SM Version:   $(if $(SM),$(SM),(not detected))"
 	@echo "DP4A:         $(DP4A)"
+	@echo "Window samples: $(DETECTOR_WINDOW_SAMPLES)"
 	@echo "Block threads: $(BLOCK_THREADS)"
 	@echo "Grid max blocks: $(GRID_MAX_BLOCKS)"
 	@echo "Constant weight lanes: $(CONSTANT_WEIGHT_LANES)"
@@ -205,6 +208,8 @@ help:
 	@echo "  SM=XX   Set compute capability (default: auto-detected via nvidia-smi)"
 	@echo "          Common values: 70 (V100), 80 (A100), 86 (RTX 30xx),"
 	@echo "                         89 (RTX 40xx/Ada), 90 (H100)"
+	@echo "  DETECTOR_WINDOW_SAMPLES=K"
+	@echo "          Set detector-window samples (default: 128; supported: 64, 128)"
 	@echo "  GRID_MAX_BLOCKS=N"
 	@echo "          Set maximum power-accumulation grid blocks (default: 4096)"
 	@echo "  CONSTANT_WEIGHT_LANES=0|1"
