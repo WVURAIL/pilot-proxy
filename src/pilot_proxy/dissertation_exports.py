@@ -32,6 +32,7 @@ PRODUCER = "pilot_proxy.dissertation_exports"
 PRODUCER_VERSION = 1
 DEFAULT_REPOSITORY = "WVURAIL/pilot-proxy"
 DEFAULT_CENSUS_RADIUS_MILES = 120.0
+FULL_CENSUS_RADIUS_MILES = 500.0
 KM_PER_MILE = 1.609344
 
 
@@ -513,13 +514,32 @@ def create_export(
         artifacts: list[dict[str, Any]] = []
 
         census_source = repo_root / "data" / "census" / "census.csv"
-        census_rows = _census_rows(census_source, census_radius_miles)
-        census_path = temp_root / "census_inner_120mi.csv"
-        count = _write_csv(census_path, CENSUS_COLUMNS, census_rows)
+
+        full_census_rows = _census_rows(census_source, FULL_CENSUS_RADIUS_MILES)
+        full_census_path = temp_root / "census_full_500mi.csv"
+        count = _write_csv(full_census_path, CENSUS_COLUMNS, full_census_rows)
         artifacts.append(
             _artifact_record(
-                census_path,
-                relative_path=census_path.name,
+                full_census_path,
+                relative_path=full_census_path.name,
+                rows=count,
+                owner="pilot-proxy",
+                authority="authoritative-source-export",
+                description=(
+                    "Complete on-air ATSC 1.0 UHF emitter-channel census within "
+                    f"{FULL_CENSUS_RADIUS_MILES:g} miles of DRAO."
+                ),
+                source_inputs=[str(census_source.relative_to(repo_root))],
+            )
+        )
+
+        inner_census_rows = _census_rows(census_source, census_radius_miles)
+        inner_census_path = temp_root / "census_inner_120mi.csv"
+        count = _write_csv(inner_census_path, CENSUS_COLUMNS, inner_census_rows)
+        artifacts.append(
+            _artifact_record(
+                inner_census_path,
+                relative_path=inner_census_path.name,
                 rows=count,
                 owner="pilot-proxy",
                 authority="authoritative-source-subset",
@@ -603,7 +623,10 @@ def create_export(
                 "summary_snapshot_id": summary.get("snapshot_id", "unknown"),
                 "summary_sha256": _sha256(summary_path),
             },
-            "parameters": {"census_radius_miles": census_radius_miles},
+            "parameters": {
+                "census_radius_miles": census_radius_miles,
+                "full_census_radius_miles": FULL_CENSUS_RADIUS_MILES,
+            },
             "complete": all(record["status"] == "available" for record in artifacts),
             "artifacts": artifacts,
         }

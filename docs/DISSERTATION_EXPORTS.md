@@ -21,8 +21,9 @@ PYTHONPATH=src python tools/export_dissertation_data.py \
 
 The default export is intentionally **partial**. It always includes:
 
-- the inner-120-mile transmitter-census subset derived from
+- the complete 500-mile transmitter census derived from
   `data/census/census.csv`;
+- the inner-120-mile subset used for the detailed map panel;
 - the current epoch-operating-point summary;
 - the current 23-channel evidence-status matrix; and
 - the current channel-33 policy comparison.

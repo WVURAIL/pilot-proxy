@@ -153,6 +153,10 @@ def test_partial_export_is_deterministic_and_verifiable(tmp_path: Path) -> None:
         rows = list(csv.DictReader(handle))
     assert [row["callsign"] for row in rows] == ["NEAREST", "NEAR"]
 
+    with (output / "census_full_500mi.csv").open(newline="", encoding="utf-8") as handle:
+        rows = list(csv.DictReader(handle))
+    assert [row["callsign"] for row in rows] == ["NEAREST", "NEAR", "FAR"]
+
     statuses = {
         record["path"]: record["status"] for record in manifest["artifacts"]
     }
