@@ -6,7 +6,7 @@ CUDA_LIB := cuda/libfstatistic.so
 CACHED_CUDA_LIB := $(CUDA_CACHE_DIR)/libfstatistic.so
 PYTHON_TEST_ENV := MPLBACKEND=Agg PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PILOT_PROXY_USE_TEX=0 PYTHONPATH=src
 
-.PHONY: build-kernel test-kernel test-python test generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs
+.PHONY: build-kernel test-kernel test-python test integration-check generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs
 
 build-kernel:
 	$(MAKE) -C cuda
@@ -22,6 +22,10 @@ test-python:
 
 test: test-kernel test-python
 
+integration-check:
+	$(PYTHON) scripts/check_test_environment.py --integration
+	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests/datatrawl -q -rs
+
 docs-specs:
 	$(PYTHON) tools/generate_doc_specs.py
 
@@ -35,6 +39,7 @@ docs: docs-specs
 	@echo "PDFs in docs/out/"
 
 release-check:
+	$(PYTHON) scripts/check_test_environment.py
 	bash scripts/check_no_legacy_guard_terms.sh
 	$(PYTHON) scripts/check_current_product_vocabulary.py
 	$(PYTHON_TEST_ENV) $(PYTHON) tools/emit_fxfft_tables.py --check

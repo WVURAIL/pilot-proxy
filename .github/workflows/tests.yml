@@ -53,11 +53,7 @@ jobs:
       - run: python -m pip install -U pip setuptools wheel
       - run: python -m pip install -e "./datatrawl[cadc,survey]"
       - run: python -m pip install -e ".[chime,plot,test]"
-      - run: python -m pytest tests/datatrawl -q
-        env:
-          MPLBACKEND: Agg
-          PYTEST_DISABLE_PLUGIN_AUTOLOAD: "1"
-          PILOT_PROXY_USE_TEX: "0"
+      - run: make integration-check
 
   wheel-resources:
     runs-on: ubuntu-latest
