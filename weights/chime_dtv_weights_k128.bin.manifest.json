@@ -50,50 +50,81 @@
   ],
   "receiver_profile": {
     "baseband_frame": {
-      "channel_center_normalized": 0.0
+      "channel_center_normalized": 0.0,
+      "physical_dc_normalized": 0.0
     },
     "channelizer": {
       "coarse_channel_center_offset_hz": 390625.0,
-      "coarse_channel_width_hz": 390625.0,
       "frequency_axis": {
-        "channel_index_to_rf_hz": "rf_hz = upper_hz - (coarse_channel_index + 1) * bandwidth_hz / num_adc_inputs",
         "order": "descending_rf",
-        "spectral_sense": "inverted",
-        "verification_required": false,
-        "verified_note": "frame + sense verified against measured pilot ensemble, 2026-07-29"
+        "spectral_sense": "inverted"
       },
       "input_sample_rate_hz": 800000000.0,
       "num_coarse_channels": 1024,
-      "output_sample_rate_hz": 390625.0,
       "pfb_fft_size": 2048,
       "response": "implementation_specific",
-      "spectral_sense": "inverted",
       "taps": 4,
       "type": "pfb"
     },
     "detector_adapter": {
       "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
-      "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
       "detector_window_samples": 128,
       "dtv_bandwidth_hz": 6000000.0,
       "fine_bin_enbw_hz": 3051.7578125,
-      "fine_bin_width_hz": 3051.7578125,
       "pilot_below_data_db": 11.3,
       "pilot_capture_efficiency": 1.0,
-      "windows_per_stream_formula": "frame_size_samples / detector_window_samples"
+      "time_reverse_detector_windows_before_kernel": true
     },
     "framing": {
-      "frame_size_samples": 16384,
-      "frame_size_unit": "channelized complex samples per input stream"
+      "frame_size_samples": 16384
     },
     "input_streams": {
       "combine_default": "incoherent_power_sum_over_streams",
       "num_input_streams": 2048,
       "stream_map_required": true,
-      "stream_unit": "input_stream"
+      "stream_unit": "feed_polarization"
     },
     "instrument_name": "CHIME",
-    "profile_status": "baseband_frame_verified_2026_07_29",
+    "metadata": {
+      "annotations": {
+        "baseband_frame": {
+          "convention": "coarse_channel_center_at_dft_dc",
+          "note": "Pilot transmitter ensemble measured within +-1.3 kHz of nominal ATSC pilot under center-at-DC framing; legacy center-at-Nyquist (+0.5) assumption disconfirmed on this data lineage. channel_center_normalized_odd_channels is available if a per-parity PFB decimation twiddle is ever demonstrated; parity is defined on this profile's coarse_channel_index convention (index = CHIME freq_id - 1).",
+          "verified_against": "CHIME/FRB baseband raw (NT_3.1.0): event 68399317 freq_id 844 full-band spectrum; chime-pilots scan integrated_spectrum products (2018-2026), 2026-07-29"
+        },
+        "channelizer": {
+          "architecture": "fx_f_engine",
+          "coarse_channel_width_hz": 390625.0,
+          "output_sample_rate_hz": 390625.0,
+          "spectral_sense": "inverted"
+        },
+        "channelizer_frequency_axis": {
+          "channel_index_to_rf_hz": "rf_hz = upper_hz - (coarse_channel_index + 1) * bandwidth_hz / num_adc_inputs",
+          "verification_required": false,
+          "verified_note": "frame + sense verified against measured pilot ensemble, 2026-07-29"
+        },
+        "detector_adapter": {
+          "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
+          "fine_bin_width_hz": 3051.7578125,
+          "windows_per_stream_formula": "frame_size_samples / detector_window_samples"
+        },
+        "framing": {
+          "frame_size_samples_may_be_overridden_per_run": true,
+          "frame_size_unit": "channelized complex samples per input stream"
+        },
+        "rf_band": {
+          "bandwidth_hz": 400000000.0,
+          "center_hz": 600000000.0
+        }
+      },
+      "digitizer": {
+        "adc_bits": 8,
+        "adc_sample_rate_hz": 800000000.0,
+        "input_unit": "feed_polarization",
+        "num_adc_inputs": 2048
+      },
+      "profile_status": "baseband_frame_verified_2026_07_29"
+    },
     "quantization": {
       "adapter_output_format": "complex_int4_packed_int8",
       "bits_per_component": 4,
@@ -105,20 +136,18 @@
     },
     "receiver_profile_id": "chime_dtv_fengine_v2",
     "rf_band": {
-      "bandwidth_hz": 400000000.0,
       "lower_hz": 400000000.0,
       "upper_hz": 800000000.0
     },
     "schema_version": "fstat_receiver_profile_v1"
   },
-  "receiver_profile_hash": "135bb194cfa58f67287e5fa7f7975162c8c467d6c84d7dfe26da307ed73afea2",
+  "receiver_profile_hash": "1d203f5db2cac7d3fdb8833685e827af77097cdc95a7fc193b34e62616fa0492",
   "schema_version": "fstat_weight_manifest_v2",
   "target_reference_layout": [
     {
       "adaptive_reference_placement": true,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 470312500.0,
       "coarse_channel_index": 843,
       "dc_reference_collision": false,
@@ -184,7 +213,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 476171875.0,
       "coarse_channel_index": 828,
       "dc_reference_collision": false,
@@ -250,7 +278,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 482421875.0,
       "coarse_channel_index": 812,
       "dc_reference_collision": false,
@@ -316,7 +343,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 488281250.0,
       "coarse_channel_index": 797,
       "dc_reference_collision": false,
@@ -382,7 +408,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 494140625.0,
       "coarse_channel_index": 782,
       "dc_reference_collision": false,
@@ -448,7 +473,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 500390625.0,
       "coarse_channel_index": 766,
       "dc_reference_collision": false,
@@ -514,7 +538,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 506250000.0,
       "coarse_channel_index": 751,
       "dc_reference_collision": false,
@@ -580,7 +603,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 512500000.0,
       "coarse_channel_index": 735,
       "dc_reference_collision": false,
@@ -646,7 +668,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 518359375.0,
       "coarse_channel_index": 720,
       "dc_reference_collision": false,
@@ -712,7 +733,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 524218750.0,
       "coarse_channel_index": 705,
       "dc_reference_collision": false,
@@ -778,7 +798,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 530468750.0,
       "coarse_channel_index": 689,
       "dc_reference_collision": false,
@@ -844,7 +863,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 536328125.0,
       "coarse_channel_index": 674,
       "dc_reference_collision": false,
@@ -910,7 +928,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 542187500.0,
       "coarse_channel_index": 659,
       "dc_reference_collision": false,
@@ -976,7 +993,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 548437500.0,
       "coarse_channel_index": 643,
       "dc_reference_collision": false,
@@ -1042,7 +1058,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 554296875.0,
       "coarse_channel_index": 628,
       "dc_reference_collision": false,
@@ -1108,7 +1123,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 560156250.0,
       "coarse_channel_index": 613,
       "dc_reference_collision": false,
@@ -1174,7 +1188,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 566406250.0,
       "coarse_channel_index": 597,
       "dc_reference_collision": false,
@@ -1240,7 +1253,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 572265625.0,
       "coarse_channel_index": 582,
       "dc_reference_collision": false,
@@ -1306,7 +1318,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 578125000.0,
       "coarse_channel_index": 567,
       "dc_reference_collision": false,
@@ -1372,7 +1383,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 584375000.0,
       "coarse_channel_index": 551,
       "dc_reference_collision": false,
@@ -1438,7 +1448,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 590234375.0,
       "coarse_channel_index": 536,
       "dc_reference_collision": false,
@@ -1504,7 +1513,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 596484375.0,
       "coarse_channel_index": 520,
       "dc_reference_collision": false,
@@ -1570,7 +1578,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 602343750.0,
       "coarse_channel_index": 505,
       "dc_reference_collision": false,

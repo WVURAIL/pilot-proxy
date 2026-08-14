@@ -24,10 +24,7 @@ from pilot_proxy.detector_contract import (
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import quantize_complex_numpy
-from pilot_proxy.detector_geometry import (
-    SPECTRAL_SENSE_NORMAL,
-    spectral_sense_requires_time_reversal,
-)
+from pilot_proxy.detector_geometry import SPECTRAL_SENSE_NORMAL
 from pilot_proxy.detector_weights import (
     CRC32_UNSIGNED_MASK,
     CRC_SIZE,
@@ -49,7 +46,6 @@ HZ_PER_MHZ = 1.0e6
 WEIGHT_TERM_TARGET = 0
 WEIGHT_TERM_REF_LOWER = 1
 WEIGHT_TERM_REF_UPPER = 2
-NORMALIZED_NYQUIST_CENTER = 0.5
 REFERENCE_SELECTION_SCORE_NOMINAL = 0.6
 REFERENCE_SELECTION_SCORE_ADAPTIVE = 0.5
 REFERENCE_SELECTION_METHOD = "adaptive_circular_reference_placement_v1"
@@ -62,16 +58,7 @@ REFERENCE_PLACEMENT_STATUS_EDGE_WRAPPED_AND_DC_SHIFTED = (
 REFERENCE_PLACEMENT_REASON_NOMINAL = "nominal"
 REFERENCE_PLACEMENT_REASON_EDGE_WRAPPED = "edge_reference_wrapped"
 REFERENCE_PLACEMENT_REASON_DC_SHIFTED = "dc_reference_shifted_away"
-REFERENCE_FORBIDDEN_DC_NORMALIZED = NORMALIZED_NYQUIST_CENTER
-PHYSICAL_DC_NORMALIZED = 0.0
 BASEBAND_FRAME_MODE_EXPLICIT = "explicit_profile_frame"
-BASEBAND_FRAME_MODE_LEGACY = "legacy_center_nyquist_default"
-BASEBAND_FRAME_LEGACY_WARNING = (
-    "receiver profile does not declare baseband_frame.channel_center_normalized; "
-    "using legacy center-at-Nyquist (+0.5) convention. This convention was "
-    "disconfirmed for CHIME/FRB baseband raw products on 2026-07-29; declare "
-    "the frame explicitly."
-)
 
 
 def _signed_circular_delta(a: float, b: float) -> float:
@@ -82,25 +69,14 @@ def _signed_circular_delta(a: float, b: float) -> float:
 def _resolve_frame_convention(
     profile: "ReceiverProfile", coarse_channel_index: int
 ) -> tuple[float, float, str]:
-    """Resolve (channel_center_normalized, forbidden_dc_normalized, mode).
+    """Return the explicitly declared frame center and physical DC."""
+    return (
+        float(profile.frame_center_normalized(coarse_channel_index)),
+        float(profile.forbidden_dc_normalized(coarse_channel_index)),
+        BASEBAND_FRAME_MODE_EXPLICIT,
+    )
 
-    Explicit profiles pin the coarse-channel center in DFT coordinates and
-    guard the physical data DC bin (normalized 0.0, where the quantizer-bias
-    spur lives). Profiles without a declared frame reproduce the legacy
-    behavior bit-for-bit: center and guard both at normalized 0.5.
-    """
-    center = None
-    accessor = getattr(profile, "frame_center_normalized", None)
-    if callable(accessor):
-        center = accessor(coarse_channel_index)
-    if center is None:
-        return (
-            float(NORMALIZED_NYQUIST_CENTER),
-            float(REFERENCE_FORBIDDEN_DC_NORMALIZED),
-            BASEBAND_FRAME_MODE_LEGACY,
-        )
-    return (float(center), float(PHYSICAL_DC_NORMALIZED),
-            BASEBAND_FRAME_MODE_EXPLICIT)
+
 REFERENCE_FORBIDDEN_COLLISION_RULE = (
     "circular_normalized_distance <= 0.5 / detector_window_samples"
 )
@@ -178,7 +154,7 @@ def _reference_collides_with_dc(
     normalized_frequency: float,
     *,
     detector_window_samples: int,
-    dc_normalized: float = REFERENCE_FORBIDDEN_DC_NORMALIZED,
+    dc_normalized: float,
 ) -> bool:
     fine_bin = 1.0 / float(detector_window_samples)
     return bool(
@@ -195,7 +171,7 @@ def _dc_in_skipped_guard(
     *,
     reference_offset_bins: int,
     detector_window_samples: int,
-    dc_normalized: float = REFERENCE_FORBIDDEN_DC_NORMALIZED,
+    dc_normalized: float,
 ) -> bool:
     fine_bin = 1.0 / float(detector_window_samples)
     signed_bins_to_dc = _signed_circular_delta(
@@ -217,7 +193,7 @@ def _resolve_one_reference_offset(
     detector_window_samples: int,
     requested_offset_bins: int,
     direction: int,
-    dc_normalized: float = REFERENCE_FORBIDDEN_DC_NORMALIZED,
+    dc_normalized: float,
 ) -> dict[str, Any]:
     if int(direction) not in {-1, 1}:
         raise ValueError("direction must be -1 or +1")
@@ -271,7 +247,7 @@ def _reference_placement(
     *,
     detector_window_samples: int,
     reference_offset_bins: int,
-    dc_normalized: float = REFERENCE_FORBIDDEN_DC_NORMALIZED,
+    dc_normalized: float,
 ) -> dict[str, Any]:
     lower = _resolve_one_reference_offset(
         target_normalized_frequency,
@@ -431,11 +407,6 @@ def target_layout(
         "baseband_frame_center_normalized": float(frame_center),
         "baseband_frame_mode": frame_mode,
         "forbidden_dc_normalized": float(forbidden_dc),
-        "baseband_frame_warning": (
-            BASEBAND_FRAME_LEGACY_WARNING
-            if frame_mode == BASEBAND_FRAME_MODE_LEGACY
-            else ""
-        ),
         "coarse_channel_center_hz": float(selection.coarse_channel_center_hz),
         "fine_bin_offset_hz": float(selection.fine_bin_offset_hz),
         "detector_fine_bin_width_hz": float(fine_bin_width_hz),
@@ -535,30 +506,13 @@ def profile_requires_window_time_reversal(
     profile: ReceiverProfile,
     weight_coordinate_system: str,
 ) -> bool:
-    """Whether the deployed adapter must time-reverse each detector window.
-
-    The post-spectral-sense weight synthesis emits templates of the form
-    ``exp(-2j*pi*f*k)`` and the kernel computes ``x . conj(w)``, so a raw
-    baseband tone at ``+f`` (the true-sense frame) is only matched after the
-    adapter reverses each K-sample detector window. For explicit-baseband-
-    frame profiles (``channel_center_normalized`` declared) the synthesis is
-    performed in the raw data frame with the profile's true sense and
-    ASSUMES that adapter flip regardless of the sense (see
-    generate_weight_table_from_receiver_profile): reversal is required even
-    for upright receivers such as CHORD. Legacy profiles (no declared frame)
-    keep the historical sense-derived rule bit-for-bit, and raw-input-
-    coordinate banks never request reversal.
-    """
-    coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
-    if coordinate_system != WEIGHT_COORDINATE_POST_SPECTRAL_SENSE:
-        return False
-    profile_declares_frame = (
-        getattr(profile, "channel_center_normalized", None) is not None
-        or getattr(profile, "channel_center_normalized_odd", None) is not None
+    """Return the adapter preprocessing declared by the profile."""
+    coordinate_system = normalize_weight_coordinate_system(
+        weight_coordinate_system
     )
-    if profile_declares_frame:
-        return True
-    return spectral_sense_requires_time_reversal(profile.spectral_sense)
+    if coordinate_system == WEIGHT_COORDINATE_RAW_INPUT:
+        return False
+    return bool(profile.time_reverse_detector_windows_before_kernel)
 
 
 def generate_weight_table_from_receiver_profile(
@@ -576,33 +530,12 @@ def generate_weight_table_from_receiver_profile(
         core, detector_window_samples=int(profile.detector_window_samples)
     )
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
-    # Frame semantics:
-    #  - Explicit baseband frame (profile declares channel_center_normalized):
-    #    layouts are computed in the raw data frame with the profile's true
-    #    spectral sense. fine_bin_offset_hz under the true sense IS the
-    #    raw-frame offset, and the adapter's window time-reversal plus the
-    #    kernel's conjugated dot product place the response exactly at the
-    #    synthesized raw-frame frequency (verified empirically against the
-    #    measured ch14 pilot ensemble, 2026-07-29). The coordinate-system
-    #    label records that the adapter flip is assumed; it no longer
-    #    transforms the synthesis.
-    #  - Legacy (no declared frame): preserve the historical sense-to-normal
-    #    override bit-for-bit.
-    profile_declares_frame = (
-        getattr(profile, "channel_center_normalized", None) is not None
-        or getattr(profile, "channel_center_normalized_odd", None) is not None
-    )
-    # Explicit frames: the post-sense (detector) coordinate is generated with
-    # the profile's true sense (validated: ch14 lobe on the measured pilot,
-    # 2026-07-29); the raw (native inverted) coordinate is its exact mirror,
-    # produced by the sense-to-normal override. Legacy keeps the historical
-    # pairing bit-for-bit.
     use_normal_override = (
         coordinate_system == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
-        and not profile_declares_frame
+        and not profile.time_reverse_detector_windows_before_kernel
     ) or (
         coordinate_system == WEIGHT_COORDINATE_RAW_INPUT
-        and profile_declares_frame
+        and profile.time_reverse_detector_windows_before_kernel
     )
     generation_profile = (
         replace(profile, spectral_sense=SPECTRAL_SENSE_NORMAL)
@@ -671,7 +604,7 @@ def _weight_header_bytes(
     weights_bytes: bytes,
 ) -> bytes:
     reference_name = b"profile_generated"
-    profile_name = profile.name.encode("utf-8")
+    profile_name = profile.receiver_profile_id.encode("utf-8")
     header_size = HEADER_FIXED_SIZE + len(reference_name) + len(profile_name) + CRC_SIZE
     fixed_without_crc = struct.pack(
         HEADER_FIXED_FMT,
@@ -746,23 +679,12 @@ def write_weight_bank_from_receiver_profile(
             "sample_bits_per_component": int(core.sample_bits_per_component),
         },
         "receiver_profile_hash": receiver_profile_hash(profile),
-        "receiver_profile": profile.to_nested_dict(),
+        "receiver_profile": profile.to_dict(),
         "physical_channels": [int(channel) for channel in physical_channels],
         "forbidden_tone_policy": {
-            "forbidden_tone": (
-                "physical_data_dc"
-                if layouts
-                and layouts[0].get("baseband_frame_mode")
-                == BASEBAND_FRAME_MODE_EXPLICIT
-                else "coarse_channel_dc"
-            ),
+            "forbidden_tone": "physical_data_dc",
             "forbidden_tone_normalized": float(
-                layouts[0].get(
-                    "forbidden_dc_normalized",
-                    REFERENCE_FORBIDDEN_DC_NORMALIZED,
-                )
-                if layouts
-                else REFERENCE_FORBIDDEN_DC_NORMALIZED
+                layouts[0]["forbidden_dc_normalized"]
             ),
             "forbidden_collision_rule": REFERENCE_FORBIDDEN_COLLISION_RULE,
             "forbidden_collision_half_width_bins": 0.5,

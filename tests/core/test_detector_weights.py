@@ -8,7 +8,10 @@ import pytest
 
 from pilot_proxy.detector_weights import DetectorWeightBank
 from pilot_proxy.integration.receiver_profile import load_receiver_profile
-from pilot_proxy.integration.detector_core import DetectorCoreProfile
+from pilot_proxy.integration.detector_core import (
+    DetectorCoreProfile,
+    load_detector_core_profile,
+)
 from pilot_proxy.integration.weight_generation import DetectorCoreLayout, target_layout
 from pilot_proxy.paths import CONFIGS_DIR
 from pilot_proxy.paths import DEFAULT_WEIGHTS_PATH
@@ -61,11 +64,15 @@ def test_weight_bank_rejects_unknown_pilot_frequency() -> None:
         )
 
 
-def test_deprecated_detector_spacing_field_is_rejected() -> None:
+def test_noncontract_detector_spacing_field_is_rejected() -> None:
     old_key = "_".join(("reference", "guard", "bins"))
+    data = load_detector_core_profile(
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+    ).to_dict()
+    data[old_key] = 2
 
-    with pytest.raises(ValueError, match="Deprecated detector-spacing field"):
-        DetectorCoreProfile.from_dict({old_key: 2})
+    with pytest.raises(ValueError, match="unknown fields"):
+        DetectorCoreProfile.from_dict(data)
 
 
 def test_weight_bank_reports_channel_14_wrapped_boundary_layout() -> None:

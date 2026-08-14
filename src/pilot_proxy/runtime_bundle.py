@@ -90,7 +90,7 @@ def _reference_placement_summary_from_layouts(
         "num_forbidden_tone_in_skipped_guard": int(len(skipped_guard)),
         "channels_with_forbidden_tone_in_skipped_guard": skipped_guard,
         "forbidden_tone_policy": {
-            "forbidden_tone": "coarse_channel_dc",
+            "forbidden_tone": "physical_data_dc",
         },
     }
 
@@ -1015,7 +1015,7 @@ def export_runtime_weight_bundle(
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": detector_contract["input_coordinate_system"],
         "input_preprocessing": detector_contract["input_preprocessing"],
-        "receiver_profile_id": profile.name,
+        "receiver_profile_id": profile.receiver_profile_id,
         "receiver_channel_id_namespace": channel_id_namespace,
         "detector_contract_sha256": contract_digest,
         "weights_sha256": weights_digest,

@@ -518,7 +518,6 @@ def _cmd_check_layout(args: argparse.Namespace) -> None:
     payload = {
         "schema_version": "fstat_layout_check_v1",
         "receiver_profile": profile.to_dict(),
-        "receiver_profile_nested": profile.to_nested_dict(),
         "stream_map": None if stream_map is None else stream_map.to_dict(),
         "layout_check": check,
     }
@@ -544,7 +543,6 @@ def _cmd_check_profile(args: argparse.Namespace) -> None:
     payload = {
         "schema_version": "fstat_profile_check_v1",
         "receiver_profile": profile.to_dict(),
-        "receiver_profile_nested": profile.to_nested_dict(),
         "detector_core_profile": (
             None if detector_core is None else detector_core.to_dict()
         ),
@@ -555,7 +553,7 @@ def _cmd_check_profile(args: argparse.Namespace) -> None:
         print(f"Wrote {args.output_json}")
     print("receiver_profile_id, num_input_streams, frame_size_samples, spectral_sense")
     print(
-        f"{profile.name}, {int(profile.num_input_streams)}, "
+        f"{profile.receiver_profile_id}, {int(profile.num_input_streams)}, "
         f"{int(profile.frame_size_samples)}, {profile.spectral_sense}"
     )
 

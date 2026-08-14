@@ -1,11 +1,11 @@
 # coding=utf-8
-"""Detector-core profile for the CUDA F-statistic kernel contract."""
+"""Strict detector-core profile for the CUDA F-statistic contract."""
 
 from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +14,6 @@ from .schemas import (
     DETECTOR_CORE_PROFILE_SCHEMA_VERSION,
 )
 
-# The detector window length (K) is a per-receiver compile-time parameter of
-# the CUDA core (FSTAT_DETECTOR_WINDOW_SAMPLES). It scales with the receiver
-# coarse-channel width to hold the fine-bin width near 3.05 kHz: CHIME uses
-# K=128 on 390.625 kHz channels; CHORD uses K=64 on 195.3125 kHz channels.
-# The window count per detector block stays frozen at 128 for every receiver.
 DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
 SUPPORTED_DETECTOR_WINDOW_SAMPLES = frozenset({64, 128})
 LOCKED_NUM_WEIGHT_TERMS = 3
@@ -28,115 +23,112 @@ MIN_SKIPPED_GUARD_BINS = 1
 MIN_REFERENCE_OFFSET_BINS = MIN_SKIPPED_GUARD_BINS + 1
 LOCKED_PACKED_COMPLEX_BITS = 8
 LOCKED_SAMPLE_BITS_PER_COMPONENT = 4
+LOCKED_INPUT_FORMAT = "complex_int4_packed_int8"
+LOCKED_POWER_ACCUMULATOR = "uint64"
+LOCKED_STATISTIC = "F = 2 * P_target / (P_ref_lower + P_ref_upper)"
+LOCKED_PILOT_EXCESS = "rho = F - 1"
+LOCKED_HOST_MASKING_POLICY = "positive_excess_from_uint64_powers"
 DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET = 16
 MAG_SQUARED_ACCUMULATOR_BITS_TARGET = 32
 POWER_SUM_ACCUMULATOR_BITS = 64
-_REFERENCE_FIELD_PART = "reference"
-_OLD_GAP_FIELD_PART = "guard"
-_OFFSET_FIELD_PART = "offset"
-_BINS_FIELD_PART = "bins"
-_NOMINAL_FIELD_PART = "nominal"
-_REQUESTED_FIELD_PART = "requested"
-_SELECTED_FIELD_PART = "selected"
-_MIN_EMPIRICAL_FIELD_PART = "min_empirical"
-DEPRECATED_DETECTOR_SPACING_FIELDS = frozenset(
+
+_TOP_LEVEL_FIELDS = frozenset(
+    {"schema_version", "detector_core_id", "kernel_contract", "fixed_point_limits"}
+)
+_KERNEL_CONTRACT_FIELDS = frozenset(
     {
-        "_".join((_REFERENCE_FIELD_PART, _OLD_GAP_FIELD_PART, _BINS_FIELD_PART)),
-        "_".join(
-            (
-                _REFERENCE_FIELD_PART,
-                _OLD_GAP_FIELD_PART,
-                _BINS_FIELD_PART,
-                _NOMINAL_FIELD_PART,
-            )
-        ),
-        "_".join(
-            (
-                _REFERENCE_FIELD_PART,
-                _OLD_GAP_FIELD_PART,
-                _BINS_FIELD_PART,
-                _REQUESTED_FIELD_PART,
-            )
-        ),
-        "_".join(
-            (
-                _REFERENCE_FIELD_PART,
-                _OLD_GAP_FIELD_PART,
-                _BINS_FIELD_PART,
-                _SELECTED_FIELD_PART,
-            )
-        ),
-        "_".join(
-            (
-                _REFERENCE_FIELD_PART,
-                _OLD_GAP_FIELD_PART,
-                _BINS_FIELD_PART,
-                _MIN_EMPIRICAL_FIELD_PART,
-            )
-        ),
-        "_".join((_OLD_GAP_FIELD_PART, _BINS_FIELD_PART)),
-        "_".join(
-            (
-                _REFERENCE_FIELD_PART,
-                _OFFSET_FIELD_PART,
-                _BINS_FIELD_PART,
-                _NOMINAL_FIELD_PART,
-            )
-        ),
+        "detector_window_samples",
+        "supported_detector_window_samples",
+        "num_weight_terms",
+        "skipped_guard_bins",
+        "packed_complex_bits",
+        "sample_bits_per_component",
+        "input_format",
+        "power_accumulator",
+        "statistic",
+        "pilot_excess",
+        "host_masking_policy",
+        "per_frequency_threshold",
     }
 )
-DERIVED_DETECTOR_SPACING_INPUT_FIELDS = frozenset(
-    {"_".join((_REFERENCE_FIELD_PART, _OFFSET_FIELD_PART, _BINS_FIELD_PART))}
+_FIXED_POINT_LIMIT_FIELDS = frozenset(
+    {
+        "dot_product_component_accumulator_bits_target",
+        "mag_squared_accumulator_bits_target",
+        "power_sum_accumulator_bits",
+    }
 )
-DEPRECATED_THRESHOLD_CONTRACT_FIELDS = frozenset({"threshold_input_to_kernel"})
 
 
-def _mapping_or_empty(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+def _validate_exact_keys(
+    data: Mapping[str, Any],
+    *,
+    required: frozenset[str],
+    context: str,
+) -> None:
+    keys = {str(key) for key in data}
+    missing = sorted(required - keys)
+    unknown = sorted(keys - required)
+    if missing:
+        raise ValueError(f"{context} is missing required fields: {missing}")
+    if unknown:
+        raise ValueError(f"{context} contains unknown fields: {unknown}")
 
 
-def _contract_value(
-    kernel_contract: dict[str, Any],
-    raw: dict[str, Any],
+def _require_mapping(
+    data: Mapping[str, Any],
     key: str,
-    default: Any,
-) -> Any:
-    if key in kernel_contract:
-        return kernel_contract[key]
-    return raw.get(key, default)
+    *,
+    required: frozenset[str],
+    context: str,
+) -> dict[str, Any]:
+    value = data[key]
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{context} must be an object.")
+    out = dict(value)
+    _validate_exact_keys(out, required=required, context=context)
+    return out
+
+
+def _require_nonempty_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field_name} must be a non-empty string.")
+    if value != value.strip():
+        raise ValueError(f"{field_name} must not contain surrounding whitespace.")
+    return value
+
+
+def _require_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer.")
+    return value
+
+
+def _require_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean.")
+    return value
 
 
 @dataclass(frozen=True)
 class DetectorCoreProfile:
-    """File-backed description of what the CUDA kernel consumes and returns."""
+    """File-backed description of the exact CUDA detector core contract."""
 
-    schema_version: str = DETECTOR_CORE_PROFILE_SCHEMA_VERSION
-    detector_core_id: str = DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1
-    detector_window_samples: int = DEFAULT_DETECTOR_WINDOW_SAMPLES
-    supported_detector_window_samples: tuple[int, ...] = (64, 128)
-    num_weight_terms: int = LOCKED_NUM_WEIGHT_TERMS
-    skipped_guard_bins: int = LOCKED_SKIPPED_GUARD_BINS
-    packed_complex_bits: int = LOCKED_PACKED_COMPLEX_BITS
-    sample_bits_per_component: int = LOCKED_SAMPLE_BITS_PER_COMPONENT
-    input_format: str = "complex_int4_packed_int8"
-    power_accumulator: str = "uint64"
-    statistic: str = "F = 2 * P_target / (P_ref_lower + P_ref_upper)"
-    pilot_excess: str = "rho = F - 1"
-    host_masking_policy: str = "positive_excess_from_uint64_powers"
-    per_frequency_threshold: bool = False
-    fixed_point_limits: dict[str, int] = field(
-        default_factory=lambda: {
-            "dot_product_component_accumulator_bits_target": (
-                DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET
-            ),
-            "mag_squared_accumulator_bits_target": (
-                MAG_SQUARED_ACCUMULATOR_BITS_TARGET
-            ),
-            "power_sum_accumulator_bits": POWER_SUM_ACCUMULATOR_BITS,
-        }
-    )
+    schema_version: str
+    detector_core_id: str
+    detector_window_samples: int
+    supported_detector_window_samples: tuple[int, ...]
+    num_weight_terms: int
+    skipped_guard_bins: int
+    packed_complex_bits: int
+    sample_bits_per_component: int
+    input_format: str
+    power_accumulator: str
+    statistic: str
+    pilot_excess: str
+    host_masking_policy: str
+    per_frequency_threshold: bool
+    fixed_point_limits: dict[str, int]
 
     def __post_init__(self) -> None:
         if self.schema_version != DETECTOR_CORE_PROFILE_SCHEMA_VERSION:
@@ -147,26 +139,20 @@ class DetectorCoreProfile:
         if self.detector_core_id != DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1:
             raise ValueError(f"unsupported detector_core_id: {self.detector_core_id!r}")
         supported = tuple(
-            sorted({int(value) for value in self.supported_detector_window_samples})
+            int(value) for value in self.supported_detector_window_samples
         )
-        if not supported:
+        expected_supported = tuple(sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES))
+        if supported != expected_supported:
             raise ValueError(
-                "supported_detector_window_samples must not be empty."
+                "supported_detector_window_samples must exactly describe the "
+                f"compiled core family {list(expected_supported)}; got "
+                f"{list(supported)}."
             )
-        for value in supported:
-            if value not in SUPPORTED_DETECTOR_WINDOW_SAMPLES:
-                raise ValueError(
-                    "unsupported detector window length in "
-                    f"supported_detector_window_samples: {value}; the core "
-                    "supports "
-                    f"{sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES)}."
-                )
         object.__setattr__(self, "supported_detector_window_samples", supported)
-        if self.detector_window_samples not in supported:
+        if int(self.detector_window_samples) not in supported:
             raise ValueError(
-                "detector_window_samples must be one of the supported window "
-                f"lengths {list(supported)}; got "
-                f"{self.detector_window_samples}."
+                "detector_window_samples must be one of "
+                f"{list(supported)}; got {self.detector_window_samples}."
             )
         if self.num_weight_terms != LOCKED_NUM_WEIGHT_TERMS:
             raise ValueError("num_weight_terms must be locked to 3.")
@@ -175,9 +161,43 @@ class DetectorCoreProfile:
                 "skipped_guard_bins must be at least "
                 f"{MIN_SKIPPED_GUARD_BINS}."
             )
+        if self.packed_complex_bits != LOCKED_PACKED_COMPLEX_BITS:
+            raise ValueError("packed_complex_bits must be locked to 8.")
         if self.sample_bits_per_component != LOCKED_SAMPLE_BITS_PER_COMPONENT:
             raise ValueError("sample_bits_per_component must be locked to 4.")
-        object.__setattr__(self, "fixed_point_limits", dict(self.fixed_point_limits))
+        if self.input_format != LOCKED_INPUT_FORMAT:
+            raise ValueError(f"input_format must be {LOCKED_INPUT_FORMAT!r}.")
+        if self.power_accumulator != LOCKED_POWER_ACCUMULATOR:
+            raise ValueError(
+                f"power_accumulator must be {LOCKED_POWER_ACCUMULATOR!r}."
+            )
+        if self.statistic != LOCKED_STATISTIC:
+            raise ValueError(f"statistic must be {LOCKED_STATISTIC!r}.")
+        if self.pilot_excess != LOCKED_PILOT_EXCESS:
+            raise ValueError(f"pilot_excess must be {LOCKED_PILOT_EXCESS!r}.")
+        if self.host_masking_policy != LOCKED_HOST_MASKING_POLICY:
+            raise ValueError(
+                "host_masking_policy must be "
+                f"{LOCKED_HOST_MASKING_POLICY!r}."
+            )
+        if self.per_frequency_threshold is not False:
+            raise ValueError("per_frequency_threshold must be false.")
+        limits = {str(key): int(value) for key, value in self.fixed_point_limits.items()}
+        expected_limits = {
+            "dot_product_component_accumulator_bits_target": (
+                DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET
+            ),
+            "mag_squared_accumulator_bits_target": (
+                MAG_SQUARED_ACCUMULATOR_BITS_TARGET
+            ),
+            "power_sum_accumulator_bits": POWER_SUM_ACCUMULATOR_BITS,
+        }
+        if limits != expected_limits:
+            raise ValueError(
+                "fixed_point_limits must exactly match the compiled core: "
+                f"expected={expected_limits}, got={limits}."
+            )
+        object.__setattr__(self, "fixed_point_limits", limits)
 
     @property
     def reference_offset_bins(self) -> int:
@@ -186,123 +206,103 @@ class DetectorCoreProfile:
     def with_detector_window_samples(
         self, detector_window_samples: int
     ) -> "DetectorCoreProfile":
-        """Return a copy of this profile with the given window length selected.
-
-        The receiver profile owns the deployed window length (K); the core
-        profile declares which lengths the compiled kernel family supports.
-        Selection re-runs the membership validation in __post_init__.
-        """
+        """Select one supported compile-time detector window length."""
         return replace(
-            self, detector_window_samples=int(detector_window_samples)
+            self,
+            detector_window_samples=int(detector_window_samples),
         )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DetectorCoreProfile":
+        if not isinstance(data, Mapping):
+            raise ValueError("detector core profile must be an object.")
         raw = dict(data)
-        kernel_contract = _mapping_or_empty(raw.get("kernel_contract"))
-        _reject_unsupported_spacing_input_fields(raw)
-        _reject_unsupported_spacing_input_fields(kernel_contract)
-        _reject_deprecated_threshold_contract_fields(raw)
-        _reject_deprecated_threshold_contract_fields(kernel_contract)
-        fixed_point_limits = _mapping_or_empty(raw.get("fixed_point_limits"))
+        _validate_exact_keys(
+            raw,
+            required=_TOP_LEVEL_FIELDS,
+            context="detector core profile",
+        )
+        kernel_contract = _require_mapping(
+            raw,
+            "kernel_contract",
+            required=_KERNEL_CONTRACT_FIELDS,
+            context="detector core profile kernel_contract",
+        )
+        fixed_point_limits = _require_mapping(
+            raw,
+            "fixed_point_limits",
+            required=_FIXED_POINT_LIMIT_FIELDS,
+            context="detector core profile fixed_point_limits",
+        )
+        supported_raw = kernel_contract["supported_detector_window_samples"]
+        if not isinstance(supported_raw, list):
+            raise ValueError(
+                "kernel_contract.supported_detector_window_samples must be a list."
+            )
         return cls(
-            schema_version=str(
-                raw.get(
-                    "schema_version",
-                    DETECTOR_CORE_PROFILE_SCHEMA_VERSION,
-                )
+            schema_version=_require_nonempty_str(
+                raw["schema_version"], "schema_version"
             ),
-            detector_core_id=str(
-                raw.get("detector_core_id", DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1)
+            detector_core_id=_require_nonempty_str(
+                raw["detector_core_id"], "detector_core_id"
             ),
-            detector_window_samples=int(
-                _contract_value(
-                    kernel_contract,
-                    raw,
-                    "detector_window_samples",
-                    DEFAULT_DETECTOR_WINDOW_SAMPLES,
-                ),
+            detector_window_samples=_require_int(
+                kernel_contract["detector_window_samples"],
+                "kernel_contract.detector_window_samples",
             ),
             supported_detector_window_samples=tuple(
-                int(value)
-                for value in _contract_value(
-                    kernel_contract,
-                    raw,
-                    "supported_detector_window_samples",
-                    sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES),
+                _require_int(
+                    value,
+                    "kernel_contract.supported_detector_window_samples[]",
                 )
+                for value in supported_raw
             ),
-            num_weight_terms=int(
-                _contract_value(
-                    kernel_contract,
-                    raw,
-                    "num_weight_terms",
-                    LOCKED_NUM_WEIGHT_TERMS,
-                ),
+            num_weight_terms=_require_int(
+                kernel_contract["num_weight_terms"],
+                "kernel_contract.num_weight_terms",
             ),
-            skipped_guard_bins=int(
-                _contract_value(
-                    kernel_contract,
-                    raw,
-                    "skipped_guard_bins",
-                    LOCKED_SKIPPED_GUARD_BINS,
-                ),
+            skipped_guard_bins=_require_int(
+                kernel_contract["skipped_guard_bins"],
+                "kernel_contract.skipped_guard_bins",
             ),
-            packed_complex_bits=int(
-                _contract_value(
-                    kernel_contract,
-                    raw,
-                    "packed_complex_bits",
-                    LOCKED_PACKED_COMPLEX_BITS,
-                ),
+            packed_complex_bits=_require_int(
+                kernel_contract["packed_complex_bits"],
+                "kernel_contract.packed_complex_bits",
             ),
-            sample_bits_per_component=int(
-                _contract_value(
-                    kernel_contract,
-                    raw,
-                    "sample_bits_per_component",
-                    LOCKED_SAMPLE_BITS_PER_COMPONENT,
-                ),
+            sample_bits_per_component=_require_int(
+                kernel_contract["sample_bits_per_component"],
+                "kernel_contract.sample_bits_per_component",
             ),
-            input_format=str(
-                kernel_contract.get("input_format", "complex_int4_packed_int8")
+            input_format=_require_nonempty_str(
+                kernel_contract["input_format"],
+                "kernel_contract.input_format",
             ),
-            power_accumulator=str(kernel_contract.get("power_accumulator", "uint64")),
-            statistic=str(
-                kernel_contract.get(
-                    "statistic",
-                    "F = 2 * P_target / (P_ref_lower + P_ref_upper)",
-                )
+            power_accumulator=_require_nonempty_str(
+                kernel_contract["power_accumulator"],
+                "kernel_contract.power_accumulator",
             ),
-            pilot_excess=str(kernel_contract.get("pilot_excess", "rho = F - 1")),
-            host_masking_policy=str(
-                kernel_contract.get(
-                    "host_masking_policy",
-                    "positive_excess_from_uint64_powers",
-                )
+            statistic=_require_nonempty_str(
+                kernel_contract["statistic"],
+                "kernel_contract.statistic",
             ),
-            per_frequency_threshold=bool(
-                kernel_contract.get("per_frequency_threshold", False)
+            pilot_excess=_require_nonempty_str(
+                kernel_contract["pilot_excess"],
+                "kernel_contract.pilot_excess",
+            ),
+            host_masking_policy=_require_nonempty_str(
+                kernel_contract["host_masking_policy"],
+                "kernel_contract.host_masking_policy",
+            ),
+            per_frequency_threshold=_require_bool(
+                kernel_contract["per_frequency_threshold"],
+                "kernel_contract.per_frequency_threshold",
             ),
             fixed_point_limits={
-                "dot_product_component_accumulator_bits_target": int(
-                    fixed_point_limits.get(
-                        "dot_product_component_accumulator_bits_target",
-                        DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET,
-                    )
-                ),
-                "mag_squared_accumulator_bits_target": int(
-                    fixed_point_limits.get(
-                        "mag_squared_accumulator_bits_target",
-                        MAG_SQUARED_ACCUMULATOR_BITS_TARGET,
-                    )
-                ),
-                "power_sum_accumulator_bits": int(
-                    fixed_point_limits.get(
-                        "power_sum_accumulator_bits",
-                        POWER_SUM_ACCUMULATOR_BITS,
-                    )
-                ),
+                key: _require_int(
+                    fixed_point_limits[key],
+                    f"fixed_point_limits.{key}",
+                )
+                for key in sorted(_FIXED_POINT_LIMIT_FIELDS)
             },
         )
 
@@ -336,45 +336,15 @@ class DetectorCoreProfile:
 
 
 def load_detector_core_profile(path: str | Path) -> DetectorCoreProfile:
-    """Load a detector-core profile JSON file."""
+    """Load one exact detector-core profile JSON document."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("detector core profile JSON must contain an object.")
     return DetectorCoreProfile.from_dict(data)
 
 
-def _reject_unsupported_spacing_input_fields(data: dict[str, Any]) -> None:
-    for key in sorted(DERIVED_DETECTOR_SPACING_INPUT_FIELDS):
-        if key in data:
-            raise ValueError(
-                f"Deprecated or derived detector-spacing field found: {key}. "
-                "Detector-core profiles use skipped_guard_bins as the source "
-                "of truth. reference_offset_bins is derived as "
-                "skipped_guard_bins + 1."
-            )
-
-
-def _reject_deprecated_threshold_contract_fields(data: dict[str, Any]) -> None:
-    for key in sorted(DEPRECATED_THRESHOLD_CONTRACT_FIELDS):
-        if key in data:
-            raise ValueError(
-                f"Deprecated detector threshold-contract field found: {key}. "
-                "Detector-core profile v2 reads uint64 target/reference powers "
-                "and applies host positive-excess masking."
-            )
-    for key in sorted(DEPRECATED_DETECTOR_SPACING_FIELDS):
-        if key in data:
-            raise ValueError(
-                f"Deprecated detector-spacing field found: {key}. "
-                "Detector-core profiles use skipped_guard_bins as the source "
-                "of truth."
-            )
-
-
 __all__ = [
     "DEFAULT_DETECTOR_WINDOW_SAMPLES",
-    "DEPRECATED_DETECTOR_SPACING_FIELDS",
-    "DERIVED_DETECTOR_SPACING_INPUT_FIELDS",
     "DetectorCoreProfile",
     "SUPPORTED_DETECTOR_WINDOW_SAMPLES",
     "LOCKED_NUM_WEIGHT_TERMS",

@@ -111,7 +111,7 @@ def test_chime_scan_matches_runner(tmp_path):
         spectral_sense=SPECTRAL_SENSE_INVERTED,
     )
     profile_path = tmp_path / "receiver_profile.json"
-    profile_path.write_text(json.dumps(profile.to_nested_dict()), encoding="utf-8")
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
 
     # reference: single multi-pilot runner pass
     ref_dir = tmp_path / "ref"

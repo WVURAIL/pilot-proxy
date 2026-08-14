@@ -25,6 +25,7 @@ test: test-kernel test-python
 integration-check:
 	$(PYTHON) scripts/check_test_environment.py --integration
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
+	$(PYTHON) scripts/check_current_profile_contract.py
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests/datatrawl -q -rs
 
 docs-specs:
@@ -44,6 +45,7 @@ release-check:
 	bash scripts/check_no_legacy_guard_terms.sh
 	$(PYTHON) scripts/check_current_product_vocabulary.py
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
+	$(PYTHON) scripts/check_current_profile_contract.py
 	$(PYTHON_TEST_ENV) $(PYTHON) tools/emit_fxfft_tables.py --check
 	$(PYTHON_TEST_ENV) $(PYTHON) -m compileall -q src tests
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q

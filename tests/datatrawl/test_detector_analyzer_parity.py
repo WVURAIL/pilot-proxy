@@ -110,7 +110,7 @@ def test_detector_analyzer_matches_runner(tmp_path):
         spectral_sense=SPECTRAL_SENSE_INVERTED,
     )
     profile_path = tmp_path / "receiver_profile.json"
-    profile_path.write_text(json.dumps(profile.to_nested_dict()), encoding="utf-8")
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
 
     # reference: PilotProxy's own runner with the CPU-reference detector
     ref_dir = tmp_path / "ref"

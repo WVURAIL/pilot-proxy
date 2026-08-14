@@ -1,6 +1,7 @@
 # coding=utf-8
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 
 import numpy as np
@@ -75,12 +76,11 @@ def test_receiver_profile_frequency_mapping_normal_and_inverted() -> None:
     assert selection.fine_bin_offset_hz == pytest.approx(REFERENCE_FINE_OFFSET_HZ)
     assert selection.requires_time_reversal is False
 
-    inverted = ReceiverProfile.from_dict(
-        {
-            **profile.to_dict(),
-            "spectral_sense": SPECTRAL_SENSE_INVERTED,
-        }
-    )
+    inverted_data = copy.deepcopy(profile.to_dict())
+    inverted_data["channelizer"]["frequency_axis"][
+        "spectral_sense"
+    ] = SPECTRAL_SENSE_INVERTED
+    inverted = ReceiverProfile.from_dict(inverted_data)
     inverted_selection = receiver_frequency_to_channel(CHANNEL_14_PILOT_HZ, inverted)
     assert inverted_selection.coarse_channel_index == (
         REFERENCE_CHANNEL_INDEX_FOR_CHANNEL_14
@@ -91,24 +91,24 @@ def test_receiver_profile_frequency_mapping_normal_and_inverted() -> None:
     assert inverted_selection.requires_time_reversal is True
 
 
-def test_receiver_profile_nested_json_roundtrip() -> None:
+def test_receiver_profile_exact_json_roundtrip() -> None:
     profile = load_receiver_profile(
         CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
     )
-    nested = profile.to_nested_dict()
-    reparsed = ReceiverProfile.from_dict(nested)
+    document = profile.to_dict()
+    reparsed = ReceiverProfile.from_dict(document)
 
-    assert profile.name == "reference_800mhz_pfb_v1"
+    assert profile.receiver_profile_id == "reference_800mhz_pfb_v1"
     assert profile.instrument_name == "reference"
     assert profile.frame_size_samples == FRAME_SIZE_SAMPLES
     assert profile.num_input_streams == 1
-    assert nested["detector_adapter"]["compatible_detector_core_id"] == (
+    assert document["detector_adapter"]["compatible_detector_core_id"] == (
         "pilotproxy_cuda_fstat_v1"
     )
     assert reparsed.to_dict() == profile.to_dict()
 
 
-def test_receiver_profile_flat_json_roundtrip() -> None:
+def test_receiver_profile_programmatic_roundtrip() -> None:
     profile = default_reference_receiver_profile(
         frame_size_samples=FRAME_SIZE_SAMPLES,
         num_input_streams=NUM_INPUT_STREAMS,
@@ -140,7 +140,7 @@ def test_receiver_profile_hash_changes_when_frequency_mapping_changes() -> None:
         load_receiver_profile(
             CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
         )
-        .to_nested_dict()
+        .to_dict()
     )
     original = ReceiverProfile.from_dict(data)
     changed = dict(data)
@@ -170,21 +170,33 @@ def test_detector_core_profile_json_roundtrip() -> None:
     assert reparsed.to_dict() == profile.to_dict()
 
 
-def test_detector_core_accepts_skipped_guard_bins_as_input_source() -> None:
-    profile = DetectorCoreProfile.from_dict({"kernel_contract": {"skipped_guard_bins": 2}})
+def test_detector_core_accepts_skipped_guard_bins_as_source_of_truth() -> None:
+    data = load_detector_core_profile(
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+    ).to_dict()
+    data["kernel_contract"]["skipped_guard_bins"] = 2
+    profile = DetectorCoreProfile.from_dict(data)
 
     assert profile.skipped_guard_bins == 2
     assert profile.reference_offset_bins == 3
 
 
 def test_detector_core_rejects_reference_offset_bins_as_input_source() -> None:
-    with pytest.raises(ValueError, match="source of truth"):
-        DetectorCoreProfile.from_dict({"reference_offset_bins": 3})
+    data = load_detector_core_profile(
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+    ).to_dict()
+    data["reference_offset_bins"] = 3
+    with pytest.raises(ValueError, match="unknown fields"):
+        DetectorCoreProfile.from_dict(data)
 
 
 def test_detector_core_rejects_kernel_contract_reference_offset_bins() -> None:
-    with pytest.raises(ValueError, match="source of truth"):
-        DetectorCoreProfile.from_dict({"kernel_contract": {"reference_offset_bins": 3}})
+    data = load_detector_core_profile(
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+    ).to_dict()
+    data["kernel_contract"]["reference_offset_bins"] = 3
+    with pytest.raises(ValueError, match="unknown fields"):
+        DetectorCoreProfile.from_dict(data)
 
 
 def test_stream_map_json_roundtrip() -> None:
@@ -269,7 +281,7 @@ def test_make_weights_from_receiver_profile_roundtrip(tmp_path) -> None:
         2 * REFERENCE_COARSE_CHANNEL_WIDTH_HZ / DETECTOR_WINDOW_SAMPLES
     )
     policy = manifest["forbidden_tone_policy"]
-    assert policy["forbidden_tone"] == "coarse_channel_dc"
+    assert policy["forbidden_tone"] == "physical_data_dc"
     assert policy["forbidden_tone_normalized"] == 0.5
     assert policy["forbidden_collision_rule"] == (
         "circular_normalized_distance <= 0.5 / detector_window_samples"

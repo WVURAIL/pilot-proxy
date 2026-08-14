@@ -12,6 +12,18 @@ h5py = pytest.importorskip("h5py")
 
 from pilot_proxy.provenance import file_sha256
 from pilot_proxy.integration.receiver_profile import default_reference_receiver_profile
+
+SMALL_RUN_FRAME_SIZE_SAMPLES = 256
+SMALL_RUN_DETECTOR_WINDOW_SAMPLES = 128
+SMALL_RUN_NUM_INPUT_STREAMS = 2
+SMALL_RUN_NUM_FRAMES = 2
+SMALL_RUN_DETECTOR_ROWS_PER_FRAME = (
+    SMALL_RUN_NUM_INPUT_STREAMS
+    * (
+        SMALL_RUN_FRAME_SIZE_SAMPLES
+        // SMALL_RUN_DETECTOR_WINDOW_SAMPLES
+    )
+)
 # noinspection PyProtectedMember
 from pilot_proxy.chime.runner import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -73,7 +85,7 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
     input_dir = tmp_path / "input"
     ch_dir = input_dir / "ch0844"
     ch_dir.mkdir(parents=True)
-    data = _encode_offset_binary(
+    pattern = _encode_offset_binary(
         np.asarray(
             [
                 [-3, -2],
@@ -88,6 +100,14 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
             dtype=np.int16,
         )
     )
+    required_samples = (
+        SMALL_RUN_FRAME_SIZE_SAMPLES * SMALL_RUN_NUM_FRAMES
+    )
+    assert required_samples % int(pattern.shape[0]) == 0
+    data = np.tile(
+        pattern,
+        (required_samples // int(pattern.shape[0]), 1),
+    )
     with h5py.File(ch_dir / "001.h5", "w") as h5:
         h5.attrs["freq"] = 470.3125
         h5.attrs["freq_id"] = 844
@@ -95,11 +115,11 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
         ds.attrs["axis"] = np.asarray(["time", "input"], dtype=object)
 
     profile = default_reference_receiver_profile(
-        frame_size_samples=4,
-        num_input_streams=2,
+        frame_size_samples=SMALL_RUN_FRAME_SIZE_SAMPLES,
+        num_input_streams=SMALL_RUN_NUM_INPUT_STREAMS,
     )
     profile_path = tmp_path / "receiver_profile.json"
-    profile_path.write_text(json.dumps(profile.to_nested_dict()), encoding="utf-8")
+    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
 
     def fake_detector(**kwargs):
         packed = kwargs["packed"]
@@ -126,13 +146,18 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
         receiver_profile_path=profile_path,
         stream_map_path=None,
         physical_channels=[14],
-        frame_size_samples=4,
-        detector_window_samples=2,
+        frame_size_samples=SMALL_RUN_FRAME_SIZE_SAMPLES,
+        detector_window_samples=SMALL_RUN_DETECTOR_WINDOW_SAMPLES,
         frames_per_chunk=1,
-        max_frames=2,
-        kernel=_fake_kernel(2),
+        max_frames=SMALL_RUN_NUM_FRAMES,
+        kernel=_fake_kernel(SMALL_RUN_DETECTOR_WINDOW_SAMPLES),
         detector_fn=fake_detector,
-        weights_by_channel={14: np.ones((3, 2), dtype=np.int8)},
+        weights_by_channel={
+            14: np.ones(
+                (3, SMALL_RUN_DETECTOR_WINDOW_SAMPLES),
+                dtype=np.int8,
+            )
+        },
     )
 
     detector = np.load(output_dir / "chime_detector_outputs.npz")
@@ -140,14 +165,17 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
     reductions = np.load(output_dir / "chime_reductions_10s.npz")
     stats = json.loads((output_dir / "stats.json").read_text(encoding="utf-8"))
 
-    assert detector["p_target_u64"].shape == (2, 1)
-    assert detector["p_ref_sum_u64"].shape == (2, 1)
-    assert detector["mask"].shape == (2, 1)
+    expected_output_shape = (SMALL_RUN_NUM_FRAMES, 1)
+    assert detector["p_target_u64"].shape == expected_output_shape
+    assert detector["p_ref_sum_u64"].shape == expected_output_shape
+    assert detector["mask"].shape == expected_output_shape
     assert float(detector["chime_frequency_hz"][0]) == pytest.approx(470_312_500.0)
-    assert cache["baseband_power_linear"].shape == (2, 1)
+    assert cache["baseband_power_linear"].shape == expected_output_shape
     assert float(cache["chime_frequency_hz"][0]) == pytest.approx(470_312_500.0)
     assert reductions["input_power_mean"].shape == (1, 1)
-    assert stats["detector_rows_per_frame"] == 4
+    assert stats["detector_rows_per_frame"] == (
+        SMALL_RUN_DETECTOR_ROWS_PER_FRAME
+    )
     assert stats["chime_frequency_hz_by_pilot"] == [470_312_500.0]
     assert stats["combine_mode"] == "all_rows_summed_before_ratio"
     assert stats["weight_coordinate"]["effective_weight_coordinate_system"] == (

@@ -50,75 +50,129 @@
   ],
   "receiver_profile": {
     "baseband_frame": {
-      "channel_center_normalized": 0.0
+      "channel_center_normalized": 0.0,
+      "physical_dc_normalized": 0.0
     },
     "channelizer": {
       "coarse_channel_center_offset_hz": 0.0,
-      "coarse_channel_width_hz": 195312.5,
       "frequency_axis": {
-        "channel_index_to_rf_hz": "rf_hz = coarse_channel_index * adc_sample_rate_hz / pfb_fft_size",
         "order": "ascending_rf",
-        "source_note": "Matches the kotekan chord branch CHORD frequency-ID convention: CHORDTelescope FreqParams with nyquist_zone=1 gives freq0=0 Hz and df=+195312.5 Hz, so freq_id == coarse_channel_index and channel 1536 = 300 MHz, channel 7680 = 1500 MHz. Verify against the operational CRS F-engine data product before an operational run.",
-        "spectral_sense": "normal",
-        "verification_required": true
+        "spectral_sense": "normal"
       },
       "input_sample_rate_hz": 3200000000.0,
       "num_coarse_channels": 8192,
-      "output_sample_rate_hz": 195312.5,
       "pfb_fft_size": 16384,
       "response": "implementation_specific",
-      "spectral_sense": "normal",
       "taps": 4,
       "type": "pfb"
     },
     "detector_adapter": {
       "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
-      "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
       "detector_window_samples": 64,
       "dtv_bandwidth_hz": 6000000.0,
       "fine_bin_enbw_hz": 3051.7578125,
-      "fine_bin_width_hz": 3051.7578125,
       "pilot_below_data_db": 11.3,
       "pilot_capture_efficiency": 1.0,
-      "windows_per_stream_formula": "frame_size_samples / detector_window_samples"
+      "time_reverse_detector_windows_before_kernel": true
     },
     "framing": {
-      "frame_size_samples": 8192,
-      "frame_size_unit": "channelized complex samples per input stream"
+      "frame_size_samples": 8192
     },
     "input_streams": {
       "combine_default": "incoherent_power_sum_over_streams",
       "num_input_streams": 1024,
       "stream_map_required": true,
-      "stream_unit": "input_stream"
+      "stream_unit": "dish_polarization"
     },
     "instrument_name": "CHORD",
-    "profile_status": "example_requires_data_product_verification",
+    "metadata": {
+      "annotations": {
+        "baseband_frame": {
+          "convention": "coarse_channel_center_at_dft_dc",
+          "note": "Assumed from the kotekan chord branch F-engine convention (channel RF center = coarse_channel_index * 195312.5 Hz at the per-channel DFT DC, first Nyquist zone, upright spectral sense). Unlike CHIME this profile has not yet been verified against measured pilot lines in an operational data product; verify frame convention, sense, and any per-parity decimation twiddle against CRS F-engine baseband before an operational run. channel_center_normalized_odd_channels remains available if a per-parity half-band shift is ever demonstrated.",
+          "verification_required": true
+        },
+        "channelizer": {
+          "architecture": "fx_f_engine",
+          "coarse_channel_width_hz": 195312.5,
+          "output_sample_rate_hz": 195312.5,
+          "spectral_sense": "normal"
+        },
+        "channelizer_frequency_axis": {
+          "channel_index_to_rf_hz": "rf_hz = coarse_channel_index * adc_sample_rate_hz / pfb_fft_size",
+          "source_note": "Matches the kotekan chord branch CHORD frequency-ID convention: CHORDTelescope FreqParams with nyquist_zone=1 gives freq0=0 Hz and df=+195312.5 Hz, so freq_id == coarse_channel_index and channel 1536 = 300 MHz, channel 7680 = 1500 MHz. Verify against the operational CRS F-engine data product before an operational run.",
+          "verification_required": true
+        },
+        "detector_adapter": {
+          "detector_rows_per_frame_formula": "num_input_streams * num_selected_channels * windows_per_stream",
+          "fine_bin_width_hz": 3051.7578125,
+          "windows_per_stream_formula": "frame_size_samples / detector_window_samples"
+        },
+        "framing": {
+          "frame_size_samples_may_be_overridden_per_run": true,
+          "frame_size_unit": "channelized complex samples per input stream",
+          "kotekan_frame_note": "The kotekan chord configs advance the voltage ring buffer in GPU frames of num_times=8192 samples (41.94304 ms). One detector block is one GPU frame: 8192 samples at K=64 yield windows_per_stream = 128, the frozen fine-reduction transform length (FSTAT_FINE_WINDOWS_PER_STREAM), and the block aligns 1:1 with the 8192-sample n2k visibility integration."
+        },
+        "quantization": {
+          "native_format_note": "kotekan chord DataType: one byte per complex sample, offset-binary (stored = value + 8), imaginary component in the low nibble, real component in the high nibble. Conversion to the kernel's two's-complement re-high/im-low layout is a per-byte XOR with 0x88 (subtract 8 per nibble); no nibble swap and no requantization.",
+          "scale_note": "CHORD F-engine output is already 4+4-bit quantized upstream (FPGA gains); the receiver adapter performs a lossless encoding conversion only."
+        },
+        "rf_band": {
+          "bandwidth_hz": 1600000000.0,
+          "center_hz": 800000000.0
+        }
+      },
+      "channel_id_map": {
+        "namespace": "chord_freq_id",
+        "note": "The kotekan chordMetadata coarse_freq entries are CHORDTelescope::to_freq_id values; with nyquist_zone=1 these equal this profile's coarse_channel_index directly (freq_id = coarse_channel_index). Populates chord_channel_id / receiver_channel_id in exported runtime bundles.",
+        "offset_from_coarse_channel_index": 0
+      },
+      "digitizer": {
+        "adc_sample_rate_hz": 3200000000.0,
+        "input_unit": "dish_polarization",
+        "num_adc_inputs": 1024,
+        "nyquist_zone": 1
+      },
+      "kotekan_binding": {
+        "channel_id_metadata_field": "chordMetadata coarse_freq (vector<int>, one entry per local frequency)",
+        "frame_identity_metadata_field": "chordMetadata fpga_seq_num plus ring-buffer read offset in channelized samples",
+        "num_dishes": 512,
+        "num_polarizations": 2,
+        "stream_index_formula": "stream_index = polarization_index * num_dishes + dish_index",
+        "voltage_buffer_layout": "[T, F, P, D] int4x2_swapped_withoffset (time, coarse channel, polarization, dish)"
+      },
+      "profile_status": "example_requires_data_product_verification",
+      "science_band": {
+        "max_science_channel": 7679,
+        "max_science_freq_hz": 1499804687.5,
+        "min_science_channel": 1536,
+        "min_science_freq_hz": 300000000.0,
+        "note": "The channelizer grid spans the full first Nyquist zone (0-1600 MHz, 8192 channels); CHORD science channels are 1536-7679. All ATSC 14-36 pilots (470.309-602.309 MHz, channels 2408-3084) fall inside the science band."
+      }
+    },
     "quantization": {
       "adapter_output_format": "complex_int4_packed_int8",
       "bits_per_component": 4,
       "clip_sigma_default": 3.0,
       "native_channelized_sample_format": "int4x2_swapped_withoffset",
-      "record_clip_fraction_by_stream": true,
-      "record_scale_by_stream": true,
+      "record_clip_fraction_by_stream": false,
+      "record_scale_by_stream": false,
       "scale_mode_default": "provided"
     },
     "receiver_profile_id": "chord_dtv_fengine_v1",
     "rf_band": {
-      "bandwidth_hz": 1600000000.0,
       "lower_hz": 0.0,
       "upper_hz": 1600000000.0
     },
     "schema_version": "fstat_receiver_profile_v1"
   },
-  "receiver_profile_hash": "3c6ce9a328691e0af069cdb6ea89b1f89b5a43f1c5557fba119b05f844a9dc0a",
+  "receiver_profile_hash": "af7d443a57b20e6b9970e179e3d2f359dd5233e25fc1db9fd77c4315d0127836",
   "schema_version": "fstat_weight_manifest_v2",
   "target_reference_layout": [
     {
       "adaptive_reference_placement": true,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 470312500.0,
       "coarse_channel_index": 2408,
       "dc_reference_collision": false,
@@ -184,7 +238,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 476367187.5,
       "coarse_channel_index": 2439,
       "dc_reference_collision": false,
@@ -250,7 +303,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 482226562.5,
       "coarse_channel_index": 2469,
       "dc_reference_collision": false,
@@ -316,7 +368,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 488281250.0,
       "coarse_channel_index": 2500,
       "dc_reference_collision": false,
@@ -382,7 +433,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 494335937.5,
       "coarse_channel_index": 2531,
       "dc_reference_collision": false,
@@ -448,7 +498,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 500390625.0,
       "coarse_channel_index": 2562,
       "dc_reference_collision": false,
@@ -514,7 +563,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 506250000.0,
       "coarse_channel_index": 2592,
       "dc_reference_collision": false,
@@ -580,7 +628,6 @@
       "adaptive_reference_placement": true,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 512304687.5,
       "coarse_channel_index": 2623,
       "dc_reference_collision": true,
@@ -646,7 +693,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 518359375.0,
       "coarse_channel_index": 2654,
       "dc_reference_collision": false,
@@ -712,7 +758,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 524218750.0,
       "coarse_channel_index": 2684,
       "dc_reference_collision": false,
@@ -778,7 +823,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 530273437.5,
       "coarse_channel_index": 2715,
       "dc_reference_collision": false,
@@ -844,7 +888,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 536328125.0,
       "coarse_channel_index": 2746,
       "dc_reference_collision": false,
@@ -910,7 +953,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 542382812.5,
       "coarse_channel_index": 2777,
       "dc_reference_collision": false,
@@ -976,7 +1018,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 548242187.5,
       "coarse_channel_index": 2807,
       "dc_reference_collision": false,
@@ -1042,7 +1083,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 554296875.0,
       "coarse_channel_index": 2838,
       "dc_reference_collision": false,
@@ -1108,7 +1148,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 560351562.5,
       "coarse_channel_index": 2869,
       "dc_reference_collision": false,
@@ -1174,7 +1213,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 566406250.0,
       "coarse_channel_index": 2900,
       "dc_reference_collision": false,
@@ -1240,7 +1278,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 572265625.0,
       "coarse_channel_index": 2930,
       "dc_reference_collision": false,
@@ -1306,7 +1343,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 578320312.5,
       "coarse_channel_index": 2961,
       "dc_reference_collision": false,
@@ -1372,7 +1408,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 584375000.0,
       "coarse_channel_index": 2992,
       "dc_reference_collision": false,
@@ -1438,7 +1473,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 590234375.0,
       "coarse_channel_index": 3022,
       "dc_reference_collision": false,
@@ -1504,7 +1538,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 596289062.5,
       "coarse_channel_index": 3053,
       "dc_reference_collision": false,
@@ -1570,7 +1603,6 @@
       "adaptive_reference_placement": false,
       "baseband_frame_center_normalized": 0.0,
       "baseband_frame_mode": "explicit_profile_frame",
-      "baseband_frame_warning": "",
       "coarse_channel_center_hz": 602343750.0,
       "coarse_channel_index": 3084,
       "dc_reference_collision": false,

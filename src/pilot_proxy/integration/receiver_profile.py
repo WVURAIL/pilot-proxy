@@ -1,5 +1,5 @@
 # coding=utf-8
-"""Receiver/channelizer profile contract for external integrations."""
+"""Strict receiver/channelizer profile contract for external integrations."""
 
 from __future__ import annotations
 
@@ -31,7 +31,12 @@ from pilot_proxy.reference_channelizer import (
     REFERENCE_PFB_TAPS,
 )
 
-from .schemas import RECEIVER_PROFILE_SCHEMA_VERSION
+from .schemas import (
+    COMBINE_MODE_COMBINED_STREAMS,
+    DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1,
+    RECEIVER_PROFILE_SCHEMA_VERSION,
+    SUPPORTED_QUANTIZATION_SCALE_MODES,
+)
 
 DEFAULT_FRAME_SIZE_SAMPLES = 16_384
 DEFAULT_NUM_INPUT_STREAMS = 1
@@ -43,8 +48,7 @@ DEFAULT_CHANNELIZER_RESPONSE = "sinc_hamming"
 DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT = "complex64"
 DEFAULT_ADAPTER_OUTPUT_FORMAT = "complex_int4_packed_int8"
 DEFAULT_QUANTIZATION_SCALE_MODE = "global"
-REFERENCE_PROFILE_NAME = "reference_800mhz_pfb"
-DEFAULT_COARSE_CHANNEL_CENTER_OFFSET_MULTIPLIER = 1.0
+REFERENCE_PROFILE_ID = "reference_800mhz_pfb"
 PROFILE_HASH_HEX_CHARS = 64
 FREQUENCY_ORDER_ASCENDING_RF = "ascending_rf"
 FREQUENCY_ORDER_DESCENDING_RF = "descending_rf"
@@ -52,77 +56,175 @@ SUPPORTED_FREQUENCY_ORDER = frozenset(
     {FREQUENCY_ORDER_ASCENDING_RF, FREQUENCY_ORDER_DESCENDING_RF}
 )
 
+_TOP_LEVEL_REQUIRED = frozenset(
+    {
+        "schema_version",
+        "receiver_profile_id",
+        "instrument_name",
+        "rf_band",
+        "channelizer",
+        "framing",
+        "input_streams",
+        "quantization",
+        "detector_adapter",
+        "baseband_frame",
+    }
+)
+_TOP_LEVEL_OPTIONAL = frozenset({"metadata"})
+_RF_BAND_FIELDS = frozenset({"lower_hz", "upper_hz"})
+_CHANNELIZER_FIELDS = frozenset(
+    {
+        "type",
+        "input_sample_rate_hz",
+        "pfb_fft_size",
+        "taps",
+        "response",
+        "num_coarse_channels",
+        "coarse_channel_center_offset_hz",
+        "frequency_axis",
+    }
+)
+_FREQUENCY_AXIS_FIELDS = frozenset({"spectral_sense", "order"})
+_FRAMING_FIELDS = frozenset({"frame_size_samples"})
+_INPUT_STREAM_FIELDS = frozenset(
+    {
+        "num_input_streams",
+        "stream_unit",
+        "stream_map_required",
+        "combine_default",
+    }
+)
+_QUANTIZATION_FIELDS = frozenset(
+    {
+        "native_channelized_sample_format",
+        "adapter_output_format",
+        "bits_per_component",
+        "scale_mode_default",
+        "clip_sigma_default",
+        "record_scale_by_stream",
+        "record_clip_fraction_by_stream",
+    }
+)
+_DETECTOR_ADAPTER_FIELDS = frozenset(
+    {
+        "compatible_detector_core_id",
+        "detector_window_samples",
+        "fine_bin_enbw_hz",
+        "dtv_bandwidth_hz",
+        "pilot_below_data_db",
+        "pilot_capture_efficiency",
+        "time_reverse_detector_windows_before_kernel",
+    }
+)
+_BASEBAND_FRAME_REQUIRED = frozenset(
+    {"channel_center_normalized", "physical_dc_normalized"}
+)
+_BASEBAND_FRAME_OPTIONAL = frozenset(
+    {
+        "channel_center_normalized_odd_channels",
+        "physical_dc_normalized_odd_channels",
+    }
+)
 
-def _is_nested_receiver_profile(data: dict[str, Any]) -> bool:
-    return any(key in data for key in ("rf_band", "framing", "input_streams"))
+
+def _validate_exact_keys(
+    data: Mapping[str, Any],
+    *,
+    required: frozenset[str],
+    optional: frozenset[str] = frozenset(),
+    context: str,
+) -> None:
+    keys = {str(key) for key in data}
+    missing = sorted(required - keys)
+    unknown = sorted(keys - required - optional)
+    if missing:
+        raise ValueError(f"{context} is missing required fields: {missing}")
+    if unknown:
+        raise ValueError(f"{context} contains unknown fields: {unknown}")
 
 
-def _require_mapping(data: dict[str, Any], key: str) -> dict[str, Any]:
-    value = data.get(key)
+def _require_mapping(
+    data: Mapping[str, Any],
+    key: str,
+    *,
+    required: frozenset[str],
+    optional: frozenset[str] = frozenset(),
+    context: str,
+) -> dict[str, Any]:
+    value = data[key]
     if not isinstance(value, Mapping):
-        raise ValueError(f"receiver profile requires object field {key!r}.")
-    return dict(value)
+        raise ValueError(f"{context} must be an object.")
+    out = dict(value)
+    _validate_exact_keys(
+        out,
+        required=required,
+        optional=optional,
+        context=context,
+    )
+    return out
 
 
-def _mapping_or_empty(value: Any) -> dict[str, Any]:
-    if isinstance(value, Mapping):
-        return dict(value)
-    return {}
+def _require_nonempty_str(value: Any, field_name: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{field_name} must be a non-empty string.")
+    if value != value.strip():
+        raise ValueError(f"{field_name} must not contain surrounding whitespace.")
+    return value
 
 
-def _mapping_or_none(value: Any) -> dict[str, Any] | None:
-    if value is None:
-        return None
-    if isinstance(value, Mapping):
-        return dict(value)
-    return None
+def _require_int(value: Any, field_name: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{field_name} must be an integer.")
+    return value
 
 
-def _optional_str(value: Any) -> str | None:
-    return None if value is None else str(value)
+def _require_float(value: Any, field_name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{field_name} must be numeric.")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{field_name} must be finite.")
+    return result
 
 
-def _as_int(value: Any, field_name: str) -> int:
-    if value is None:
-        raise ValueError(f"receiver profile requires integer field {field_name!r}.")
-    return int(value)
+def _require_bool(value: Any, field_name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{field_name} must be a boolean.")
+    return value
 
 
-def _as_float(value: Any, field_name: str) -> float:
-    if value is None:
-        raise ValueError(f"receiver profile requires numeric field {field_name!r}.")
-    return float(value)
+def _normalized_unit_interval(value: float, field_name: str) -> float:
+    normalized = float(value)
+    if not math.isfinite(normalized):
+        raise ValueError(f"{field_name} must be finite.")
+    if not 0.0 <= normalized < 1.0:
+        raise ValueError(f"{field_name} must lie in [0, 1).")
+    return normalized
 
 
 @dataclass(frozen=True)
 class ChannelizerProfile:
-    """Neutral channelizer description embedded in a receiver profile."""
+    """Authoritative channelizer implementation parameters."""
 
-    type: str = DEFAULT_CHANNELIZER_TYPE
-    fft_size: int = REFERENCE_PFB_FFT_SIZE
-    taps: int = REFERENCE_PFB_TAPS
-    response: str = DEFAULT_CHANNELIZER_RESPONSE
+    type: str
+    fft_size: int
+    taps: int
+    response: str
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "ChannelizerProfile":
-        data = _mapping_or_empty(data)
-        return cls(
-            type=str(data.get("type", DEFAULT_CHANNELIZER_TYPE)),
-            fft_size=_as_int(
-                data.get(
-                    "fft_size",
-                    data.get("pfb_fft_size", REFERENCE_PFB_FFT_SIZE),
-                ),
-                "channelizer.fft_size",
-            ),
-            taps=_as_int(data.get("taps", REFERENCE_PFB_TAPS), "channelizer.taps"),
-            response=str(data.get("response", DEFAULT_CHANNELIZER_RESPONSE)),
-        )
+    def __post_init__(self) -> None:
+        if not str(self.type).strip():
+            raise ValueError("channelizer.type must not be empty.")
+        if int(self.fft_size) <= 0:
+            raise ValueError("channelizer.pfb_fft_size must be positive.")
+        if int(self.taps) <= 0:
+            raise ValueError("channelizer.taps must be positive.")
+        if not str(self.response).strip():
+            raise ValueError("channelizer.response must not be empty.")
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "type": str(self.type),
-            "fft_size": int(self.fft_size),
+            "pfb_fft_size": int(self.fft_size),
             "taps": int(self.taps),
             "response": str(self.response),
         }
@@ -130,34 +232,42 @@ class ChannelizerProfile:
 
 @dataclass(frozen=True)
 class ReceiverProfile:
-    """Neutral receiver profile used to map RF frequencies to detector streams."""
+    """One exact receiver-to-detector integration contract."""
 
     schema_version: str
-    name: str
+    receiver_profile_id: str
+    instrument_name: str
     sample_rate_hz: float
     band_lower_hz: float
     band_upper_hz: float
     num_coarse_channels: int
+    coarse_channel_center_offset_hz: float
     frame_size_samples: int
     num_input_streams: int
-    spectral_sense: str = SPECTRAL_SENSE_NORMAL
-    frequency_order: str = FREQUENCY_ORDER_ASCENDING_RF
-    channelizer: ChannelizerProfile = field(default_factory=ChannelizerProfile)
-    bin_enbw_hz: float = EFFECTIVE_BIN_BW_HZ
-    pilot_capture_efficiency: float = PILOT_CAPTURE_EFFICIENCY
-    coarse_channel_center_offset_hz: float | None = None
-    instrument_name: str | None = None
-    profile_status: str | None = None
-    detector_window_samples: int = DEFAULT_DETECTOR_WINDOW_SAMPLES
-    dtv_bandwidth_hz: float = DTV_BANDWIDTH_HZ
-    pilot_below_data_db: float = PILOT_BELOW_DATA_DB
-    native_channelized_sample_format: str = DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT
-    adapter_output_format: str = DEFAULT_ADAPTER_OUTPUT_FORMAT
-    bits_per_component: int = DEFAULT_BITS_PER_COMPONENT
-    quantization_scale_mode_default: str = DEFAULT_QUANTIZATION_SCALE_MODE
-    clip_sigma_default: float = DEFAULT_CLIP_SIGMA
-    channel_center_normalized: float | None = None
+    input_stream_unit: str
+    stream_map_required: bool
+    combine_default: str
+    spectral_sense: str
+    frequency_order: str
+    channelizer: ChannelizerProfile
+    native_channelized_sample_format: str
+    adapter_output_format: str
+    bits_per_component: int
+    quantization_scale_mode_default: str
+    clip_sigma_default: float
+    record_scale_by_stream: bool
+    record_clip_fraction_by_stream: bool
+    compatible_detector_core_id: str
+    detector_window_samples: int
+    bin_enbw_hz: float
+    dtv_bandwidth_hz: float
+    pilot_below_data_db: float
+    pilot_capture_efficiency: float
+    time_reverse_detector_windows_before_kernel: bool
+    channel_center_normalized: float
+    physical_dc_normalized: float
     channel_center_normalized_odd: float | None = None
+    physical_dc_normalized_odd: float | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -166,20 +276,27 @@ class ReceiverProfile:
                 "unsupported receiver profile schema_version: "
                 f"{self.schema_version!r}"
             )
+        if not str(self.receiver_profile_id).strip():
+            raise ValueError("receiver_profile_id must not be empty.")
+        if not str(self.instrument_name).strip():
+            raise ValueError("instrument_name must not be empty.")
         if self.sample_rate_hz <= 0.0:
-            raise ValueError("sample_rate_hz must be positive.")
+            raise ValueError("channelizer.input_sample_rate_hz must be positive.")
         if self.band_upper_hz <= self.band_lower_hz:
-            raise ValueError("band_upper_hz must be greater than band_lower_hz.")
+            raise ValueError("rf_band.upper_hz must be greater than rf_band.lower_hz.")
         if self.num_coarse_channels <= 0:
-            raise ValueError("num_coarse_channels must be positive.")
+            raise ValueError("channelizer.num_coarse_channels must be positive.")
         if self.frame_size_samples <= 0:
-            raise ValueError("frame_size_samples must be positive.")
+            raise ValueError("framing.frame_size_samples must be positive.")
         if self.num_input_streams <= 0:
-            raise ValueError("num_input_streams must be positive.")
-        if self.bin_enbw_hz <= 0.0:
-            raise ValueError("bin_enbw_hz must be positive.")
-        if self.pilot_capture_efficiency <= 0.0:
-            raise ValueError("pilot_capture_efficiency must be positive.")
+            raise ValueError("input_streams.num_input_streams must be positive.")
+        if not str(self.input_stream_unit).strip():
+            raise ValueError("input_streams.stream_unit must not be empty.")
+        if self.combine_default != COMBINE_MODE_COMBINED_STREAMS:
+            raise ValueError(
+                "input_streams.combine_default must be "
+                f"{COMBINE_MODE_COMBINED_STREAMS!r}."
+            )
         object.__setattr__(
             self,
             "spectral_sense",
@@ -188,50 +305,96 @@ class ReceiverProfile:
         frequency_order = str(self.frequency_order).strip().lower()
         if frequency_order not in SUPPORTED_FREQUENCY_ORDER:
             raise ValueError(
-                "frequency_order must be one of "
+                "channelizer.frequency_axis.order must be one of "
                 f"{sorted(SUPPORTED_FREQUENCY_ORDER)}; got "
                 f"{self.frequency_order!r}."
             )
         object.__setattr__(self, "frequency_order", frequency_order)
-        if self.detector_window_samples <= 0:
-            raise ValueError("detector_window_samples must be positive.")
-        if self.dtv_bandwidth_hz <= 0.0:
-            raise ValueError("dtv_bandwidth_hz must be positive.")
         if self.bits_per_component <= 0:
-            raise ValueError("bits_per_component must be positive.")
+            raise ValueError("quantization.bits_per_component must be positive.")
+        if self.quantization_scale_mode_default not in SUPPORTED_QUANTIZATION_SCALE_MODES:
+            raise ValueError(
+                "quantization.scale_mode_default must be one of "
+                f"{sorted(SUPPORTED_QUANTIZATION_SCALE_MODES)}."
+            )
         if self.clip_sigma_default <= 0.0:
-            raise ValueError("clip_sigma_default must be positive.")
-        for _frame_field in (
-            "channel_center_normalized",
-            "channel_center_normalized_odd",
+            raise ValueError("quantization.clip_sigma_default must be positive.")
+        if self.compatible_detector_core_id != DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1:
+            raise ValueError(
+                "detector_adapter.compatible_detector_core_id must be "
+                f"{DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1!r}."
+            )
+        if self.detector_window_samples <= 0:
+            raise ValueError(
+                "detector_adapter.detector_window_samples must be positive."
+            )
+        if self.frame_size_samples % self.detector_window_samples != 0:
+            raise ValueError(
+                "framing.frame_size_samples must be an integer multiple of "
+                "detector_adapter.detector_window_samples."
+            )
+        if self.bin_enbw_hz <= 0.0:
+            raise ValueError("detector_adapter.fine_bin_enbw_hz must be positive.")
+        if self.dtv_bandwidth_hz <= 0.0:
+            raise ValueError("detector_adapter.dtv_bandwidth_hz must be positive.")
+        if self.pilot_capture_efficiency <= 0.0:
+            raise ValueError(
+                "detector_adapter.pilot_capture_efficiency must be positive."
+            )
+        expected_fine_bin_hz = (
+            self.coarse_channel_width_hz / float(self.detector_window_samples)
+        )
+        if not math.isclose(
+            self.bin_enbw_hz,
+            expected_fine_bin_hz,
+            rel_tol=0.0,
+            abs_tol=1e-9,
         ):
-            _frame_value = getattr(self, _frame_field)
-            if _frame_value is not None:
-                object.__setattr__(
-                    self, _frame_field, float(_frame_value) % 1.0
-                )
+            raise ValueError(
+                "detector_adapter.fine_bin_enbw_hz does not match "
+                "coarse_channel_width_hz / detector_window_samples: "
+                f"{self.bin_enbw_hz} != {expected_fine_bin_hz}."
+            )
+        object.__setattr__(
+            self,
+            "channel_center_normalized",
+            _normalized_unit_interval(
+                self.channel_center_normalized,
+                "baseband_frame.channel_center_normalized",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "physical_dc_normalized",
+            _normalized_unit_interval(
+                self.physical_dc_normalized,
+                "baseband_frame.physical_dc_normalized",
+            ),
+        )
+        if self.channel_center_normalized_odd is not None:
+            object.__setattr__(
+                self,
+                "channel_center_normalized_odd",
+                _normalized_unit_interval(
+                    self.channel_center_normalized_odd,
+                    "baseband_frame.channel_center_normalized_odd_channels",
+                ),
+            )
+        if self.physical_dc_normalized_odd is not None:
+            object.__setattr__(
+                self,
+                "physical_dc_normalized_odd",
+                _normalized_unit_interval(
+                    self.physical_dc_normalized_odd,
+                    "baseband_frame.physical_dc_normalized_odd_channels",
+                ),
+            )
         object.__setattr__(self, "metadata", dict(self.metadata))
 
-    def frame_center_normalized(
-        self, coarse_channel_index: int | None = None
-    ) -> float | None:
-        """Normalized DFT frequency of the coarse-channel center, if declared.
-
-        Returns None when the profile does not declare a baseband frame
-        convention (legacy behavior applies). When
-        ``channel_center_normalized_odd`` is set, odd coarse-channel indices
-        use it, supporting critically-sampled PFBs whose decimation twiddle
-        half-band-shifts alternating channels.
-        """
-        base = self.channel_center_normalized
-        odd = self.channel_center_normalized_odd
-        if (
-            odd is not None
-            and coarse_channel_index is not None
-            and int(coarse_channel_index) % 2 == 1
-        ):
-            return float(odd)
-        return None if base is None else float(base)
+    @property
+    def profile_status(self) -> str | None:
+        value = self.metadata.get("profile_status")
+        return None if value is None else str(value)
 
     @property
     def bandwidth_hz(self) -> float:
@@ -243,12 +406,25 @@ class ReceiverProfile:
 
     @property
     def center_offset_hz(self) -> float:
-        if self.coarse_channel_center_offset_hz is not None:
-            return float(self.coarse_channel_center_offset_hz)
-        return float(
-            DEFAULT_COARSE_CHANNEL_CENTER_OFFSET_MULTIPLIER
-            * self.coarse_channel_width_hz
-        )
+        return float(self.coarse_channel_center_offset_hz)
+
+    def frame_center_normalized(self, coarse_channel_index: int | None = None) -> float:
+        if (
+            self.channel_center_normalized_odd is not None
+            and coarse_channel_index is not None
+            and int(coarse_channel_index) % 2 == 1
+        ):
+            return float(self.channel_center_normalized_odd)
+        return float(self.channel_center_normalized)
+
+    def forbidden_dc_normalized(self, coarse_channel_index: int | None = None) -> float:
+        if (
+            self.physical_dc_normalized_odd is not None
+            and coarse_channel_index is not None
+            and int(coarse_channel_index) % 2 == 1
+        ):
+            return float(self.physical_dc_normalized_odd)
+        return float(self.physical_dc_normalized)
 
     def coarse_channel_center_hz(self, index: int) -> float:
         idx = int(index)
@@ -271,329 +447,259 @@ class ReceiverProfile:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ReceiverProfile":
+        if not isinstance(data, Mapping):
+            raise ValueError("receiver profile must be an object.")
         raw = dict(data)
-        if _is_nested_receiver_profile(raw):
-            return cls._from_nested_dict(raw)
-        band_lower_hz = float(raw["band_lower_hz"])
-        if "band_upper_hz" in raw:
-            band_upper_hz = float(raw["band_upper_hz"])
-        else:
-            band_upper_hz = band_lower_hz + float(raw["bandwidth_hz"])
-        profile = cls(
-            schema_version=str(
-                raw.get("schema_version", RECEIVER_PROFILE_SCHEMA_VERSION)
-            ),
-            name=str(raw["name"]),
-            sample_rate_hz=float(raw["sample_rate_hz"]),
-            band_lower_hz=band_lower_hz,
-            band_upper_hz=band_upper_hz,
-            num_coarse_channels=int(raw["num_coarse_channels"]),
-            frame_size_samples=int(raw["frame_size_samples"]),
-            num_input_streams=int(raw.get("num_input_streams", 1)),
-            spectral_sense=str(raw.get("spectral_sense", SPECTRAL_SENSE_NORMAL)),
-            frequency_order=str(
-                raw.get("frequency_order", FREQUENCY_ORDER_ASCENDING_RF)
-            ),
-            channelizer=ChannelizerProfile.from_dict(
-                _mapping_or_none(raw.get("channelizer"))
-            ),
-            bin_enbw_hz=_as_float(
-                raw.get("bin_enbw_hz", EFFECTIVE_BIN_BW_HZ),
-                "bin_enbw_hz",
-            ),
-            pilot_capture_efficiency=_as_float(
-                raw.get("pilot_capture_efficiency", PILOT_CAPTURE_EFFICIENCY),
-                "pilot_capture_efficiency",
-            ),
-            coarse_channel_center_offset_hz=(
-                None
-                if raw.get("coarse_channel_center_offset_hz") is None
-                else float(raw["coarse_channel_center_offset_hz"])
-            ),
-            channel_center_normalized=(
-                None
-                if raw.get("channel_center_normalized") is None
-                else float(raw["channel_center_normalized"])
-            ),
-            channel_center_normalized_odd=(
-                None
-                if raw.get("channel_center_normalized_odd") is None
-                else float(raw["channel_center_normalized_odd"])
-            ),
-            instrument_name=_optional_str(raw.get("instrument_name")),
-            profile_status=_optional_str(raw.get("profile_status")),
-            detector_window_samples=int(
-                raw.get("detector_window_samples", DEFAULT_DETECTOR_WINDOW_SAMPLES)
-            ),
-            dtv_bandwidth_hz=float(raw.get("dtv_bandwidth_hz", DTV_BANDWIDTH_HZ)),
-            pilot_below_data_db=float(
-                raw.get("pilot_below_data_db", PILOT_BELOW_DATA_DB)
-            ),
-            native_channelized_sample_format=str(
-                raw.get(
-                    "native_channelized_sample_format",
-                    DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT,
-                )
-            ),
-            adapter_output_format=str(
-                raw.get("adapter_output_format", DEFAULT_ADAPTER_OUTPUT_FORMAT)
-            ),
-            bits_per_component=int(
-                raw.get("bits_per_component", DEFAULT_BITS_PER_COMPONENT)
-            ),
-            quantization_scale_mode_default=str(
-                raw.get(
-                    "quantization_scale_mode_default",
-                    DEFAULT_QUANTIZATION_SCALE_MODE,
-                )
-            ),
-            clip_sigma_default=float(raw.get("clip_sigma_default", DEFAULT_CLIP_SIGMA)),
-            metadata=_mapping_or_empty(raw.get("metadata")),
+        _validate_exact_keys(
+            raw,
+            required=_TOP_LEVEL_REQUIRED,
+            optional=_TOP_LEVEL_OPTIONAL,
+            context="receiver profile",
         )
-        if "coarse_channel_width_hz" in raw and not math.isclose(
-            float(raw["coarse_channel_width_hz"]),
-            profile.coarse_channel_width_hz,
-            rel_tol=0.0,
-            abs_tol=1e-6,
-        ):
-            raise ValueError(
-                "coarse_channel_width_hz does not match band/num_coarse_channels: "
-                f"{raw['coarse_channel_width_hz']} vs "
-                f"{profile.coarse_channel_width_hz}"
-            )
-        return profile
-
-    def to_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {
-            "schema_version": self.schema_version,
-            "name": self.name,
-            "receiver_profile_id": self.name,
-            "sample_rate_hz": float(self.sample_rate_hz),
-            "band_lower_hz": float(self.band_lower_hz),
-            "band_upper_hz": float(self.band_upper_hz),
-            "num_coarse_channels": int(self.num_coarse_channels),
-            "coarse_channel_width_hz": float(self.coarse_channel_width_hz),
-            "frame_size_samples": int(self.frame_size_samples),
-            "num_input_streams": int(self.num_input_streams),
-            "spectral_sense": self.spectral_sense,
-            "frequency_order": self.frequency_order,
-            "channelizer": self.channelizer.to_dict(),
-            "bin_enbw_hz": float(self.bin_enbw_hz),
-            "pilot_capture_efficiency": float(self.pilot_capture_efficiency),
-            "coarse_channel_center_offset_hz": float(self.center_offset_hz),
-            "detector_window_samples": int(self.detector_window_samples),
-            "dtv_bandwidth_hz": float(self.dtv_bandwidth_hz),
-            "pilot_below_data_db": float(self.pilot_below_data_db),
-            "native_channelized_sample_format": self.native_channelized_sample_format,
-            "adapter_output_format": self.adapter_output_format,
-            "bits_per_component": int(self.bits_per_component),
-            "quantization_scale_mode_default": self.quantization_scale_mode_default,
-            "clip_sigma_default": float(self.clip_sigma_default),
-        }
-        if self.channel_center_normalized is not None:
-            out["channel_center_normalized"] = float(
-                self.channel_center_normalized
-            )
-        if self.channel_center_normalized_odd is not None:
-            out["channel_center_normalized_odd"] = float(
-                self.channel_center_normalized_odd
-            )
-        if self.instrument_name is not None:
-            out["instrument_name"] = self.instrument_name
-        if self.profile_status is not None:
-            out["profile_status"] = self.profile_status
-        if self.metadata:
-            out["metadata"] = dict(self.metadata)
-        return out
-
-    @classmethod
-    def _from_nested_dict(cls, data: dict[str, Any]) -> "ReceiverProfile":
-        raw = dict(data)
-        rf_band = _require_mapping(raw, "rf_band")
-        channelizer = _require_mapping(raw, "channelizer")
-        framing = _require_mapping(raw, "framing")
-        input_streams = _require_mapping(raw, "input_streams")
-        quantization = _mapping_or_empty(raw.get("quantization"))
-        adapter = _mapping_or_empty(raw.get("detector_adapter"))
-        baseband_frame = _mapping_or_empty(raw.get("baseband_frame"))
-        frequency_axis = _mapping_or_empty(channelizer.get("frequency_axis"))
-        digitizer = _mapping_or_empty(raw.get("digitizer"))
-
-        band_lower_hz = float(rf_band["lower_hz"])
-        if "upper_hz" in rf_band:
-            band_upper_hz = float(rf_band["upper_hz"])
-        else:
-            band_upper_hz = band_lower_hz + float(rf_band["bandwidth_hz"])
-        sample_rate_hz = _as_float(
-            channelizer.get(
-                "input_sample_rate_hz",
-                raw.get("sample_rate_hz", digitizer.get("adc_sample_rate_hz")),
-            ),
-            "channelizer.input_sample_rate_hz",
+        rf_band = _require_mapping(
+            raw,
+            "rf_band",
+            required=_RF_BAND_FIELDS,
+            context="receiver profile rf_band",
         )
-        spectral_sense = str(
-            frequency_axis.get(
-                "spectral_sense",
-                channelizer.get("spectral_sense", SPECTRAL_SENSE_NORMAL),
-            )
+        channelizer = _require_mapping(
+            raw,
+            "channelizer",
+            required=_CHANNELIZER_FIELDS,
+            context="receiver profile channelizer",
         )
-        frequency_order = str(
-            frequency_axis.get("order", channelizer.get("frequency_order", FREQUENCY_ORDER_ASCENDING_RF))
+        frequency_axis = _require_mapping(
+            channelizer,
+            "frequency_axis",
+            required=_FREQUENCY_AXIS_FIELDS,
+            context="receiver profile channelizer.frequency_axis",
         )
-        name = str(
-            raw.get(
-                "receiver_profile_id",
-                raw.get("name", raw.get("instrument_name", REFERENCE_PROFILE_NAME)),
-            )
+        framing = _require_mapping(
+            raw,
+            "framing",
+            required=_FRAMING_FIELDS,
+            context="receiver profile framing",
         )
-        nested_metadata = {
-            "rf_band": {
-                key: value
-                for key, value in rf_band.items()
-                if key not in {"lower_hz", "upper_hz", "bandwidth_hz"}
-            },
-            "channelizer_frequency_axis": frequency_axis,
-        }
-        nested_metadata = {
-            key: value for key, value in nested_metadata.items() if value
-        }
-        nested_metadata.update(_mapping_or_empty(raw.get("metadata")))
+        input_streams = _require_mapping(
+            raw,
+            "input_streams",
+            required=_INPUT_STREAM_FIELDS,
+            context="receiver profile input_streams",
+        )
+        quantization = _require_mapping(
+            raw,
+            "quantization",
+            required=_QUANTIZATION_FIELDS,
+            context="receiver profile quantization",
+        )
+        adapter = _require_mapping(
+            raw,
+            "detector_adapter",
+            required=_DETECTOR_ADAPTER_FIELDS,
+            context="receiver profile detector_adapter",
+        )
+        baseband_frame = _require_mapping(
+            raw,
+            "baseband_frame",
+            required=_BASEBAND_FRAME_REQUIRED,
+            optional=_BASEBAND_FRAME_OPTIONAL,
+            context="receiver profile baseband_frame",
+        )
+        metadata_value = raw.get("metadata", {})
+        if not isinstance(metadata_value, Mapping):
+            raise ValueError("receiver profile metadata must be an object.")
 
         return cls(
-            schema_version=str(
-                raw.get("schema_version", RECEIVER_PROFILE_SCHEMA_VERSION)
+            schema_version=_require_nonempty_str(
+                raw["schema_version"], "schema_version"
             ),
-            name=name,
-            sample_rate_hz=sample_rate_hz,
-            band_lower_hz=band_lower_hz,
-            band_upper_hz=band_upper_hz,
-            num_coarse_channels=int(channelizer["num_coarse_channels"]),
-            frame_size_samples=int(framing["frame_size_samples"]),
-            num_input_streams=int(input_streams["num_input_streams"]),
-            spectral_sense=spectral_sense,
-            channel_center_normalized=(
-                None
-                if baseband_frame.get("channel_center_normalized") is None
-                else float(baseband_frame["channel_center_normalized"])
+            receiver_profile_id=_require_nonempty_str(
+                raw["receiver_profile_id"], "receiver_profile_id"
+            ),
+            instrument_name=_require_nonempty_str(
+                raw["instrument_name"], "instrument_name"
+            ),
+            sample_rate_hz=_require_float(
+                channelizer["input_sample_rate_hz"],
+                "channelizer.input_sample_rate_hz",
+            ),
+            band_lower_hz=_require_float(rf_band["lower_hz"], "rf_band.lower_hz"),
+            band_upper_hz=_require_float(rf_band["upper_hz"], "rf_band.upper_hz"),
+            num_coarse_channels=_require_int(
+                channelizer["num_coarse_channels"],
+                "channelizer.num_coarse_channels",
+            ),
+            coarse_channel_center_offset_hz=_require_float(
+                channelizer["coarse_channel_center_offset_hz"],
+                "channelizer.coarse_channel_center_offset_hz",
+            ),
+            frame_size_samples=_require_int(
+                framing["frame_size_samples"], "framing.frame_size_samples"
+            ),
+            num_input_streams=_require_int(
+                input_streams["num_input_streams"],
+                "input_streams.num_input_streams",
+            ),
+            input_stream_unit=_require_nonempty_str(
+                input_streams["stream_unit"], "input_streams.stream_unit"
+            ),
+            stream_map_required=_require_bool(
+                input_streams["stream_map_required"],
+                "input_streams.stream_map_required",
+            ),
+            combine_default=_require_nonempty_str(
+                input_streams["combine_default"],
+                "input_streams.combine_default",
+            ),
+            spectral_sense=_require_nonempty_str(
+                frequency_axis["spectral_sense"],
+                "channelizer.frequency_axis.spectral_sense",
+            ),
+            frequency_order=_require_nonempty_str(
+                frequency_axis["order"],
+                "channelizer.frequency_axis.order",
+            ),
+            channelizer=ChannelizerProfile(
+                type=_require_nonempty_str(
+                    channelizer["type"], "channelizer.type"
+                ),
+                fft_size=_require_int(
+                    channelizer["pfb_fft_size"], "channelizer.pfb_fft_size"
+                ),
+                taps=_require_int(channelizer["taps"], "channelizer.taps"),
+                response=_require_nonempty_str(
+                    channelizer["response"], "channelizer.response"
+                ),
+            ),
+            native_channelized_sample_format=_require_nonempty_str(
+                quantization["native_channelized_sample_format"],
+                "quantization.native_channelized_sample_format",
+            ),
+            adapter_output_format=_require_nonempty_str(
+                quantization["adapter_output_format"],
+                "quantization.adapter_output_format",
+            ),
+            bits_per_component=_require_int(
+                quantization["bits_per_component"],
+                "quantization.bits_per_component",
+            ),
+            quantization_scale_mode_default=_require_nonempty_str(
+                quantization["scale_mode_default"],
+                "quantization.scale_mode_default",
+            ),
+            clip_sigma_default=_require_float(
+                quantization["clip_sigma_default"],
+                "quantization.clip_sigma_default",
+            ),
+            record_scale_by_stream=_require_bool(
+                quantization["record_scale_by_stream"],
+                "quantization.record_scale_by_stream",
+            ),
+            record_clip_fraction_by_stream=_require_bool(
+                quantization["record_clip_fraction_by_stream"],
+                "quantization.record_clip_fraction_by_stream",
+            ),
+            compatible_detector_core_id=_require_nonempty_str(
+                adapter["compatible_detector_core_id"],
+                "detector_adapter.compatible_detector_core_id",
+            ),
+            detector_window_samples=_require_int(
+                adapter["detector_window_samples"],
+                "detector_adapter.detector_window_samples",
+            ),
+            bin_enbw_hz=_require_float(
+                adapter["fine_bin_enbw_hz"],
+                "detector_adapter.fine_bin_enbw_hz",
+            ),
+            dtv_bandwidth_hz=_require_float(
+                adapter["dtv_bandwidth_hz"],
+                "detector_adapter.dtv_bandwidth_hz",
+            ),
+            pilot_below_data_db=_require_float(
+                adapter["pilot_below_data_db"],
+                "detector_adapter.pilot_below_data_db",
+            ),
+            pilot_capture_efficiency=_require_float(
+                adapter["pilot_capture_efficiency"],
+                "detector_adapter.pilot_capture_efficiency",
+            ),
+            time_reverse_detector_windows_before_kernel=_require_bool(
+                adapter["time_reverse_detector_windows_before_kernel"],
+                "detector_adapter.time_reverse_detector_windows_before_kernel",
+            ),
+            channel_center_normalized=_require_float(
+                baseband_frame["channel_center_normalized"],
+                "baseband_frame.channel_center_normalized",
+            ),
+            physical_dc_normalized=_require_float(
+                baseband_frame["physical_dc_normalized"],
+                "baseband_frame.physical_dc_normalized",
             ),
             channel_center_normalized_odd=(
                 None
-                if baseband_frame.get("channel_center_normalized_odd_channels")
-                is None
-                else float(
-                    baseband_frame["channel_center_normalized_odd_channels"]
+                if "channel_center_normalized_odd_channels" not in baseband_frame
+                else _require_float(
+                    baseband_frame["channel_center_normalized_odd_channels"],
+                    "baseband_frame.channel_center_normalized_odd_channels",
                 )
             ),
-            frequency_order=frequency_order,
-            channelizer=ChannelizerProfile.from_dict(channelizer),
-            bin_enbw_hz=_as_float(
-                adapter.get(
-                    "fine_bin_enbw_hz",
-                    adapter.get("bin_enbw_hz", EFFECTIVE_BIN_BW_HZ),
-                ),
-                "detector_adapter.fine_bin_enbw_hz",
-            ),
-            pilot_capture_efficiency=float(
-                adapter.get("pilot_capture_efficiency", PILOT_CAPTURE_EFFICIENCY)
-            ),
-            coarse_channel_center_offset_hz=(
+            physical_dc_normalized_odd=(
                 None
-                if channelizer.get("coarse_channel_center_offset_hz") is None
-                else float(channelizer["coarse_channel_center_offset_hz"])
-            ),
-            instrument_name=raw.get("instrument_name"),
-            profile_status=raw.get("profile_status"),
-            detector_window_samples=int(
-                adapter.get(
-                    "detector_window_samples",
-                    DEFAULT_DETECTOR_WINDOW_SAMPLES,
+                if "physical_dc_normalized_odd_channels" not in baseband_frame
+                else _require_float(
+                    baseband_frame["physical_dc_normalized_odd_channels"],
+                    "baseband_frame.physical_dc_normalized_odd_channels",
                 )
             ),
-            dtv_bandwidth_hz=float(
-                adapter.get("dtv_bandwidth_hz", DTV_BANDWIDTH_HZ)
-            ),
-            pilot_below_data_db=float(
-                adapter.get("pilot_below_data_db", PILOT_BELOW_DATA_DB)
-            ),
-            native_channelized_sample_format=str(
-                quantization.get(
-                    "native_channelized_sample_format",
-                    DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT,
-                )
-            ),
-            adapter_output_format=str(
-                quantization.get(
-                    "adapter_output_format",
-                    DEFAULT_ADAPTER_OUTPUT_FORMAT,
-                )
-            ),
-            bits_per_component=int(
-                quantization.get("bits_per_component", DEFAULT_BITS_PER_COMPONENT)
-            ),
-            quantization_scale_mode_default=str(
-                quantization.get("scale_mode_default", DEFAULT_QUANTIZATION_SCALE_MODE)
-            ),
-            clip_sigma_default=float(
-                quantization.get("clip_sigma_default", DEFAULT_CLIP_SIGMA)
-            ),
-            metadata=nested_metadata,
+            metadata=dict(metadata_value),
         )
 
     @classmethod
     def from_json(cls, path: str | Path) -> "ReceiverProfile":
-        """Load a receiver profile from JSON."""
         return load_receiver_profile(path)
 
-    def to_nested_dict(self) -> dict[str, Any]:
-        """Return the preferred public nested JSON representation."""
-        frequency_axis = {
-            "spectral_sense": self.spectral_sense,
-            "order": self.frequency_order,
+    def to_dict(self) -> dict[str, Any]:
+        channelizer = self.channelizer.to_dict()
+        channelizer.update(
+            {
+                "input_sample_rate_hz": float(self.sample_rate_hz),
+                "num_coarse_channels": int(self.num_coarse_channels),
+                "coarse_channel_center_offset_hz": float(
+                    self.coarse_channel_center_offset_hz
+                ),
+                "frequency_axis": {
+                    "spectral_sense": self.spectral_sense,
+                    "order": self.frequency_order,
+                },
+            }
+        )
+        baseband_frame: dict[str, Any] = {
+            "channel_center_normalized": float(self.channel_center_normalized),
+            "physical_dc_normalized": float(self.physical_dc_normalized),
         }
-        metadata_frequency_axis = self.metadata.get("channelizer_frequency_axis")
-        if isinstance(metadata_frequency_axis, Mapping):
-            frequency_axis.update(dict(metadata_frequency_axis))
-        channelizer = {
-            "type": self.channelizer.type,
-            "input_sample_rate_hz": float(self.sample_rate_hz),
-            "pfb_fft_size": int(self.channelizer.fft_size),
-            "taps": int(self.channelizer.taps),
-            "num_coarse_channels": int(self.num_coarse_channels),
-            "coarse_channel_width_hz": float(self.coarse_channel_width_hz),
-            "coarse_channel_center_offset_hz": float(self.center_offset_hz),
-            "output_sample_rate_hz": float(self.coarse_channel_width_hz),
-            "spectral_sense": self.spectral_sense,
-            "response": self.channelizer.response,
-            "frequency_axis": frequency_axis,
-        }
-        baseband_frame: dict[str, Any] = {}
-        if self.channel_center_normalized is not None:
-            baseband_frame["channel_center_normalized"] = float(
-                self.channel_center_normalized
-            )
         if self.channel_center_normalized_odd is not None:
             baseband_frame["channel_center_normalized_odd_channels"] = float(
                 self.channel_center_normalized_odd
             )
+        if self.physical_dc_normalized_odd is not None:
+            baseband_frame["physical_dc_normalized_odd_channels"] = float(
+                self.physical_dc_normalized_odd
+            )
         out: dict[str, Any] = {
             "schema_version": self.schema_version,
-            "receiver_profile_id": self.name,
-            "instrument_name": self.instrument_name or self.name,
+            "receiver_profile_id": self.receiver_profile_id,
+            "instrument_name": self.instrument_name,
             "rf_band": {
                 "lower_hz": float(self.band_lower_hz),
                 "upper_hz": float(self.band_upper_hz),
-                "bandwidth_hz": float(self.bandwidth_hz),
             },
             "channelizer": channelizer,
-            "framing": {
-                "frame_size_samples": int(self.frame_size_samples),
-                "frame_size_unit": "channelized complex samples per input stream",
-            },
+            "framing": {"frame_size_samples": int(self.frame_size_samples)},
             "input_streams": {
                 "num_input_streams": int(self.num_input_streams),
-                "stream_unit": "input_stream",
-                "stream_map_required": bool(self.num_input_streams > 1),
-                "combine_default": "incoherent_power_sum_over_streams",
+                "stream_unit": self.input_stream_unit,
+                "stream_map_required": bool(self.stream_map_required),
+                "combine_default": self.combine_default,
             },
             "quantization": {
                 "native_channelized_sample_format": (
@@ -603,29 +709,26 @@ class ReceiverProfile:
                 "bits_per_component": int(self.bits_per_component),
                 "scale_mode_default": self.quantization_scale_mode_default,
                 "clip_sigma_default": float(self.clip_sigma_default),
-                "record_scale_by_stream": True,
-                "record_clip_fraction_by_stream": True,
+                "record_scale_by_stream": bool(self.record_scale_by_stream),
+                "record_clip_fraction_by_stream": bool(
+                    self.record_clip_fraction_by_stream
+                ),
             },
             "detector_adapter": {
-                "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
+                "compatible_detector_core_id": self.compatible_detector_core_id,
                 "detector_window_samples": int(self.detector_window_samples),
-                "windows_per_stream_formula": (
-                    "frame_size_samples / detector_window_samples"
-                ),
-                "detector_rows_per_frame_formula": (
-                    "num_input_streams * num_selected_channels * windows_per_stream"
-                ),
-                "fine_bin_width_hz": float(self.bin_enbw_hz),
                 "fine_bin_enbw_hz": float(self.bin_enbw_hz),
                 "dtv_bandwidth_hz": float(self.dtv_bandwidth_hz),
                 "pilot_below_data_db": float(self.pilot_below_data_db),
                 "pilot_capture_efficiency": float(self.pilot_capture_efficiency),
+                "time_reverse_detector_windows_before_kernel": bool(
+                    self.time_reverse_detector_windows_before_kernel
+                ),
             },
+            "baseband_frame": baseband_frame,
         }
-        if self.profile_status is not None:
-            out["profile_status"] = self.profile_status
-        if baseband_frame:
-            out["baseband_frame"] = baseband_frame
+        if self.metadata:
+            out["metadata"] = dict(self.metadata)
         return out
 
 
@@ -659,22 +762,49 @@ def default_reference_receiver_profile(
     """Return the shipped 800 MS/s, 400-800 MHz reference receiver profile."""
     return ReceiverProfile(
         schema_version=RECEIVER_PROFILE_SCHEMA_VERSION,
-        name=REFERENCE_PROFILE_NAME,
+        receiver_profile_id=REFERENCE_PROFILE_ID,
+        instrument_name="reference",
         sample_rate_hz=REFERENCE_ADC_SAMPLE_RATE_HZ,
         band_lower_hz=REFERENCE_BAND_LOWER_HZ,
         band_upper_hz=REFERENCE_BAND_LOWER_HZ + REFERENCE_BANDWIDTH_HZ,
         num_coarse_channels=REFERENCE_NUM_CHANNELS,
+        coarse_channel_center_offset_hz=(
+            REFERENCE_BANDWIDTH_HZ / float(REFERENCE_NUM_CHANNELS)
+        ),
         frame_size_samples=int(frame_size_samples),
         num_input_streams=int(num_input_streams),
+        input_stream_unit="input_stream",
+        stream_map_required=bool(int(num_input_streams) > 1),
+        combine_default=COMBINE_MODE_COMBINED_STREAMS,
         spectral_sense=SPECTRAL_SENSE_NORMAL,
-        channelizer=ChannelizerProfile(),
+        frequency_order=FREQUENCY_ORDER_ASCENDING_RF,
+        channelizer=ChannelizerProfile(
+            type=DEFAULT_CHANNELIZER_TYPE,
+            fft_size=REFERENCE_PFB_FFT_SIZE,
+            taps=REFERENCE_PFB_TAPS,
+            response=DEFAULT_CHANNELIZER_RESPONSE,
+        ),
+        native_channelized_sample_format=DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT,
+        adapter_output_format=DEFAULT_ADAPTER_OUTPUT_FORMAT,
+        bits_per_component=DEFAULT_BITS_PER_COMPONENT,
+        quantization_scale_mode_default=DEFAULT_QUANTIZATION_SCALE_MODE,
+        clip_sigma_default=DEFAULT_CLIP_SIGMA,
+        record_scale_by_stream=True,
+        record_clip_fraction_by_stream=True,
+        compatible_detector_core_id=DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1,
+        detector_window_samples=DEFAULT_DETECTOR_WINDOW_SAMPLES,
         bin_enbw_hz=EFFECTIVE_BIN_BW_HZ,
+        dtv_bandwidth_hz=DTV_BANDWIDTH_HZ,
+        pilot_below_data_db=PILOT_BELOW_DATA_DB,
         pilot_capture_efficiency=PILOT_CAPTURE_EFFICIENCY,
+        time_reverse_detector_windows_before_kernel=False,
+        channel_center_normalized=0.5,
+        physical_dc_normalized=0.5,
     )
 
 
 def load_receiver_profile(path: str | Path) -> ReceiverProfile:
-    """Load a receiver profile JSON file."""
+    """Load one exact receiver-profile JSON document."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError("receiver profile JSON must contain an object.")
@@ -682,9 +812,13 @@ def load_receiver_profile(path: str | Path) -> ReceiverProfile:
 
 
 def receiver_profile_hash(profile: ReceiverProfile | dict[str, Any]) -> str:
-    """Return a stable SHA-256 hash for a receiver profile."""
-    payload = profile.to_dict() if isinstance(profile, ReceiverProfile) else dict(profile)
-    text = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    """Return the SHA-256 of the canonical strict profile serialization."""
+    canonical = (
+        profile.to_dict()
+        if isinstance(profile, ReceiverProfile)
+        else ReceiverProfile.from_dict(dict(profile)).to_dict()
+    )
+    text = json.dumps(canonical, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
     if len(digest) != PROFILE_HASH_HEX_CHARS:
         raise RuntimeError("unexpected SHA-256 digest length.")
@@ -695,7 +829,7 @@ def receiver_frequency_to_channel(
     rf_hz: float,
     profile: ReceiverProfile,
 ) -> ChannelSelection:
-    """Map an RF frequency to the nearest receiver coarse-channel selection."""
+    """Map an RF frequency to the nearest receiver coarse channel."""
     rf = float(rf_hz)
     if profile.frequency_order == FREQUENCY_ORDER_DESCENDING_RF:
         first_center = profile.band_upper_hz - profile.center_offset_hz
@@ -709,9 +843,11 @@ def receiver_frequency_to_channel(
         )
     center = profile.coarse_channel_center_hz(idx)
     rf_offset = rf - center
-    fine_offset = -rf_offset if spectral_sense_requires_time_reversal(
-        profile.spectral_sense
-    ) else rf_offset
+    fine_offset = (
+        -rf_offset
+        if spectral_sense_requires_time_reversal(profile.spectral_sense)
+        else rf_offset
+    )
     return ChannelSelection(
         rf_hz=rf,
         coarse_channel_index=idx,
@@ -727,17 +863,13 @@ def receiver_frequency_to_channel(
 def validate_weight_manifest_profile_hash(
     manifest: dict[str, Any],
     profile: ReceiverProfile,
-    *,
-    allow_missing: bool = False,
 ) -> bool:
-    """Validate a manifest receiver-profile hash when present."""
+    """Require the manifest to bind the exact canonical receiver profile."""
     expected = receiver_profile_hash(profile)
-    got = manifest.get("receiver_profile_hash", manifest.get("profile_hash"))
-    if got is None:
-        if allow_missing:
-            return False
+    if "receiver_profile_hash" not in manifest:
         raise ValueError("weight manifest does not contain receiver_profile_hash.")
-    if str(got) != expected:
+    got = str(manifest["receiver_profile_hash"])
+    if got != expected:
         raise ValueError(
             "weight manifest receiver profile hash does not match: "
             f"manifest={got}, expected={expected}"

@@ -321,3 +321,17 @@ overrides). For an inventory stored elsewhere, pass `--inventory <path>` or
 
 The analyzer also checks the input dtype: if a reader delivers complex64, the
 analyzer stops with an error before any product is written.
+
+## Exact profile documents
+
+Receiver profiles and detector-core profiles are current-only contract documents.
+The receiver profile has one nested representation; the detector core has one
+`kernel_contract` representation. Every authoritative field is required, unknown
+structural fields are rejected, and serialization emits exactly the accepted
+shape. Receiver-specific narrative notes belong under `metadata` and do not act
+as alternate sources for numerical parameters.
+
+The receiver profile explicitly declares both the normalized coarse-channel
+center and the normalized physical data-DC location. It also declares whether
+the adapter reverses detector windows before the post-spectral-sense weight bank.
+There is no implicit center-at-Nyquist or spectral-sense fallback.
