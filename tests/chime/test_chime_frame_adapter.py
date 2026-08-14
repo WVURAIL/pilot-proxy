@@ -43,6 +43,18 @@ def test_native_packed_chunk_shape_and_row_order() -> None:
 
     assert packed.packed.shape == (1, 4, 4)
     assert packed.input_layout["detector_rows_per_frame"] == 4
+    assert set(packed.input_layout) == {
+        "schema_version",
+        "frame_size_samples",
+        "detector_window_samples",
+        "windows_per_stream",
+        "num_input_streams",
+        "num_selected_channels",
+        "num_streams",
+        "detector_rows_per_frame",
+        "samples_per_result",
+        "combine_mode",
+    }
     expected = np.stack(
         [
             repack_chime_offset_binary_i4_to_twos_complement(block[0, 0, 0:4]),

@@ -381,22 +381,9 @@ def main(argv: list[str] | None = None) -> int:
         "input_layout": input_layout,
         "stream_map": stream_map,
         "input_stream_model": "replicated_single_input_iq",
-        "frame_size_samples": int(args.samples_per_block),
-        "samples_per_block": int(args.samples_per_block),
         "num_blocks": int(args.num_blocks),
-        "detector_window_samples": int(args.detector_window_samples),
         "spectral_sense": str(args.spectral_sense),
         "reference_archive_phase": bool(args.reference_archive_phase),
-        "windows_per_stream": int(
-            args.samples_per_block // args.detector_window_samples
-        ),
-        "windows_per_feed": int(input_layout["windows_per_feed"]),
-        "num_feeds": int(args.num_input_streams),
-        "num_selected_channels": int(len(base_channels)),
-        "num_input_streams": int(input_layout["num_input_streams"]),
-        "num_streams": int(input_layout["num_streams"]),
-        "detector_rows_per_block": int(input_layout["detector_rows_per_block"]),
-        "combine_mode": str(input_layout["combine_mode"]),
         "bits_per_component": int(args.bits),
         "packed_format": (
             "signed two's-complement int4 complex in int8: "

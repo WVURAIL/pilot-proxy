@@ -1,15 +1,17 @@
 # coding=utf-8
 """Schema constants for neutral receiver integration metadata."""
 
+from pilot_proxy.detector_geometry import (
+    COMBINE_MODE_COMBINED_STREAMS,
+    COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
+    STREAM_LAYOUT_SCHEMA_VERSION,
+)
+
 DETECTOR_CORE_PROFILE_SCHEMA_VERSION = "pilotproxy_detector_core_profile_v2"
 RECEIVER_PROFILE_SCHEMA_VERSION = "fstat_receiver_profile_v1"
-STREAM_LAYOUT_SCHEMA_VERSION = "fstat_stream_layout_v1"
 STREAM_MAP_SCHEMA_VERSION = "fstat_stream_map_v1"
 
 DETECTOR_CORE_ID_PILOT_PROXY_CUDA_V1 = "pilotproxy_cuda_fstat_v1"
-
-COMBINE_MODE_COMBINED_STREAMS = "incoherent_power_sum_over_streams"
-COMBINE_MODE_PER_STREAM_DIAGNOSTIC = "per_stream_diagnostic"
 
 QUANTIZATION_SCALE_MODE_GLOBAL = "global"
 QUANTIZATION_SCALE_MODE_PER_STREAM = "per_stream"

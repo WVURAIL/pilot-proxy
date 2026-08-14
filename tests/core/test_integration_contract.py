@@ -18,6 +18,7 @@ from pilot_proxy.detector_weights import DetectorWeightBank
 from pilot_proxy.integration import (
     COMBINE_MODE_COMBINED_STREAMS,
     COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
+    DetectorFrameLayout,
     DetectorCoreProfile,
     FREQUENCY_ORDER_DESCENDING_RF,
     InputStreamMap,
@@ -38,7 +39,6 @@ from pilot_proxy.integration import (
 from pilot_proxy.integration.packing import pack_channelized_streams_for_detector
 from pilot_proxy.integration.receiver_profile import load_receiver_profile
 from pilot_proxy.integration.stream_layout import load_stream_map
-from pilot_proxy.integration.stream_layout import InputStreamLayout
 from pilot_proxy.paths import DEFAULT_WEIGHTS_PATH
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -388,7 +388,7 @@ def test_receiver_profile_hash_validation() -> None:
 
 
 def test_stream_layout_shapes_and_uint64_bound_check() -> None:
-    layout = InputStreamLayout(
+    layout = DetectorFrameLayout(
         frame_size_samples=FRAME_SIZE_SAMPLES,
         detector_window_samples=DETECTOR_WINDOW_SAMPLES,
         num_input_streams=NUM_INPUT_STREAMS,
@@ -396,6 +396,18 @@ def test_stream_layout_shapes_and_uint64_bound_check() -> None:
 
     assert layout.combine_mode == COMBINE_MODE_COMBINED_STREAMS
     assert layout.detector_rows_per_frame == DETECTOR_ROWS
+    assert set(layout.to_dict()) == {
+        "schema_version",
+        "frame_size_samples",
+        "detector_window_samples",
+        "windows_per_stream",
+        "num_input_streams",
+        "num_selected_channels",
+        "num_streams",
+        "detector_rows_per_frame",
+        "samples_per_result",
+        "combine_mode",
+    }
     assert detector_shape_for_combined_streams(layout) == (
         1,
         DETECTOR_ROWS,

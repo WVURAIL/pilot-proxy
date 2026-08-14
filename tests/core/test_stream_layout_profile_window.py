@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from pilot_proxy.integration import DetectorFrameLayout
 from pilot_proxy.integration.stream_layout import layout_from_receiver_profile
 
 
@@ -15,6 +16,7 @@ def test_layout_uses_receiver_profile_detector_window() -> None:
 
     layout = layout_from_receiver_profile(profile)
 
+    assert isinstance(layout, DetectorFrameLayout)
     assert layout.frame_size_samples == 8192
     assert layout.detector_window_samples == 64
     assert layout.windows_per_stream == 128

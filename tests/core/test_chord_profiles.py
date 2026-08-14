@@ -29,8 +29,8 @@ import numpy as np
 import pytest
 
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
-from pilot_proxy.detector_geometry import DetectorInputLayout
 from pilot_proxy.integration import (
+    DetectorFrameLayout,
     load_detector_core_profile,
     load_receiver_profile,
 )
@@ -148,15 +148,15 @@ def test_chord_detector_layout_matches_frozen_fine_geometry(
     profile_path, expected_rows
 ) -> None:
     profile = load_receiver_profile(profile_path)
-    layout = DetectorInputLayout(
-        samples_per_block=profile.frame_size_samples,
-        num_streams=profile.num_input_streams,
+    layout = DetectorFrameLayout(
+        frame_size_samples=profile.frame_size_samples,
         detector_window_samples=profile.detector_window_samples,
+        num_input_streams=profile.num_input_streams,
     )
-    # windows_per_block must equal the frozen fine-reduction transform length
+    # windows_per_stream must equal the frozen fine-reduction transform length
     # (FSTAT_FINE_WINDOWS_PER_STREAM = 128) for the fused fine/mask kernels.
-    assert layout.windows_per_block == 128
-    assert layout.detector_rows_per_block == expected_rows
+    assert layout.windows_per_stream == 128
+    assert layout.detector_rows_per_frame == expected_rows
     # One detector block = one kotekan GPU frame of 8192 samples (41.94304
     # ms), aligned 1:1 with the 8192-sample n2k visibility integration.
     assert profile.frame_size_samples == 8192

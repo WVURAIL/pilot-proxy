@@ -11,13 +11,12 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from pilot_proxy.detector_geometry import DetectorInputLayout
+from pilot_proxy.detector_geometry import DetectorFrameLayout
 
 from .receiver_profile import ChannelSelection, ReceiverProfile
 from .schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
     COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
-    STREAM_LAYOUT_SCHEMA_VERSION,
     STREAM_MAP_SCHEMA_VERSION,
     SUPPORTED_QUANTIZATION_SCALE_MODES,
 )
@@ -28,64 +27,6 @@ COMPLEX_COMPONENT_COUNT = 2
 DEFAULT_SAMPLE_COMPONENT_BITS = 4
 DEFAULT_DOT_COMPONENT_BITS = 16
 DEFAULT_REFERENCE_WEIGHT_TERMS = 3
-
-
-@dataclass(frozen=True)
-class InputStreamLayout:
-    """Derived row geometry for external receiver data."""
-
-    frame_size_samples: int
-    detector_window_samples: int
-    num_input_streams: int
-    num_selected_channels: int = 1
-    combine_mode: str = COMBINE_MODE_COMBINED_STREAMS
-
-    def __post_init__(self) -> None:
-        if self.num_selected_channels <= 0:
-            raise ValueError("num_selected_channels must be positive.")
-        if self.combine_mode not in {
-            COMBINE_MODE_COMBINED_STREAMS,
-            COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
-        }:
-            raise ValueError(f"unsupported combine_mode: {self.combine_mode!r}")
-        DetectorInputLayout(
-            samples_per_block=int(self.frame_size_samples),
-            num_streams=int(self.num_streams),
-            detector_window_samples=int(self.detector_window_samples),
-        )
-
-    @property
-    def windows_per_stream(self) -> int:
-        return int(self.frame_size_samples) // int(self.detector_window_samples)
-
-    @property
-    def windows_per_feed(self) -> int:
-        return self.windows_per_stream
-
-    @property
-    def num_streams(self) -> int:
-        return int(self.num_input_streams) * int(self.num_selected_channels)
-
-    @property
-    def detector_rows_per_frame(self) -> int:
-        return int(self.num_streams) * int(self.windows_per_stream)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
-            "frame_size_samples": int(self.frame_size_samples),
-            "samples_per_frame": int(self.frame_size_samples),
-            "detector_window_samples": int(self.detector_window_samples),
-            "windows_per_stream": int(self.windows_per_stream),
-            "windows_per_feed": int(self.windows_per_feed),
-            "num_input_streams": int(self.num_input_streams),
-            "num_feeds": int(self.num_input_streams),
-            "num_selected_channels": int(self.num_selected_channels),
-            "num_streams": int(self.num_streams),
-            "detector_rows_per_frame": int(self.detector_rows_per_frame),
-            "detector_rows_per_block": int(self.detector_rows_per_frame),
-            "combine_mode": self.combine_mode,
-        }
 
 
 @dataclass(frozen=True)
@@ -244,7 +185,7 @@ def build_stream_map_for_channel(
 
 
 def detector_shape_for_combined_streams(
-    layout: InputStreamLayout,
+    layout: DetectorFrameLayout,
     *,
     batch: int = 1,
 ) -> tuple[int, int, int]:
@@ -257,7 +198,7 @@ def detector_shape_for_combined_streams(
 
 
 def detector_shape_for_per_stream_diagnostics(
-    layout: InputStreamLayout,
+    layout: DetectorFrameLayout,
     *,
     batch: int = 1,
 ) -> tuple[int, int, int]:
@@ -274,9 +215,9 @@ def layout_from_receiver_profile(
     *,
     num_selected_channels: int = 1,
     combine_mode: str = COMBINE_MODE_COMBINED_STREAMS,
-) -> InputStreamLayout:
-    """Build an input-stream layout from a receiver profile."""
-    return InputStreamLayout(
+) -> DetectorFrameLayout:
+    """Build canonical detector-frame geometry from a receiver profile."""
+    return DetectorFrameLayout(
         frame_size_samples=int(profile.frame_size_samples),
         detector_window_samples=int(profile.detector_window_samples),
         num_input_streams=int(profile.num_input_streams),
@@ -295,7 +236,7 @@ def layout_uint64_bound_check(
     num_weight_terms: int = DEFAULT_REFERENCE_WEIGHT_TERMS,
 ) -> dict[str, Any]:
     """Conservatively check uint64 power-sum capacity for a layout."""
-    layout = InputStreamLayout(
+    layout = DetectorFrameLayout(
         frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
         num_input_streams=int(num_input_streams),
@@ -370,7 +311,6 @@ def load_stream_map(path: str | Path) -> InputStreamMap:
 
 
 __all__ = [
-    "InputStreamLayout",
     "InputStreamMap",
     "StreamDescriptor",
     "build_stream_map_for_channel",

@@ -9,6 +9,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from pilot_proxy.detector_geometry import (
+    DetectorFrameLayout,
     apply_spectral_sense_to_detector_matrix,
     build_stream_map,
     flatten_feed_channel_streams,
@@ -23,7 +24,7 @@ from .schemas import (
     QUANTIZATION_SCALE_MODE_PER_STREAM,
     QUANTIZATION_SCALE_MODE_PROVIDED,
 )
-from .stream_layout import InputStreamLayout, quantization_metadata
+from .stream_layout import quantization_metadata
 
 DEFAULT_BITS_PER_COMPONENT = 4
 DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
@@ -225,7 +226,7 @@ def pack_channelized_streams_for_detector(
     if step <= 0:
         raise ValueError("block_step_samples must be positive.")
 
-    layout = InputStreamLayout(
+    layout = DetectorFrameLayout(
         frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
         num_input_streams=int(num_input_streams),

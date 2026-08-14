@@ -9,6 +9,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from pilot_proxy.detector_geometry import (
+    DetectorFrameLayout,
     apply_spectral_sense_to_detector_matrix,
     stream_time_block_to_detector_matrix,
 )
@@ -18,7 +19,6 @@ from pilot_proxy.integration.schemas import (
     QUANTIZATION_SCALE_MODE_GLOBAL,
     QUANTIZATION_SCALE_MODE_PROVIDED,
 )
-from pilot_proxy.integration.stream_layout import InputStreamLayout
 
 from .hdf5_input import (
     CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
@@ -214,7 +214,7 @@ def pack_chime_block_for_detector(
         frames_in_chunk=int(frames_in_chunk),
         sample_encoding=sample_encoding,
     )
-    layout = InputStreamLayout(
+    layout = DetectorFrameLayout(
         frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
         num_input_streams=int(arr.shape[0]),

@@ -23,10 +23,10 @@ if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
 
 from pilot_proxy.detector_geometry import (  # noqa: E402
+    DetectorFrameLayout,
     apply_spectral_sense_to_detector_matrix,
     build_stream_map,
     flatten_feed_channel_streams,
-    input_layout_metadata,
     stream_time_block_to_detector_matrix,
 )
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz  # noqa: E402
@@ -962,10 +962,9 @@ def _evaluate_one_trial(
             cpu_float_estimated_snr_shelf_db - measured_truth_snr_shelf_db
         ),
         "trial": int(trial),
-        "num_feeds": int(args.num_input_streams),
         "num_input_streams": int(args.num_input_streams),
         "num_selected_channels": 1,
-        "detector_rows_per_block": int(packed.shape[0]),
+        "detector_rows_per_frame": int(packed.shape[0]),
         "noise_source": str(args.noise_source),
         "noise_seed": (
             "" if not feed_noise_seeds else ";".join(str(seed) for seed in feed_noise_seeds)
@@ -1156,7 +1155,6 @@ def _summarize_rows(
                     ),
                     "trials": int(len(group)),
                     **_detection_rate_fields(group),
-                    "num_feeds": int(num_input_streams),
                     "num_input_streams": int(num_input_streams),
                     "cpu_gpu_abs_diff_max": _nanmax_or_nan(diffs),
                 }
@@ -1592,12 +1590,12 @@ def run(args: argparse.Namespace) -> int:
     ):
         measured_pilot_below_data_db = -float(measured_pilot_to_data_power_db)
     all_errors = np.asarray([row["snr_error_db"] for row in rows], dtype=np.float64)
-    input_layout = input_layout_metadata(
+    input_layout = DetectorFrameLayout(
         frame_size_samples=int(args.samples_per_block),
         detector_window_samples=int(args.detector_window_samples),
-        num_feeds=int(args.num_input_streams),
+        num_input_streams=int(args.num_input_streams),
         num_selected_channels=1,
-    )
+    ).to_dict()
     stream_map = build_stream_map(
         num_feeds=int(args.num_input_streams),
         selected_channel_indices=[int(channel_index)],
@@ -1608,7 +1606,6 @@ def run(args: argparse.Namespace) -> int:
     detector_geometry = {
         "input_layout": input_layout,
         "stream_map": stream_map,
-        "detector_window_samples": int(args.detector_window_samples),
         "reference_offset_bins": int(weights_bank.reference_offset_bins),
         "nominal_reference_offset_bins": int(weights_bank.reference_offset_bins),
         "selected_lower_reference_offset_bins": selected_weight_layout.get(
@@ -1620,16 +1617,6 @@ def run(args: argparse.Namespace) -> int:
         "bin_enbw_hz": float(args.bin_enbw_hz),
         "dtv_bandwidth_hz": float(args.dtv_bandwidth_hz),
         "pilot_capture_efficiency": float(args.pilot_capture_efficiency),
-        "frame_size_samples": int(args.samples_per_block),
-        "samples_per_block": int(args.samples_per_block),
-        "windows_per_stream": int(input_layout["windows_per_stream"]),
-        "windows_per_feed": int(input_layout["windows_per_feed"]),
-        "num_feeds": int(args.num_input_streams),
-        "num_selected_channels": 1,
-        "num_input_streams": int(input_layout["num_input_streams"]),
-        "num_streams": int(input_layout["num_streams"]),
-        "detector_rows_per_block": int(input_layout["detector_rows_per_block"]),
-        "combine_mode": str(input_layout["combine_mode"]),
         "stable_combine_mode": COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
         "power_sum_rule": (
             "sum target/reference powers over all detector rows before forming F"

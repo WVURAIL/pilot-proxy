@@ -6,21 +6,21 @@ import pytest
 
 from pilot_proxy.detector_reference import fstat_cpu_reference_packed
 from pilot_proxy.detector_geometry import (
+    DetectorFrameLayout,
+    STREAM_LAYOUT_SCHEMA_VERSION,
     apply_spectral_sense_to_detector_matrix,
     block_time_stream_to_detector_matrix,
     build_stream_map,
     flatten_feed_channel_streams,
-    input_layout_metadata,
     stack_stream_time_blocks,
     stream_time_block_to_detector_matrix,
 )
-from pilot_proxy.detector_geometry import DetectorInputLayout
 
 REFERENCE_FRAME_SIZE_SAMPLES = 16_384
 REFERENCE_NUM_STREAMS = 2_048
 REFERENCE_DETECTOR_WINDOW_SAMPLES = 128
-REFERENCE_WINDOWS_PER_BLOCK = 128
-REFERENCE_DETECTOR_ROWS_PER_BLOCK = 262_144
+REFERENCE_WINDOWS_PER_STREAM = 128
+REFERENCE_DETECTOR_ROWS_PER_FRAME = 262_144
 REFERENCE_SAMPLES_PER_RESULT = 33_554_432
 
 SMALL_BLOCK_TIME_SAMPLES = 8
@@ -47,19 +47,27 @@ COMBINED_PACKED_LOW = -64
 COMBINED_PACKED_HIGH = 64
 
 
-def test_detector_block_geometry_derived_values() -> None:
-    geometry = DetectorInputLayout(
-        samples_per_block=REFERENCE_FRAME_SIZE_SAMPLES,
-        num_streams=REFERENCE_NUM_STREAMS,
+def test_detector_frame_geometry_derived_values() -> None:
+    geometry = DetectorFrameLayout(
+        frame_size_samples=REFERENCE_FRAME_SIZE_SAMPLES,
         detector_window_samples=REFERENCE_DETECTOR_WINDOW_SAMPLES,
+        num_input_streams=REFERENCE_NUM_STREAMS,
     )
-    assert geometry.windows_per_block == REFERENCE_WINDOWS_PER_BLOCK
-    assert geometry.detector_rows_per_block == REFERENCE_DETECTOR_ROWS_PER_BLOCK
+    assert geometry.windows_per_stream == REFERENCE_WINDOWS_PER_STREAM
+    assert geometry.detector_rows_per_frame == REFERENCE_DETECTOR_ROWS_PER_FRAME
     assert geometry.samples_per_result == REFERENCE_SAMPLES_PER_RESULT
-    assert (
-        geometry.as_dict()["detector_window_samples"]
-        == REFERENCE_DETECTOR_WINDOW_SAMPLES
-    )
+    assert geometry.to_dict() == {
+        "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+        "frame_size_samples": REFERENCE_FRAME_SIZE_SAMPLES,
+        "detector_window_samples": REFERENCE_DETECTOR_WINDOW_SAMPLES,
+        "windows_per_stream": REFERENCE_WINDOWS_PER_STREAM,
+        "num_input_streams": REFERENCE_NUM_STREAMS,
+        "num_selected_channels": 1,
+        "num_streams": REFERENCE_NUM_STREAMS,
+        "detector_rows_per_frame": REFERENCE_DETECTOR_ROWS_PER_FRAME,
+        "samples_per_result": REFERENCE_SAMPLES_PER_RESULT,
+        "combine_mode": "incoherent_power_sum_over_streams",
+    }
 
 
 def test_block_time_stream_to_detector_matrix_order() -> None:
@@ -160,19 +168,27 @@ def test_feed_channel_streams_flatten_feed_major() -> None:
     np.testing.assert_array_equal(flattened[3], feed_channel[1, 1])
 
 
-def test_multi_feed_input_layout_metadata_and_stream_map() -> None:
-    layout = input_layout_metadata(
+def test_multi_feed_detector_frame_layout_and_stream_map() -> None:
+    layout = DetectorFrameLayout(
         frame_size_samples=REFERENCE_FRAME_SIZE_SAMPLES,
         detector_window_samples=REFERENCE_DETECTOR_WINDOW_SAMPLES,
-        num_feeds=MULTIFEED_FEEDS,
+        num_input_streams=MULTIFEED_FEEDS,
         num_selected_channels=1,
-    )
-    assert layout["windows_per_feed"] == REFERENCE_WINDOWS_PER_BLOCK
-    assert layout["num_input_streams"] == MULTIFEED_FEEDS
-    assert layout["detector_rows_per_block"] == (
-        MULTIFEED_FEEDS * REFERENCE_WINDOWS_PER_BLOCK
-    )
-    assert layout["combine_mode"] == "incoherent_power_sum_over_streams"
+    ).to_dict()
+    assert layout == {
+        "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+        "frame_size_samples": REFERENCE_FRAME_SIZE_SAMPLES,
+        "detector_window_samples": REFERENCE_DETECTOR_WINDOW_SAMPLES,
+        "windows_per_stream": REFERENCE_WINDOWS_PER_STREAM,
+        "num_input_streams": MULTIFEED_FEEDS,
+        "num_selected_channels": 1,
+        "num_streams": MULTIFEED_FEEDS,
+        "detector_rows_per_frame": (
+            MULTIFEED_FEEDS * REFERENCE_WINDOWS_PER_STREAM
+        ),
+        "samples_per_result": MULTIFEED_FEEDS * REFERENCE_FRAME_SIZE_SAMPLES,
+        "combine_mode": "incoherent_power_sum_over_streams",
+    }
 
     stream_map = build_stream_map(
         num_feeds=MULTIFEED_FEEDS,
@@ -270,10 +286,10 @@ def test_apply_spectral_sense_reverses_detector_window_axis() -> None:
     assert inverted.flags.c_contiguous
 
 
-def test_detector_block_geometry_rejects_non_divisible_block() -> None:
+def test_detector_frame_geometry_rejects_non_divisible_frame() -> None:
     with pytest.raises(ValueError, match="integer multiple"):
-        DetectorInputLayout(
-            samples_per_block=10,
-            num_streams=STACK_STREAMS,
+        DetectorFrameLayout(
+            frame_size_samples=10,
             detector_window_samples=STACK_FRAME_SIZE_SAMPLES,
+            num_input_streams=STACK_STREAMS,
         )

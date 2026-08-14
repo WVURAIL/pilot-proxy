@@ -11,8 +11,14 @@ import numpy as np
 SPECTRAL_SENSE_NORMAL = "normal"
 SPECTRAL_SENSE_INVERTED = "inverted"
 SUPPORTED_SPECTRAL_SENSE = frozenset({SPECTRAL_SENSE_NORMAL, SPECTRAL_SENSE_INVERTED})
-COMBINE_MODE_INCOHERENT_POWER_SUM_OVER_STREAMS = (
-    "incoherent_power_sum_over_streams"
+STREAM_LAYOUT_SCHEMA_VERSION = "fstat_stream_layout_v1"
+COMBINE_MODE_COMBINED_STREAMS = "incoherent_power_sum_over_streams"
+COMBINE_MODE_PER_STREAM_DIAGNOSTIC = "per_stream_diagnostic"
+SUPPORTED_COMBINE_MODES = frozenset(
+    {
+        COMBINE_MODE_COMBINED_STREAMS,
+        COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
+    }
 )
 
 
@@ -35,63 +41,73 @@ def spectral_sense_requires_time_reversal(value: Any | None) -> bool:
 
 
 @dataclass(frozen=True)
-class DetectorInputLayout:
-    """Derived geometry for one detector decision."""
+class DetectorFrameLayout:
+    """Canonical receiver-frame geometry for one detector decision."""
 
-    samples_per_block: int
-    num_streams: int
+    frame_size_samples: int
     detector_window_samples: int
+    num_input_streams: int
+    num_selected_channels: int = 1
+    combine_mode: str = COMBINE_MODE_COMBINED_STREAMS
 
     def __post_init__(self) -> None:
-        if self.samples_per_block <= 0:
-            raise ValueError("samples_per_block must be positive.")
-        if self.num_streams <= 0:
-            raise ValueError("num_streams must be positive.")
-        if self.detector_window_samples <= 0:
+        frame_size = int(self.frame_size_samples)
+        window = int(self.detector_window_samples)
+        inputs = int(self.num_input_streams)
+        channels = int(self.num_selected_channels)
+        combine_mode = str(self.combine_mode)
+        if frame_size <= 0:
+            raise ValueError("frame_size_samples must be positive.")
+        if window <= 0:
             raise ValueError("detector_window_samples must be positive.")
-        if self.samples_per_block % self.detector_window_samples != 0:
+        if inputs <= 0:
+            raise ValueError("num_input_streams must be positive.")
+        if channels <= 0:
+            raise ValueError("num_selected_channels must be positive.")
+        if frame_size % window != 0:
             raise ValueError(
-                "samples_per_block must be an integer multiple of "
+                "frame_size_samples must be an integer multiple of "
                 "detector_window_samples: "
-                f"samples_per_block={self.samples_per_block}, "
-                f"detector_window_samples={self.detector_window_samples}"
+                f"frame_size_samples={frame_size}, "
+                f"detector_window_samples={window}"
             )
+        if combine_mode not in SUPPORTED_COMBINE_MODES:
+            raise ValueError(f"unsupported combine_mode: {combine_mode!r}")
+        object.__setattr__(self, "frame_size_samples", frame_size)
+        object.__setattr__(self, "detector_window_samples", window)
+        object.__setattr__(self, "num_input_streams", inputs)
+        object.__setattr__(self, "num_selected_channels", channels)
+        object.__setattr__(self, "combine_mode", combine_mode)
 
     @property
-    def windows_per_block(self) -> int:
-        return self.samples_per_block // self.detector_window_samples
+    def windows_per_stream(self) -> int:
+        return self.frame_size_samples // self.detector_window_samples
 
     @property
-    def detector_rows_per_block(self) -> int:
-        return self.num_streams * self.windows_per_block
+    def num_streams(self) -> int:
+        return self.num_input_streams * self.num_selected_channels
+
+    @property
+    def detector_rows_per_frame(self) -> int:
+        return self.num_streams * self.windows_per_stream
 
     @property
     def samples_per_result(self) -> int:
-        return self.samples_per_block * self.num_streams
+        return self.frame_size_samples * self.num_streams
 
-    def as_dict(self) -> dict[str, int]:
+    def to_dict(self) -> dict[str, Any]:
         return {
-            "samples_per_block": int(self.samples_per_block),
-            "num_streams": int(self.num_streams),
-            "detector_window_samples": int(self.detector_window_samples),
-            "windows_per_block": int(self.windows_per_block),
-            "detector_rows_per_block": int(self.detector_rows_per_block),
-            "samples_per_result": int(self.samples_per_result),
+            "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+            "frame_size_samples": self.frame_size_samples,
+            "detector_window_samples": self.detector_window_samples,
+            "windows_per_stream": self.windows_per_stream,
+            "num_input_streams": self.num_input_streams,
+            "num_selected_channels": self.num_selected_channels,
+            "num_streams": self.num_streams,
+            "detector_rows_per_frame": self.detector_rows_per_frame,
+            "samples_per_result": self.samples_per_result,
+            "combine_mode": self.combine_mode,
         }
-
-
-def derive_detector_input_layout(
-    *,
-    samples_per_block: int,
-    num_streams: int,
-    detector_window_samples: int,
-) -> DetectorInputLayout:
-    """Build and validate a detector input layout object."""
-    return DetectorInputLayout(
-        samples_per_block=int(samples_per_block),
-        num_streams=int(num_streams),
-        detector_window_samples=int(detector_window_samples),
-    )
 
 
 def flatten_feed_channel_streams(feed_channel_streams: np.ndarray) -> np.ndarray:
@@ -145,36 +161,6 @@ def build_stream_map(
     return stream_map
 
 
-def input_layout_metadata(
-    *,
-    frame_size_samples: int,
-    detector_window_samples: int,
-    num_feeds: int,
-    num_selected_channels: int,
-) -> dict[str, int | str]:
-    """Return public metadata for combined-stream detector input layout."""
-    if num_selected_channels <= 0:
-        raise ValueError("num_selected_channels must be positive.")
-    layout = DetectorInputLayout(
-        samples_per_block=int(frame_size_samples),
-        num_streams=int(num_feeds) * int(num_selected_channels),
-        detector_window_samples=int(detector_window_samples),
-    )
-    return {
-        "frame_size_samples": int(frame_size_samples),
-        "samples_per_block": int(frame_size_samples),
-        "detector_window_samples": int(detector_window_samples),
-        "windows_per_stream": int(layout.windows_per_block),
-        "windows_per_feed": int(layout.windows_per_block),
-        "num_feeds": int(num_feeds),
-        "num_selected_channels": int(num_selected_channels),
-        "num_input_streams": int(layout.num_streams),
-        "num_streams": int(layout.num_streams),
-        "detector_rows_per_block": int(layout.detector_rows_per_block),
-        "combine_mode": COMBINE_MODE_INCOHERENT_POWER_SUM_OVER_STREAMS,
-    }
-
-
 def block_time_stream_to_detector_matrix(
     block: np.ndarray,
     *,
@@ -200,18 +186,18 @@ def block_time_stream_to_detector_matrix(
         raise ValueError("time_axis and stream_axis must identify the two axes.")
 
     time_stream = np.moveaxis(arr, (time_axis, stream_axis), (0, 1))
-    layout = DetectorInputLayout(
-        samples_per_block=int(time_stream.shape[0]),
-        num_streams=int(time_stream.shape[1]),
+    layout = DetectorFrameLayout(
+        frame_size_samples=int(time_stream.shape[0]),
         detector_window_samples=int(detector_window_samples),
+        num_input_streams=int(time_stream.shape[1]),
     )
     windows = time_stream.reshape(
-        layout.windows_per_block,
+        layout.windows_per_stream,
         layout.detector_window_samples,
         layout.num_streams,
     )
     detector_matrix = np.transpose(windows, (2, 0, 1)).reshape(
-        layout.detector_rows_per_block,
+        layout.detector_rows_per_frame,
         layout.detector_window_samples,
     )
     return np.ascontiguousarray(detector_matrix)
@@ -283,17 +269,18 @@ def apply_spectral_sense_to_detector_matrix(
 
 
 __all__ = [
-    "DetectorInputLayout",
-    "COMBINE_MODE_INCOHERENT_POWER_SUM_OVER_STREAMS",
+    "COMBINE_MODE_COMBINED_STREAMS",
+    "COMBINE_MODE_PER_STREAM_DIAGNOSTIC",
+    "DetectorFrameLayout",
     "SPECTRAL_SENSE_INVERTED",
     "SPECTRAL_SENSE_NORMAL",
+    "STREAM_LAYOUT_SCHEMA_VERSION",
+    "SUPPORTED_COMBINE_MODES",
     "SUPPORTED_SPECTRAL_SENSE",
     "apply_spectral_sense_to_detector_matrix",
     "block_time_stream_to_detector_matrix",
     "build_stream_map",
-    "derive_detector_input_layout",
     "flatten_feed_channel_streams",
-    "input_layout_metadata",
     "normalize_spectral_sense",
     "spectral_sense_requires_time_reversal",
     "stack_stream_time_blocks",

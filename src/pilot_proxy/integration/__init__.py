@@ -1,6 +1,8 @@
 # coding=utf-8
 """Neutral integration contract for external receiver pipelines."""
 
+from pilot_proxy.detector_geometry import DetectorFrameLayout
+
 from .detector_core import DetectorCoreProfile, load_detector_core_profile
 from .defaults import (
     DEFAULT_CHIME_DTV_RECEIVER_PROFILE,
@@ -34,7 +36,6 @@ from .schemas import (
     STREAM_MAP_SCHEMA_VERSION,
 )
 from .stream_layout import (
-    InputStreamLayout,
     InputStreamMap,
     StreamDescriptor,
     build_stream_map_for_channel,
@@ -62,9 +63,9 @@ __all__ = [
     "DEFAULT_DETECTOR_CORE_PROFILE",
     "DEFAULT_REFERENCE_RECEIVER_PROFILE",
     "DetectorCoreProfile",
+    "DetectorFrameLayout",
     "FREQUENCY_ORDER_ASCENDING_RF",
     "FREQUENCY_ORDER_DESCENDING_RF",
-    "InputStreamLayout",
     "InputStreamMap",
     "PackedDetectorInput",
     "QUANTIZATION_SCALE_MODE_GLOBAL",
