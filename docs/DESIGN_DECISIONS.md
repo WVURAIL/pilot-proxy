@@ -358,10 +358,8 @@ candidate checkout.
 The ragged detection list (`fine_detected_frame`, `fine_detected_bin`) is
 partitioned authoritatively by `fine_detected_count`; the frame column must
 equal `repeat(arange(n_frames), counts)`, and the test suite enforces that
-invariant end to end. A product whose frame column is unit-anchored (each
-detection stamped with its unit's first frame index) is exactly repairable
-in place with `tools/repair_fine_frame_labels.py`, because the counts
-column is authoritative; no rescan is required.
+invariant end to end. Products that violate the public contract are unsupported
+development outputs and must be regenerated from authoritative inputs.
 
 ## Deferred work
 

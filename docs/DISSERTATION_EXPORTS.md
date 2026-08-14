@@ -84,3 +84,13 @@ The exporter does not move raw captures, result bundles, NPZ dumps, or Fisher
 workspaces into git. Those remain in the archive channel. Their small tabular
 exports can be supplied to the exporter and are then fingerprinted in the
 resulting dissertation export.
+
+## Frozen dissertation inputs still requiring replacement
+
+The dissertation bundle can render every current figure reproducibly, but some
+plots still consume audited frozen intermediate tables rather than direct
+exports from the owning scientific pipeline. Before the archival dissertation
+release, replace the frozen inputs for the census power spectra, worked detector
+example, BAO forecast curves, and any digitized introductory cosmology curves.
+The manifest must continue to label these as frozen bridges until their upstream
+generators emit hash-pinned tables directly.

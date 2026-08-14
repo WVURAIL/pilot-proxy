@@ -87,15 +87,15 @@ def test_snr_shelf_threshold_converts_to_kernel_half_threshold() -> None:
     assert fields["threshold_snr_shelf_db"] == THRESHOLD_SNR_SHELF_DB
 
 
-def test_numden_zero_denominator_policy_matches_c_helper() -> None:
-    assert fstat_num_den_to_raw(
+def test_numden_zero_denominator_is_invalid_measurement() -> None:
+    assert math.isnan(fstat_num_den_to_raw(
         NUMDEN_ZERO_REFERENCE_NUM,
         NUMDEN_ZERO_REFERENCE_DEN,
-    ) == 0.0
-    assert fstat_num_den_to_pilot_excess_linear(
+    ))
+    assert math.isnan(fstat_num_den_to_pilot_excess_linear(
         NUMDEN_ZERO_REFERENCE_NUM,
         NUMDEN_ZERO_REFERENCE_DEN,
-    ) == 0.0
+    ))
     assert math.isnan(
         fstat_num_den_to_pnr_bin_db(
             NUMDEN_ZERO_REFERENCE_NUM,

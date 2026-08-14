@@ -45,6 +45,26 @@ def _valid_array_like(values: np.ndarray, valid: np.ndarray | None) -> np.ndarra
     return flags
 
 
+def _optional_frequency_array(
+    values: Sequence[float] | np.ndarray | None,
+    *,
+    shape_like: Sequence[float] | np.ndarray,
+) -> np.ndarray:
+    """Return frequency metadata without inventing a different coordinate.
+
+    A nominal pilot frequency is not a substitute for an unknown receiver
+    coarse-channel centre.  Missing metadata is represented by NaN and remains
+    visibly unavailable to downstream validation and plotting.
+    """
+    reference = np.asarray(shape_like)
+    if values is None:
+        return np.full(reference.shape, np.nan, dtype=np.float64)
+    out = np.asarray(values, dtype=np.float64)
+    if out.shape != reference.shape:
+        raise ValueError("frequency metadata must match the pilot-frequency shape")
+    return out
+
+
 def mean_where(
     values: np.ndarray, include: np.ndarray, *, axis: int = 0
 ) -> np.ndarray:
@@ -57,9 +77,6 @@ def mean_where(
     out = np.full(numerator.shape, np.nan, dtype=np.float64)
     np.divide(numerator, denominator, out=out, where=denominator > 0)
     return out
-
-
-_mean_where = mean_where
 
 
 def valid_mask_counts(
@@ -141,9 +158,9 @@ def write_detector_outputs(
     arrays: dict[str, np.ndarray] = dict(
         physical_channel=np.asarray(physical_channel, dtype=np.int32),
         pilot_frequency_hz=np.asarray(pilot_frequency_hz, dtype=np.float64),
-        chime_frequency_hz=np.asarray(
-            pilot_frequency_hz if chime_frequency_hz is None else chime_frequency_hz,
-            dtype=np.float64,
+        chime_frequency_hz=_optional_frequency_array(
+            chime_frequency_hz,
+            shape_like=pilot_frequency_hz,
         ),
         frame_index=np.asarray(frame_index, dtype=np.int64),
         p_target_u64=np.asarray(p_target_u64, dtype=np.uint64),
@@ -194,9 +211,9 @@ def write_spectrogram_cache(
         valid=np.asarray(valid_array, dtype=np.uint8),
         physical_channel=np.asarray(physical_channel, dtype=np.int32),
         pilot_frequency_hz=np.asarray(pilot_frequency_hz, dtype=np.float64),
-        chime_frequency_hz=np.asarray(
-            pilot_frequency_hz if chime_frequency_hz is None else chime_frequency_hz,
-            dtype=np.float64,
+        chime_frequency_hz=_optional_frequency_array(
+            chime_frequency_hz,
+            shape_like=pilot_frequency_hz,
         ),
         frame_index=np.asarray(frame_index, dtype=np.int64),
         relative_time_s=relative_time_seconds(
@@ -280,6 +297,10 @@ def write_spectrum_table(
 ) -> Path:
     before_db, after_db = spectrum_before_after(baseband_power_linear, mask, valid)
     counts = valid_mask_counts(mask, valid)
+    coarse_centres = _optional_frequency_array(
+        chime_frequency_hz,
+        shape_like=pilot_frequency_hz,
+    )
     path = Path(run_dir) / "tables" / "spectrum_before_after.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -306,11 +327,7 @@ def write_spectrum_table(
                 {
                     "physical_channel": int(channel),
                     "pilot_frequency_hz": float(pilot_frequency_hz[index]),
-                    "chime_frequency_hz": float(
-                        pilot_frequency_hz[index]
-                        if chime_frequency_hz is None
-                        else chime_frequency_hz[index]
-                    ),
+                    "chime_frequency_hz": float(coarse_centres[index]),
                     "before_mask_power_db": float(before_db[index]),
                     "after_mask_power_db": float(after_db[index]),
                     "mask_fraction": float(counts["mask_fraction_valid"][index]),
@@ -338,6 +355,10 @@ def write_mask_summary(
     valid_rule: str = "p_ref_sum != 0",
 ) -> Path:
     counts = valid_mask_counts(mask, valid)
+    coarse_centres = _optional_frequency_array(
+        chime_frequency_hz,
+        shape_like=pilot_frequency_hz,
+    )
     path = Path(run_dir) / "tables" / "mask_summary_by_pilot.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
@@ -364,11 +385,7 @@ def write_mask_summary(
                 {
                     "physical_channel": int(channel),
                     "pilot_frequency_hz": float(pilot_frequency_hz[index]),
-                    "chime_frequency_hz": float(
-                        pilot_frequency_hz[index]
-                        if chime_frequency_hz is None
-                        else chime_frequency_hz[index]
-                    ),
+                    "chime_frequency_hz": float(coarse_centres[index]),
                     "mask_source": str(mask_source),
                     "valid_rule": str(valid_rule),
                     "mask_rule": str(mask_rule),

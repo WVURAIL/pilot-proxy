@@ -738,17 +738,7 @@ def run_chime_analysis(
         [_coarse_center_hz(dataset, receiver_profile) for dataset in selected],
         dtype=np.float64,
     )
-    chime_frequency_hz = np.asarray(
-        [
-            (
-                coarse_channel_center_hz[index]
-                if dataset.coarse_channel_center_hz is not None
-                else dataset.pilot_frequency_hz
-            )
-            for index, dataset in enumerate(selected)
-        ],
-        dtype=np.float64,
-    )
+    chime_frequency_hz = coarse_channel_center_hz.copy()
     layout_check = layout_uint64_bound_check(
         frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),

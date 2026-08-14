@@ -1,7 +1,7 @@
 # coding=utf-8
-"""Schema-v2 product contents for the ``pilot-proxy-detector`` analyzer.
+"""Current per-pilot product contents for the PilotProxy analyzer.
 
-v2 folds three derived-from-the-same-pass products into the per-pilot ``.npz`` so
+The product folds three derived-from-the-same-pass products into one ``.npz`` so
 the week-long CANFAR run never needs a second pass:
 
   * two integrated power spectra (rectangular-window |FFT|^2 summed over feeds),
@@ -18,6 +18,7 @@ the numpy path against an independent FFT, which is the same arithmetic.
 """
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
@@ -32,6 +33,10 @@ from datatrawl.instruments import load_instrument  # noqa: E402
 from datatrawl.interfaces import RunContext  # noqa: E402
 
 from pilot_proxy.detector_contract import POSITIVE_EXCESS_MASK_RULE  # noqa: E402
+from pilot_proxy.product_contract import (  # noqa: E402
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    current_decision_contract,
+)
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer  # noqa: E402
 from pilot_proxy.datatrawl_plugins.packed_reader import ChimeBasebandPackedReader  # noqa: E402
 
@@ -301,7 +306,7 @@ def test_two_units_have_distinct_time0_and_reset_frame_in_unit(tmp_path):
 
 # -- provenance + rename ------------------------------------------------------
 
-def test_provenance_and_reject_mask_rename(tmp_path):
+def test_current_product_provenance_and_reject_mask(tmp_path):
     synth = tmp_path / "prov.h5"
     fmt.make_synth_file(str(synth), n_time=NFFT * 2, n_feeds=N_FEEDS,
                         f_center_mhz=F_CENTER_MHZ, f_tone_bb=1500.0, seed=9)
@@ -315,6 +320,8 @@ def test_provenance_and_reject_mask_rename(tmp_path):
     # rename propagated: the per-channel product uses reject_mask rather than mask
     assert "reject_mask" in got.files
     assert "mask" not in got.files
+    assert "fine_null_bulk_exceedance_fraction" in got.files
+    assert "fine_nd_flag_rate" not in got.files
 
     # provenance
     import hashlib
@@ -322,5 +329,11 @@ def test_provenance_and_reject_mask_rename(tmp_path):
     assert str(np.asarray(got["weights_hash"])) == hashlib.sha256(
         np.ascontiguousarray(w).tobytes()
     ).hexdigest()
-    assert "pilotproxy_detector_datatrawl_v3" in str(np.asarray(got["detector_version"]))
-    assert str(np.asarray(got["schema_version"])) == "pilotproxy_detector_datatrawl_v3"
+    assert PER_PILOT_PRODUCT_SCHEMA_TOKEN in str(np.asarray(got["detector_version"]))
+    assert str(np.asarray(got["schema_version"])) == PER_PILOT_PRODUCT_SCHEMA_TOKEN
+    assert str(np.asarray(got["schema_name"])) == "pilotproxy_per_pilot_product"
+    assert int(np.asarray(got["schema_revision"])) == 1
+    stored_contract = json.loads(
+        str(np.asarray(got["decision_contract_json"]).reshape(()).item())
+    )
+    assert stored_contract == current_decision_contract()

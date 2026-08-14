@@ -66,18 +66,21 @@ report). The combined measurement is now direct: the fused kernel (core
 2.2.0) runs the complete samples-to-fine-and-coarse-powers datapath in
 0.77 ms per 2048-stream frame (x55 margin; 2.8x faster than the composed
 three-launch chain, and binding the row-sum debug tap adds ~5 us), and
-the full deployed mask form (core 2.3.0, decision epilogue included)
+the fused fine-mask candidate (core 2.3.0, decision epilogue included)
 measures 0.90 ms (x47 margin; the epilogue itself costs +0.13 ms) ---
 A100, `test_fused_fine_gpu.py` / `test_fused_mask_gpu.py` rate reports,
-2026-08-05. The deployed decision therefore occupies ~2% of the frame
-cadence end to end.
+2026-08-05. The implemented candidate therefore occupies ~2% of the frame
+cadence end to end; that timing result does not make an uncalibrated decision
+an active observing policy.
 
-The enqueued decision is the fine designated-set CFAR, computed on the
-device after the exact int32 row sums: padded window-axis FFT, incoherent
-feed sum, per-frame null-bulk CFAR estimate, designated-set compare, one
-mask bit per aligned frame --- so the queue design below is unchanged
-(see "The deployed decision is the fine designated-set CFAR in the
-kernel" in `docs/DESIGN_DECISIONS.md`). The gating engineering
+The intended post-calibration enqueued decision is the fine designated-set
+order-statistic CFAR computed on the device after the exact int32 row sums:
+padded window-axis FFT, incoherent feed sum, null-bulk order statistic,
+designated-set compare, and one mask bit per aligned frame. The queue design
+below is unchanged. The current Python CHIME/archive path instead records the
+norm-corrected coarse positive-excess decision as `reject_mask`; its stored fine
+spectrum and threshold exceedances are diagnostics, not the active rejection
+decision. The gating engineering
 requirement --- a deterministic verification FFT implemented identically
 in CUDA and the reference --- is frozen as fxfft256 v1; section 5 lists
 the frozen artifacts and the bit-for-bit rule. The bundle
@@ -227,7 +230,7 @@ operating point (for example to a null-calibrated false-alarm quantile) by
 regenerating the bundle with a different rational pair, with no kernel
 change.
 
-The fine deployed decision extends this ABI: the stage additionally binds
+The fine candidate decision extends this ABI: the stage additionally binds
 the row-sum entry (kernel core 2.0.0) and the on-device fine power stage
 (kernel core 2.1.0, `FStat_Compute_FinePowers_U64`: the frozen fxfft256
 v1 FFT plus exact uint64 feed sums, handle-free over the row-sum buffer).

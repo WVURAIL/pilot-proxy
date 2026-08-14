@@ -639,7 +639,7 @@ streams yields the fine-bin statistic
 exactly: the integer sum of \(|z|^2\) over rows reproduces the coarse powers
 bit-for-bit, so \(F\) is exactly the all-bin marginal of the fine spectrum.
 The Data Sheet
-and \code{docs/product_schema_v3.md} give the definitions and stored fields;
+and \code{docs/PRODUCT_SCHEMA.md} give the definitions and stored fields;
 \code{docs/METHOD_SPEC.md} states the CFAR calibration.
 
 In CHIME archive products (\code{pilot-proxy chime-scan}), fine products are
@@ -667,11 +667,11 @@ either side of nominal), while the designated bin itself may rarely fire. The an
 decision rule exists for exactly this case. Two consequences follow. First,
 identify a transmitter by the stability of its offset across frames and
 epochs, not by designated-bin hits. Second, on DTV-occupied channels the
-offset pilot lives in non-designated bins, so the live false-alarm monitor
-\field{fine_nd_flag_rate} reads high there; that is signal, not CFAR
-miscalibration. Judge CFAR calibration on channels without detected lines,
-where the monitor should sit within a factor of a few of the configured
-\(P_{FA}\).
+offset pilot lives in non-designated bins, so
+\field{fine_null_bulk_exceedance_fraction} can read high there. This field is
+the in-sample fraction of fitted null-bulk bins above the fitted threshold; it
+is not an independently measured false-alarm rate. Interpret it together with
+the stored fine spectrum and the detected-line stability across frames.
 
 \section{C API Overview}
 
@@ -730,7 +730,7 @@ science products and diagnostics.
 
 JSON reports do not emit NaN or infinity; values that are not finite are serialized as \code{null}. CSV files may retain NaN text when analysis software can represent it.
 
-Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilot_proxy_result_v2}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppSchemaVThree} as defined in \code{docs/product_schema_v3.md}.
+Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilot_proxy_result_v2}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppSchemaVThree} as defined in \code{docs/PRODUCT_SCHEMA.md}.
 
 The combined-row statistic is:
 \begin{equation}
@@ -792,7 +792,7 @@ If \(F\leq1\), the raw pilot-excess ratio is non-positive and \(10\log_{10}(F-1)
 The loaded \code{libfstatistic.so} predates the row-sum entry. Rebuild and restage it with \code{make build-kernel}, confirm \code{FStat_Supports_RowSums()} returns 1 (the kernel-load check in \code{scripts/setup_env.sh} prints the loaded version), and relaunch. This hard failure is intentional for production runs; use \code{fine_products=auto} only when degrading to coarse-only products is acceptable.
 
 \subsection{High nd flag rate on an occupied channel}
-\field{fine_nd_flag_rate} counts detections in non-designated bins. A real transmitter at a nonzero pilot offset occupies those bins persistently, so a high rate on a DTV-occupied channel is expected signal (see Section~\ref{sec:fineproducts}). Evaluate CFAR calibration on channels without detected lines instead.
+\field{fine_null_bulk_exceedance_fraction} counts detections in non-designated bins. A real transmitter at a nonzero pilot offset occupies those bins persistently, so a high rate on a DTV-occupied channel is expected signal (see Section~\ref{sec:fineproducts}). Evaluate CFAR calibration on channels without detected lines instead.
 
 \begin{thebibliography}{9}
 \bibitem{atsc_a53_part2_2011} Advanced Television Systems Committee, \emph{ATSC Digital Television Standard, Part 2: RF/Transmission System Characteristics}, A/53 Part 2:2011, 15 December 2011. \url{https://www.atsc.org/wp-content/uploads/2021/04/A53-Part-2-2011.pdf}

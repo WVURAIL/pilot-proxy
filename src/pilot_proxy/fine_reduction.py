@@ -32,8 +32,9 @@ Invariants (enforced, not assumed):
   (location = P25, scale = (P25 - P2.275) / 2) and record the mode.
 * **Any-bin detection.** Detections are declared on all bins against the
   null calibration, removing the census dependency of designated-only
-  rules; the flag rate over the non-designated independent bins is
-  reported as a live false-alarm-rate monitor (``nd_flag_rate``).
+  rules. The fraction of those same null-bulk bins that exceed the fitted
+  threshold is reported as ``null_bulk_exceedance_fraction``. It is an
+  in-sample threshold diagnostic, not an independent false-alarm-rate estimate.
 
 The module is backend-agnostic: pass ``xp=numpy`` (default) or
 ``xp=cupy``. Integer marginals are computed with integer dtypes on either
@@ -127,7 +128,7 @@ class CfarCalibration:
     p_fa: float
     mode: str
     num_null_bins: int
-    nd_flag_rate: float
+    null_bulk_exceedance_fraction: float
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -138,7 +139,9 @@ class CfarCalibration:
             "p_fa": float(self.p_fa),
             "mode": str(self.mode),
             "num_null_bins": int(self.num_null_bins),
-            "nd_flag_rate": float(self.nd_flag_rate),
+            "null_bulk_exceedance_fraction": float(
+                self.null_bulk_exceedance_fraction
+            ),
         }
 
 
@@ -349,14 +352,16 @@ def calibrate_cfar(
     if scale <= 0.0:
         scale = float(np.std(null_bins)) or 1.0
     threshold = location + k * scale
-    flag_fraction = float(np.mean(null_bins > threshold))
+    null_bulk_exceedance_fraction = float(np.mean(null_bins > threshold))
 
-    if flag_fraction > float(fallback_flag_fraction):
+    if null_bulk_exceedance_fraction > float(fallback_flag_fraction):
         location = float(np.quantile(null_bins, CFAR_FALLBACK_LOCATION_QUANTILE))
         left = float(np.quantile(null_bins, CFAR_FALLBACK_LEFT_QUANTILE))
         scale = max((location - left) / 2.0, 1.0e-12)
         threshold = location + k * scale
-        flag_fraction = float(np.mean(null_bins > threshold))
+        null_bulk_exceedance_fraction = float(
+            np.mean(null_bins > threshold)
+        )
         mode = CFAR_MODE_QUANTILE_FALLBACK
 
     return CfarCalibration(
@@ -367,7 +372,7 @@ def calibrate_cfar(
         p_fa=float(p_fa),
         mode=mode,
         num_null_bins=int(null_bins.size),
-        nd_flag_rate=flag_fraction,
+        null_bulk_exceedance_fraction=null_bulk_exceedance_fraction,
     )
 
 

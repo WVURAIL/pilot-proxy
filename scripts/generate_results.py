@@ -66,12 +66,14 @@ from pathlib import Path
 
 import numpy as np
 
+from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
+
 # CHIME freq_ids of the ATSC physical-channel 14-36 pilot set (CANFAR_RUNBOOK.md).
 PILOT_FREQ_IDS = frozenset({
     506, 521, 537, 552, 568, 583, 598, 614, 629, 644, 660, 675,
     690, 706, 721, 736, 752, 767, 783, 798, 813, 829, 844,
 })
-DETECTOR_SCHEMA = "pilotproxy_detector_datatrawl_v3"
+DETECTOR_SCHEMA = PER_PILOT_PRODUCT_SCHEMA_TOKEN
 COMBINED_REQUIRED = ("chime_detector_outputs.npz", "chime_integrated_spectra.npz")
 CONTROL_NAME_HINT = re.compile(r"control|h0|null|quiet|blank", re.IGNORECASE)
 BUNDLE_NPZ_ALLOWLIST = {"h0_fstat_histograms.npz", "chime_frame_identity.npz",

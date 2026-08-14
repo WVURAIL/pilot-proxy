@@ -54,7 +54,6 @@ def _save_figure(fig, path) -> None:
     base = Path(path)
     for fmt in _figure_formats():
         fig.savefig(base.with_suffix("." + fmt), dpi=FIGURE_DPI)
-OUTLIER_PHYSICAL_CHANNEL = 30
 FSTAT_TOP_TICKS_DB = np.asarray(
     [1.0e-5, 1.0e-4, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 20.0]
 )
@@ -171,9 +170,12 @@ def _robust_color_limits(
 
 
 def _product_frequency_hz(product: np.lib.npyio.NpzFile) -> np.ndarray:
-    if "chime_frequency_hz" in product.files:
-        return np.asarray(product["chime_frequency_hz"], dtype=np.float64)
-    return np.asarray(product["pilot_frequency_hz"], dtype=np.float64)
+    if "chime_frequency_hz" not in product.files:
+        raise KeyError(
+            "product is missing chime_frequency_hz; pilot frequency is not a "
+            "coarse-channel-center substitute"
+        )
+    return np.asarray(product["chime_frequency_hz"], dtype=np.float64)
 
 
 def _manifest_frequency_hz(
@@ -207,7 +209,10 @@ def _run_frequency_hz(run_dir: Path, product: np.lib.npyio.NpzFile) -> np.ndarra
     from_manifest = _manifest_frequency_hz(Path(run_dir), product["physical_channel"])
     if from_manifest is not None:
         return from_manifest
-    return np.asarray(product["pilot_frequency_hz"], dtype=np.float64)
+    raise KeyError(
+        "coarse-channel-center metadata is unavailable; pilot frequency is not "
+        "a receiver-frequency substitute"
+    )
 
 
 def _coordinate_edges(centers: np.ndarray, *, default_step: float = 1.0) -> np.ndarray:
@@ -294,13 +299,6 @@ def _set_spectrogram_time_axis(ax, x_edges: np.ndarray) -> None:
     ax.set_xlim(left, right)
     if right >= 9.0:
         ax.xaxis.set_major_locator(MultipleLocator(2.0))
-
-
-def _without_outlier_channel(physical_channel: np.ndarray) -> np.ndarray:
-    keep = np.asarray(physical_channel, dtype=np.int64) != OUTLIER_PHYSICAL_CHANNEL
-    if not np.any(keep):
-        return np.ones_like(keep, dtype=bool)
-    return keep.astype(bool, copy=False)
 
 
 def _write_histogram_summary(
@@ -562,17 +560,11 @@ def plot_fstat_survival(run_dir: Path) -> list[Path]:
         else (detector["p_ref_sum_u64"] > 0).astype(np.uint8)
     )
 
-    panels = [
-        (r"All DTV pilot channels", np.ones_like(physical_channel, dtype=bool)),
-        (
-            rf"Excluding DTV {OUTLIER_PHYSICAL_CHANNEL}",
-            _without_outlier_channel(physical_channel),
-        ),
-    ]
+    panels = [(r"All DTV pilot channels", np.ones_like(physical_channel, dtype=bool))]
     fig, axes = plt.subplots(
         len(panels),
         1,
-        figsize=(9.5, 8.2),
+        figsize=(9.5, 4.8),
         constrained_layout=True,
     )
     axes = np.atleast_1d(axes)
@@ -594,7 +586,7 @@ def plot_fstat_survival(run_dir: Path) -> list[Path]:
         if panel_values:
             xlim = _fstat_survival_plot_bounds(
                 panel_values,
-                include_comparison_range=panel_index == 1,
+                include_comparison_range=False,
             )
             max_count = max(values.size for values in panel_values)
             survival_floor = 0.5 / float(max_count)
@@ -784,7 +776,6 @@ def _plot_spectrogram(
     basename: str,
     cmap: str,
     robust_limits: bool = False,
-    exclude_outlier_panel: bool = False,
     discrete_mask_colorbar: bool = False,
 ) -> list[Path]:
     plt = _setup_matplotlib()
@@ -807,13 +798,6 @@ def _plot_spectrogram(
     panels: list[tuple[str, np.ndarray]] = [
         (title, np.ones_like(channel_array, dtype=bool)),
     ]
-    if exclude_outlier_panel:
-        panels.append(
-            (
-                rf"{title}, excluding DTV {OUTLIER_PHYSICAL_CHANNEL}",
-                _without_outlier_channel(channel_array),
-            )
-        )
     fig, axes = plt.subplots(
         len(panels),
         1,
@@ -916,7 +900,6 @@ def plot_fstat_level_spectrogram(run_dir: Path) -> list[Path]:
         basename="fstat_level_spectrogram",
         cmap="magma",
         robust_limits=True,
-        exclude_outlier_panel=True,
     )
 
 

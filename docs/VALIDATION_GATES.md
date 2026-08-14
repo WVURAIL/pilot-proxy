@@ -92,18 +92,19 @@ failure.
    through `tools/framing_audit.py` (expect ALIGNED).
 
 5. **End-to-end smoke on real infrastructure.** One short datatrawl run
-   (a handful of files, one even and one odd freq_id) with the v3
+   (a handful of files, one even and one odd freq_id) with the current
    analyzer:
    pass criteria, all from the produced npz:
-   - `schema_version == pilotproxy_detector_datatrawl_v3`;
+   - `schema_version == pilotproxy_per_pilot_product_v1`;
    - `detector_version` embeds the installed `pilot-proxy/<version>`,
      kernel 2.1.x, the library sha, and the profile hash via the weight
      bank;
    - `fine_status == enabled`, `fstat_fine.shape == (n_frames, 256)`;
    - no v1-marginal identity assertion fired (the run raises on
      mismatch);
-   - `fine_nd_flag_rate` median across frames within a factor of a few of
-     the configured P_FA = 1e-3 on RFI-quiet frames;
+   - `fine_null_bulk_exceedance_fraction` is bounded to `[0, 1]` on valid
+     frames and interpreted as an in-sample threshold diagnostic rather than
+     an independent false-alarm-rate measurement;
    - resume test: interrupt after a checkpoint, resume, and verify the
      frame count and `unit_order` continue without duplication (run this
      half in an output directory without a chunk cap: a capped product

@@ -23,7 +23,9 @@ from pathlib import Path
 
 import numpy as np
 
-SCHEMA = "pilotproxy_detector_datatrawl_v3"
+from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
+
+SCHEMA = PER_PILOT_PRODUCT_SCHEMA_TOKEN
 PER_FRAME = ("frame_index", "p_target_u64", "p_ref_sum_u64", "fstat_raw",
              "fstat_level_db", "pnr_bin_db", "snr_shelf_db", "valid",
              "reject_mask", "baseband_power_linear", "frame_unit_index",

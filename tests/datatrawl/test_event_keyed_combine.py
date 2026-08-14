@@ -7,7 +7,7 @@ frame stacking cannot work at production scale. These tests cover:
   * the alignment core: pass-through parity on fully aligned inputs, reference
     (lowest-channel) ordering on ragged inputs, partial-event frame drops,
     the typed empty-intersection error, duplicate-identity refusal, and the
-    preserved strict path for legacy identity-less products;
+    refusal of products without event-keyed identity;
   * the scan layer end-to-end (offline, CPU-stub detector): a ragged
     inventory combines over the intersection with drops recorded in
     stats.json and the frame-identity sidecar, and a disjoint inventory
@@ -119,16 +119,6 @@ def test_align_duplicate_identity_raises():
     b = _mem_product(15, 829, [("100", 1)])
     with pytest.raises(ValueError, match="duplicate"):
         _align_frames([a, b])
-
-
-def test_align_legacy_products_use_strict_path():
-    a = {"physical_channel": np.asarray([14]),
-         "frame_index": np.arange(2, dtype=np.int64)}
-    b = {"physical_channel": np.asarray([15]),
-         "frame_index": np.arange(2, dtype=np.int64)}
-    aligned, frame_index, info = _align_frames([a, b])
-    assert info["mode"] == "strict_positional"
-    assert np.array_equal(frame_index, np.arange(2))
 
 
 # -- scan layer end-to-end (offline) ------------------------------------------
@@ -290,7 +280,7 @@ def test_scan_disjoint_inventory_soft_fails_terminal_combine(tmp_path, monkeypat
 
 def _ver(source, kernel="2548aef", version="0.2.0.dev0"):
     return (f"pilot-proxy/{version} source={source} kernel=1.0.0 "
-            f"kernel_sha256={kernel} pilotproxy_detector_datatrawl_v2 K=128")
+            f"kernel_sha256={kernel} pilotproxy_per_pilot_product_v1 K=128")
 
 
 def test_invariants_allow_mixed_source_builds_same_geometry():

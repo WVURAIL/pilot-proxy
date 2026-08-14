@@ -33,14 +33,15 @@ from pilot_proxy.chime.reductions import write_reductions_npz
 from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_VERSION,
     CHIME_STATS_SCHEMA_VERSION,
-    WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    WEIGHT_COORDINATE_RAW_INPUT,
-    build_chime_detector_contract,
     positive_excess_mask_policy,
 )
 from pilot_proxy.provenance import (
     detector_version_build_id,
     detector_version_geometry,
+)
+from pilot_proxy.product_contract import (
+    CurrentProductContractError,
+    validate_current_product_identity,
 )
 import json
 
@@ -55,9 +56,8 @@ class CombineEmptyIntersectionError(ValueError):
 
 def _label(z: Mapping[str, Any]) -> str:
     ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
-    if "freq_id" in z:
-        return f"ch{ch}/freq_id {int(np.asarray(z['freq_id']).reshape(-1)[0])}"
-    return f"ch{ch}"
+    fid = int(np.asarray(z["freq_id"]).reshape(-1)[0])
+    return f"ch{ch}/freq_id {fid}"
 
 
 # Every per-frame array the analyzer writes (length n_frames along axis 0).
@@ -82,14 +82,9 @@ def _align_frames(
     reference (lowest-channel) product's own order restricted to the common
     identities, so a fully aligned set passes through untouched (byte-parity
     with ``run_chime_analysis``) and a ragged set stacks exactly its overlap,
-    reporting what each pilot dropped. Products predating the identity tags
-    fall back to the strict positional check unchanged.
+    reporting what each pilot dropped. Event-keyed identity is mandatory.
     """
     identities = [_frame_identity(z) for z in products]
-    if not all(identity is not None for identity in identities):
-        # legacy products: strict positional semantics, exactly as before
-        return [dict(z) for z in products], _check_frames(products), {
-            "mode": "strict_positional"}
     for z, ids in zip(products, identities):
         n = int(np.asarray(z["frame_index"]).reshape(-1).size)
         if ids.size != n:
@@ -167,12 +162,16 @@ def report_products(product_paths: Sequence[str | Path]) -> str:
     import collections
     ev: dict[str, set[str]] = {}
     for p in product_paths:
-        with np.load(str(p)) as z:
-            label = (f"ch{int(np.asarray(z['physical_channel']).reshape(-1)[0])}"
-                     + (f"/freq_id {int(np.asarray(z['freq_id']).reshape(-1)[0])}"
-                        if "freq_id" in z.files else ""))
-            events = set(np.asarray(z["source_event_keys"]).reshape(-1).astype(str)
-                         .tolist()) if "source_event_keys" in z.files else set()
+        with np.load(str(p), allow_pickle=False) as z:
+            product = {name: z[name] for name in z.files}
+        validate_current_product_identity(product)
+        label = (
+            f"ch{int(np.asarray(product['physical_channel']).reshape(-1)[0])}"
+            + f"/freq_id {int(np.asarray(product['freq_id']).reshape(-1)[0])}"
+        )
+        events = set(
+            np.asarray(product["source_event_keys"]).reshape(-1).astype(str).tolist()
+        )
         ev[label] = events
     lines = [f"per-pilot products: {len(ev)}"]
     for label in sorted(ev):
@@ -205,55 +204,62 @@ def report_products(product_paths: Sequence[str | Path]) -> str:
     return "\n".join(lines)
 
 
-def _detector_contract_from(products: Sequence[Mapping[str, Any]], nfft: int) -> dict:
-    """Prefer the analyzer-stored contract; else rebuild one from product geometry."""
-    raw = products[0].get("detector_contract_json")
-    if raw is not None:
-        try:
-            c = json.loads(str(np.asarray(raw)))
-            if isinstance(c, dict) and c:
-                return c
-        except Exception:  # pragma: no cover - fall back to a rebuilt contract
-            pass
-    sense = int(np.asarray(products[0].get("sense", 1)))
-    k = int(np.asarray(products[0]["detector_window_samples"]))
-    time_reverse = sense == -1
-    return build_chime_detector_contract(
-        detector_window_samples=k,
-        skipped_guard_bins=1,
-        reference_offset_bins=2,
-        num_weight_terms=3,
-        weight_coordinate_system=(
-            WEIGHT_COORDINATE_POST_SPECTRAL_SENSE if time_reverse
-            else WEIGHT_COORDINATE_RAW_INPUT
-        ),
-        time_reverse_detector_windows_before_kernel=time_reverse,
-    )
+def _detector_contract_from(
+    products: Sequence[Mapping[str, Any]], nfft: int
+) -> dict[str, Any]:
+    """Return the required analyzer-stored detector contract."""
+    del nfft  # retained in the call signature until the combine refactor lands
+    try:
+        contract = json.loads(
+            str(np.asarray(products[0]["detector_contract_json"]).reshape(()).item())
+        )
+    except (KeyError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "combine: current per-pilot product lacks a valid detector_contract_json"
+        ) from exc
+    if not isinstance(contract, dict) or not contract:
+        raise ValueError(
+            "combine: detector_contract_json must encode a non-empty object"
+        )
+    return contract
 
 
 def _load_sorted(product_paths: Sequence[str | Path]) -> list[Mapping[str, Any]]:
     if not product_paths:
         raise ValueError("combine: no per-pilot product files given")
-    products = [dict(np.load(str(p))) for p in product_paths]
-    products.sort(key=lambda z: int(np.asarray(z["physical_channel"]).reshape(-1)[0]))
-    chans = [int(np.asarray(z["physical_channel"]).reshape(-1)[0]) for z in products]
-    dupes = sorted({c for c in chans if chans.count(c) > 1})
+    products: list[dict[str, Any]] = []
+    for path in product_paths:
+        with np.load(str(path), allow_pickle=False) as product:
+            loaded = {name: product[name] for name in product.files}
+        try:
+            validate_current_product_identity(loaded)
+        except CurrentProductContractError as exc:
+            raise ValueError(f"combine: {path}: {exc}") from exc
+        products.append(loaded)
+    products.sort(
+        key=lambda z: int(np.asarray(z["physical_channel"]).reshape(-1)[0])
+    )
+    chans = [
+        int(np.asarray(z["physical_channel"]).reshape(-1)[0]) for z in products
+    ]
+    dupes = sorted({channel for channel in chans if chans.count(channel) > 1})
     if dupes:
-        # Two coarse channels (freq_ids) that map to the same ATSC physical channel.
         raise ValueError(
             f"combine: ATSC physical channel(s) {dupes} appear in more than one "
-            f"per-pilot product. The combined schema is one pilot per ATSC channel, "
-            f"so stacking two freq_ids that resolve to the same channel would put "
-            f"two pilots under one label. Drop one, or extend the schema to "
-            f"represent multiple coarse channels per ATSC channel."
+            "per-pilot product. The combined schema is one pilot per ATSC "
+            "channel; drop the duplicate receiver channel."
         )
     return products
 
 
-def _frame_identity(z: Mapping[str, Any]) -> np.ndarray | None:
+def _frame_identity(z: Mapping[str, Any]) -> np.ndarray:
     required = {"source_event_keys", "frame_unit_index", "frame_in_unit"}
-    if not required.issubset(z):
-        return None
+    missing = sorted(required.difference(z))
+    if missing:
+        raise ValueError(
+            "combine: current per-pilot product is missing frame identity arrays: "
+            + ", ".join(missing)
+        )
     events = np.asarray(z["source_event_keys"]).reshape(-1).astype(str)
     unit_index = np.asarray(z["frame_unit_index"], dtype=np.int64).reshape(-1)
     frame_in_unit = np.asarray(z["frame_in_unit"], dtype=np.int64).reshape(-1)
@@ -264,89 +270,6 @@ def _frame_identity(z: Mapping[str, Any]) -> np.ndarray | None:
     return np.asarray(
         [f"{events[u]}\0{int(f)}" for u, f in zip(unit_index, frame_in_unit)],
         dtype=str,
-    )
-
-
-def _check_frames(products: Sequence[Mapping[str, Any]]) -> np.ndarray:
-    """Return the shared frame grid, or fail with a diagnostic if pilots disagree.
-
-    Each product's ``frame_index`` is a 0-based *positional* counter (the analyzer
-    writes ``arange(n_frames)``), so it is only comparable across pilots when they
-    processed the *same files in the same order*. A length/grid mismatch therefore
-    means the pilots saw different files (typically a quarantined or missing
-    file for one channel), which shifts every subsequent frame in time. Stacking
-    then would silently fuse time-misaligned frames, so we refuse and explain
-    instead of intersecting. A positional intersection across differing file
-    sets would hide the misalignment rather than fix it.
-    """
-    ref_fi = np.asarray(products[0]["frame_index"], dtype=np.int64)
-    grids = [np.asarray(z["frame_index"], dtype=np.int64) for z in products]
-    grids_match = all(
-        g.shape == ref_fi.shape and np.array_equal(g, ref_fi) for g in grids[1:]
-    )
-
-    # Frame counts matching is necessary but NOT sufficient: frame_index is a
-    # 0-based positional counter, so two pilots with the same count but different
-    # source events (e.g. freq_id 829 over events A,B and freq_id 844 over A,C)
-    # would also pass. Compare the per-pilot ordered source-event keys (the file
-    # identities with each product's own freq_id token removed) so that only
-    # pilots that saw the same events in the same order are accepted.
-    have_events = all("source_event_keys" in z for z in products)
-    events = (
-        [np.asarray(z["source_event_keys"]).reshape(-1).tolist() for z in products]
-        if have_events else None
-    )
-    events_match = events is None or all(e == events[0] for e in events[1:])
-    identities = [_frame_identity(z) for z in products]
-    present_identities = [identity is not None for identity in identities]
-    if any(present_identities) and not all(present_identities):
-        raise ValueError(
-            "combine: only some per-pilot products contain per-frame identity tags"
-        )
-    have_identities = all(present_identities)
-    identity_match = True
-    if have_identities:
-        ref_identity = identities[0]
-        assert ref_identity is not None
-        if ref_identity.shape != ref_fi.shape:
-            raise ValueError(
-                "combine: frame identity length does not match frame_index length"
-            )
-        identity_match = all(
-            identity is not None
-            and identity.shape == ref_identity.shape
-            and np.array_equal(identity, ref_identity)
-            for identity in identities[1:]
-        )
-
-    if grids_match and events_match and identity_match:
-        return ref_fi
-
-    lines = []
-    for i, z in enumerate(products):
-        g = grids[i]
-        rng = f"[{int(g[0])}..{int(g[-1])}]" if g.size else "[empty]"
-        ev = (f", events={events[i]}" if events is not None else "")
-        lines.append(f"  {_label(z)}: {g.size} frames {rng}{ev}")
-    if not grids_match:
-        why = ("different frame counts: the pilots processed different numbers "
-               "of files")
-    elif not events_match:
-        why = ("equal frame counts but different source events: the pilots "
-               "processed different acquisitions, so frame N is a different time "
-               "in each")
-    else:
-        why = ("equal frame counts and event order but different per-frame unit "
-               "positions: a file has a different number of frames for at least "
-               "one pilot")
-    raise ValueError(
-        "combine: per-pilot products are not time-aligned and cannot be stacked "
-        f"({why}). Because frame_index is a 0-based positional counter, frames only "
-        "align when every pilot saw the same events in the same order; a "
-        "quarantined/missing file for one channel shifts every later frame in "
-        "time. Fix the inputs: re-pull the missing file(s) for the short "
-        "channel(s), or drop the affected channel(s) from this combine.\n"
-        "Per-pilot frame inventory:\n" + "\n".join(lines)
     )
 
 
@@ -381,7 +304,10 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
     ref = products[0]
     for key in keys:
         if key not in ref:
-            continue
+            raise ValueError(
+                f"combine: current per-pilot product is missing {key!r}, needed "
+                f"to verify {what}"
+            )
         if key == "detector_version":
             versions = []
             for z in products:
@@ -585,14 +511,9 @@ def combine_detector_products(
     physical_channel = _scalars(products, "physical_channel", np.int32)
     pilot_frequency_hz = _scalars(products, "pilot_frequency_hz", np.float64)
     chime_frequency_hz = _scalars(products, "chime_frequency_hz", np.float64)
-    # freq_id is recorded by the analyzer (derived from the center frequency); it
-    # is the coarse-channel handle the deferred 6 MHz mask-expansion needs to find
-    # a detected pilot's sibling channels. Guard for older products without it.
-    freq_id = (
-        _scalars(products, "freq_id", np.int64)
-        if all("freq_id" in z for z in products)
-        else None
-    )
+    # freq_id is required by the current schema and identifies the receiver
+    # coarse channel used by the later 6 MHz mask-expansion step.
+    freq_id = _scalars(products, "freq_id", np.int64)
 
     p_target_u64 = _stack_cols(products, "p_target_u64", np.uint64)
     p_ref_sum_u64 = _stack_cols(products, "p_ref_sum_u64", np.uint64)
@@ -606,23 +527,12 @@ def combine_detector_products(
     mask = _stack_cols(products, "reject_mask", np.uint8)
     valid = _stack_cols(products, "valid", np.uint8)
     baseband_power_linear = _stack_cols(products, "baseband_power_linear", np.float64)
-    # Weight-norm zero-point fields (norm-corrected mask). Present in every
-    # product at or after the corrected rule; guarded like freq_id so a combine
-    # of legacy products still writes a legacy-shaped file.
-    has_norms = all(
-        "target_norm_sq" in z and "ref_norm_sum_sq" in z and "mu0" in z
-        and "pilot_excess_corrected" in z
-        for z in products
-    )
-    target_norm_sq = _scalars(products, "target_norm_sq", np.int64) if has_norms else None
-    ref_norm_sum_sq = (
-        _scalars(products, "ref_norm_sum_sq", np.int64) if has_norms else None
-    )
-    mu0 = _scalars(products, "mu0", np.float64) if has_norms else None
-    pilot_excess_corrected = (
-        _stack_cols(products, "pilot_excess_corrected", np.float64)
-        if has_norms
-        else None
+    # The current schema always carries the exact quantized-weight null point.
+    target_norm_sq = _scalars(products, "target_norm_sq", np.int64)
+    ref_norm_sum_sq = _scalars(products, "ref_norm_sum_sq", np.int64)
+    mu0 = _scalars(products, "mu0", np.float64)
+    pilot_excess_corrected = _stack_cols(
+        products, "pilot_excess_corrected", np.float64
     )
 
     # integrated spectra are per-channel 1-D [nfft] (not per-frame): stack along the
@@ -745,8 +655,7 @@ def combine_detector_products(
     }
     if reference_placement is not None:
         common["reference_placement_summary"] = reference_placement
-    if freq_id is not None:
-        common["freq_id_by_pilot"] = [int(v) for v in freq_id]
+    common["freq_id_by_pilot"] = [int(v) for v in freq_id]
     _write_json(run_dir / "run_config.json",
                 {"schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION, **common})
     if align_info.get("mode") == "event_keyed":

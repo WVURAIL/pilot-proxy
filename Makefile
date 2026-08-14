@@ -36,6 +36,7 @@ docs: docs-specs
 
 release-check:
 	bash scripts/check_no_legacy_guard_terms.sh
+	$(PYTHON) scripts/check_current_product_vocabulary.py
 	$(PYTHON_TEST_ENV) $(PYTHON) tools/emit_fxfft_tables.py --check
 	$(PYTHON_TEST_ENV) $(PYTHON) -m compileall -q src tests
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q

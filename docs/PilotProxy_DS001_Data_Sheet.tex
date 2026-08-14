@@ -329,7 +329,7 @@ tolerance. \(F\) therefore remains the exact all-bin marginal of the fine
 spectrum. Fine-bin detection uses a pre-registered null-bulk CFAR over the
 independent non-designated bins with an any-bin decision rule; the stored
 fields, CFAR calibration modes, and detection-list layout are specified in
-\code{docs/product_schema_v3.md}.
+\code{docs/PRODUCT_SCHEMA.md}.
 
 \subsection{Distributional Statement ($H_0$)}
 \label{ssec:dist}
@@ -522,8 +522,8 @@ can be re-scored offline under any such rule.
 CHIME per-pilot archive products use
 \field{schema_version}=\texttt{\ppSchemaVThree}: the complete shared array
 set plus the fine-reduction fields (fine spectrum, CFAR calibration columns,
-and the ragged any-bin detection list). \code{docs/product_schema_v2.md}
-defines the shared arrays and \code{docs/product_schema_v3.md} the
+and the ragged any-bin detection list). \code{docs/PER_PILOT_PRODUCT_FIELDS.md}
+defines the shared arrays and \code{docs/PRODUCT_SCHEMA.md} the
 fine-reduction fields and their enforced invariants. The shipped weight bank and manifest are
 identified by SHA-256 prefixes \texttt{\ppWeightBankShaShort} and
 \texttt{\ppWeightManifestShaShort}.

@@ -65,6 +65,11 @@ The uncorrected one-bin pilot excess is
 rho = F - 1
 ```
 
+When `P_ref_sum = 0`, the ratio is undefined. Current products store
+`valid = 0` and NaN for diagnostic ratios and dB transforms; the binary
+decision separately forces `reject_mask = 0`. Numerical zero is not used as
+a stand-in for an invalid measurement.
+
 ## Norm-corrected positive-excess mask
 
 The CHIME real-data path places its fixed mask threshold at the detector's own
@@ -152,12 +157,31 @@ census-excluded bins) with location = median and scale = left-side spread
 (location = P25, scale = (P25 - P2.275)/2) and records the mode. Detections
 are declared on all bins against this calibration (any-bin rule), which
 removes the census dependence of designated-only rules; the flag rate over
-the non-designated independent bins is reported per frame
-(`fine_nd_flag_rate`) as a live false-alarm monitor with
-`P_FA = 1e-3`. On DTV-occupied channels a real pilot at a nonzero frequency
-offset lives in non-designated bins, so an elevated monitor rate can be
-signal rather than miscalibration; the stored fine spectrum resolves which.
-Stored fields are defined in `product_schema_v3.md`.
+the non-designated independent bins is reported per frame as
+`fine_null_bulk_exceedance_fraction`. Because the same bins fit the threshold,
+this is an in-sample threshold diagnostic rather than an independent measured
+false-alarm rate. On DTV-occupied channels a real pilot at a nonzero frequency
+offset can elevate the fraction; the stored fine spectrum resolves which.
+Stored fields are defined in `PRODUCT_SCHEMA.md`.
+
+### Decision status
+
+The repository currently contains two decision implementations with different
+operational status:
+
+- Current CHIME archive products store `reject_mask` from the exact,
+  norm-corrected coarse positive-excess comparison `F > mu0`.
+- The floating-point fine reduction stores a fine-bin statistic, a robust
+  per-frame null-bulk threshold, and threshold exceedances for analysis. Those
+  fields do not replace `reject_mask`.
+- Kernel core 2.3.0 implements the fixed-point designated-set order-statistic
+  CFAR decision and has bit-equality tests against the Python reference. Its
+  per-channel runtime-bundle calibration remains `pending_campaign`; a pending
+  profile must not enable that rejection path.
+
+Accordingly, “implemented,” “validated,” and “active decision” are separate
+claims. A kernel entry point is not an active observing policy until its
+calibration status is complete and the receiver integration selects it.
 
 ## Dynamic range and frequency capture
 

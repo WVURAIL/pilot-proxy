@@ -168,12 +168,16 @@ def fstat_num_den_to_raw(num, den):
     """Convert deployed kernel NumDen outputs to raw F = 2*num/den."""
     numerator = np.asarray(num, dtype=np.float64)
     denominator = np.asarray(den, dtype=np.float64)
-    out = np.zeros(np.broadcast_shapes(numerator.shape, denominator.shape))
+    out = np.full(
+        np.broadcast_shapes(numerator.shape, denominator.shape),
+        np.nan,
+        dtype=np.float64,
+    )
     np.divide(
         RAW_FSTAT_REFERENCE_SCALE * numerator,
         denominator,
         out=out,
-        where=denominator != 0.0,
+        where=denominator > 0.0,
     )
     if np.isscalar(num) and np.isscalar(den):
         return float(np.asarray(out).reshape(()))
@@ -193,14 +197,12 @@ def fstat_num_den_to_pnr_bin_db(num, den):
 def fstat_num_den_to_pilot_excess_linear(num, den):
     """Convert deployed NumDen outputs to the linear pilot excess.
 
-    A zero denominator is an invalid reference floor and maps to 0.0 to match
-    the C helper and deployed mask policy.
+    A zero denominator is an invalid reference-floor measurement and maps to
+    NaN.  Binary decision code separately forces invalid measurements to keep;
+    a diagnostic value of zero must not be used to encode invalidity.
     """
-    numerator = np.asarray(num, dtype=np.float64)
-    denominator = np.asarray(den, dtype=np.float64)
-    raw = fstat_num_den_to_raw(numerator, denominator)
-    out = np.asarray(raw, dtype=np.float64) - NO_PILOT_EXCESS_FSTAT
-    out = np.where(denominator != 0.0, out, 0.0)
+    out = np.asarray(fstat_num_den_to_raw(num, den), dtype=np.float64)
+    out = out - NO_PILOT_EXCESS_FSTAT
     if np.isscalar(num) and np.isscalar(den):
         return float(np.asarray(out).reshape(()))
     return out

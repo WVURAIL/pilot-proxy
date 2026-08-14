@@ -1,58 +1,23 @@
-# Per-Pilot Detector Product Schema (v2)
+# Per-pilot product field reference
 
-> Current products emit
-> `schema_version = "pilotproxy_detector_datatrawl_v3"`: every v2 array
-> below unchanged, plus the fine-reduction fields defined in
-> [`product_schema_v3.md`](product_schema_v3.md). This document remains the
-> definition of the shared v2 arrays and of legacy v2-only products.
-
-The `pilot-proxy-detector` analyzer writes one per-pilot product for each
-selected CHIME coarse channel:
+This document defines the fields in the only supported public per-pilot
+product. The product identity and decision semantics are defined in
+[`PRODUCT_SCHEMA.md`](PRODUCT_SCHEMA.md); fine-reduction-specific arrays are
+listed in [`FINE_REDUCTION_PRODUCTS.md`](FINE_REDUCTION_PRODUCTS.md).
 
 ```text
-<scan output>/_per_pilot/<freq_id>.npz
+schema_name = "pilotproxy_per_pilot_product"
+schema_revision = 1
+schema_version = "pilotproxy_per_pilot_product_v1"
 ```
 
-These files preserve the information produced before channels are aligned and
-stacked. For a `chime-scan` run, the combined products in `DATA_PRODUCTS.md`,
-the standard spectrograms, and the F-statistic distributions are derived from
-them. An event-keyed combine can discard frames that are not common to all
-channels, so the per-pilot files remain the authoritative record of each
-channel's processed frames.
-
-```text
-schema_version = "pilotproxy_detector_datatrawl_v2"
-```
-
-The per-pilot schema calls the rejection decision `reject_mask`. The combined
-`chime_detector_outputs.npz` file retains the older field name `mask` for
-compatibility. Both use `1 = reject` and carry the same values for frames kept
-by the combine.
-
----
-
-## What changed from v1
-
-Version 2 makes four changes:
-
-- `mask` becomes `reject_mask`, with the same `1 = discard` convention.
-- `integrated_spectrum_before_mask` and
-  `integrated_spectrum_after_mask` preserve the per-bin accumulated power.
-- Per-unit timing values and per-frame unit tags provide an absolute-time axis
-  when the HDF5 attributes are available.
-- `weights_hash`, `detector_version`, and `mask_rule` record the detector
-  provenance required for resume.
-
-The version change is a hard resume boundary. If an existing product has a v1
-schema, `resume()` stops and asks the operator to remove it or choose a clean
-output directory. The analyzer does not silently append v2 frames or
-automatically overwrite the v1 product.
+The `pilot-proxy-detector` analyzer writes one product for one selected receiver
+coarse channel. `reject_mask = 1` means reject. Event-keyed frame identity,
+exact weight norms, detector provenance, and the decision contract are
+mandatory. Products missing them are invalid and must be regenerated.
 
 In the tables below, `N` is the number of detector frames and `U` is the number
 of consumed input files.
-
----
-
 ## Identity and geometry
 
 | Array | Shape | Dtype | Meaning |
@@ -63,7 +28,7 @@ of consumed input files.
 | `pilot_frequency_hz` | `(1,)` | `float64` | ATSC pilot RF frequency |
 | `chime_frequency_hz` | `(1,)` | `float64` | CHIME coarse-channel center |
 | `nfft` | scalar | `int64` | Analysis frame and FFT length used for this product |
-| `detector_window_samples` | scalar | `int64` | CUDA detector window `K`, currently 128 |
+| `detector_window_samples` | scalar | `int64` | Receiver-selected CUDA detector window `K` (128 for CHIME; 64 for the current CHORD profiles) |
 | `num_input_streams` | scalar | `int64` | Input feed/polarization streams summed |
 | `sense` | scalar | `int64` | Spectral sense, `+1` or `-1` |
 
@@ -117,16 +82,6 @@ reject_mask = valid && (p_target_u64 * ref_norm_sum_sq
 The integer cross multiplication is the recorded `mask_rule`. It avoids a
 floating-point threshold decision and uses the weight-norm flat-floor reference
 `mu0 = 2*target_norm_sq/ref_norm_sum_sq` rather than assuming `mu0 = 1`.
-
-Earlier products can declare:
-
-```text
-valid && (p_target_u64 > (p_ref_sum_u64 >> 1))
-```
-
-That legacy rule is equivalent to `F > 1` and does not carry the norm fields.
-Resume rejects a product whose mask rule or required provenance does not match
-the current analyzer.
 
 Reporting can derive `keep_mask = 1 - reject_mask`; the per-pilot product does
 not store a second copy.

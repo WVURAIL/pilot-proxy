@@ -1,14 +1,17 @@
 # coding=utf-8
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 pytest.importorskip("datatrawl")
 
 from pilot_proxy.datatrawl_plugins.combine import (
-    _check_frames,
+    _align_frames,
     _common_sample_rate_hz,
+    _load_sorted,
 )
 
 
@@ -25,13 +28,32 @@ def _product(unit_index, frame_in_unit, *, delta=1.0 / 390_625.0):
     }
 
 
-def test_check_frames_rejects_equal_total_with_shifted_unit_boundary():
-    first = _product([0, 0, 0, 1, 1], [0, 1, 2, 0, 1])
-    second = _product([0, 0, 1, 1, 1], [0, 1, 0, 1, 2])
+def test_event_keyed_alignment_rejects_duplicate_identity():
+    first = _product([0, 0], [0, 1])
+    second = _product([0, 0], [0, 0])
     second["physical_channel"] = np.asarray([15], dtype=np.int32)
     second["freq_id"] = np.asarray([829], dtype=np.int64)
-    with pytest.raises(ValueError, match="different per-frame unit positions"):
-        _check_frames([first, second])
+    with pytest.raises(ValueError, match="duplicate"):
+        _align_frames([first, second])
+
+
+def test_event_keyed_alignment_requires_identity_fields():
+    first = _product([0, 1], [0, 0])
+    second = _product([0, 1], [0, 0])
+    del second["source_event_keys"]
+    with pytest.raises(ValueError, match="missing frame identity arrays"):
+        _align_frames([first, second])
+
+
+def test_combine_refuses_an_unstamped_product(tmp_path: Path):
+    path = tmp_path / "844.npz"
+    np.savez_compressed(
+        path,
+        physical_channel=np.asarray([14], dtype=np.int32),
+        frame_index=np.asarray([0], dtype=np.int64),
+    )
+    with pytest.raises(ValueError, match="missing required field 'schema_name'"):
+        _load_sorted([path])
 
 
 def test_common_sample_rate_rejects_mixed_delta_time():

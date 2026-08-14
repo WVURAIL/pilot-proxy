@@ -25,6 +25,12 @@ from datatrawl.interfaces import RunContext
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
 from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
 from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
+from pilot_proxy.product_contract import (
+    PER_PILOT_PRODUCT_SCHEMA_NAME,
+    PER_PILOT_PRODUCT_SCHEMA_REVISION,
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    current_decision_contract_json,
+)
 
 K = 128
 CH14_HZ = 470.3125e6   # -> ATSC channel 14, CHIME freq_id 844
@@ -83,22 +89,86 @@ def test_detector_rejects_nfft_mismatch():
 
 # -- combiner refuses mismatched geometry (F10) ------------------------------
 
-def _write_min_detector_product(path, *, channel, nfft, n_frames=2, unit_keys=(),
-                                event_keys=None, contract=None):
+def _write_min_detector_product(
+    path,
+    *,
+    channel,
+    nfft,
+    n_frames=2,
+    unit_keys=(),
+    event_keys=None,
+    contract=None,
+):
+    events = [str(value) for value in (
+        event_keys if event_keys is not None
+        else unit_keys if unit_keys
+        else [f"event-{index}" for index in range(int(n_frames))]
+    )]
+    if len(events) != int(n_frames):
+        raise ValueError("test fixture requires one frame per event")
+    detector_contract = (
+        str(contract)
+        if contract is not None
+        else '{"detector_window_samples":128}'
+    )
+    shape = (int(n_frames), 1)
     fields = dict(
+        schema_name=np.asarray(PER_PILOT_PRODUCT_SCHEMA_NAME),
+        schema_revision=np.asarray(PER_PILOT_PRODUCT_SCHEMA_REVISION),
+        schema_version=np.asarray(PER_PILOT_PRODUCT_SCHEMA_TOKEN),
+        decision_contract_json=np.asarray(current_decision_contract_json()),
+        detector_contract_json=np.asarray(detector_contract),
         physical_channel=np.asarray([channel], dtype=np.int32),
-        freq_id=np.asarray([800 - channel], dtype=np.int64),  # arbitrary but recorded
-        schema_version=np.asarray("fstat_detector_v_test"),
+        freq_id=np.asarray([800 - channel], dtype=np.int64),
+        pilot_frequency_hz=np.asarray([470_000_000.0 + channel]),
+        chime_frequency_hz=np.asarray([470_000_000.0 + channel]),
+        pilot_in_band=np.asarray([1], dtype=np.uint8),
         nfft=np.asarray(int(nfft), dtype=np.int64),
         detector_window_samples=np.asarray(K, dtype=np.int64),
+        num_input_streams=np.asarray(4, dtype=np.int64),
         sense=np.asarray(-1, dtype=np.int64),
         frame_index=np.arange(int(n_frames), dtype=np.int64),
-        unit_keys=np.asarray([str(k) for k in unit_keys]),
+        p_target_u64=np.ones(shape, dtype=np.uint64),
+        p_ref_sum_u64=np.full(shape, 2, dtype=np.uint64),
+        fstat_raw=np.ones(shape, dtype=np.float64),
+        fstat_level_db=np.zeros(shape, dtype=np.float64),
+        pnr_bin_db=np.full(shape, np.nan, dtype=np.float64),
+        snr_shelf_db=np.full(shape, np.nan, dtype=np.float64),
+        reject_mask=np.zeros(shape, dtype=np.uint8),
+        valid=np.ones(shape, dtype=np.uint8),
+        target_norm_sq=np.asarray([1], dtype=np.int64),
+        ref_norm_sum_sq=np.asarray([2], dtype=np.int64),
+        mu0=np.asarray([1.0], dtype=np.float64),
+        pilot_excess_corrected=np.zeros(shape, dtype=np.float64),
+        baseband_power_linear=np.ones(shape, dtype=np.float64),
+        integrated_spectrum_before_mask=np.zeros(int(nfft), dtype=np.float64),
+        integrated_spectrum_after_mask=np.zeros(int(nfft), dtype=np.float64),
+        fstat_fine=np.zeros((int(n_frames), 0), dtype=np.float32),
+        fine_null_bulk_exceedance_fraction=np.full(
+            shape, np.nan, dtype=np.float64
+        ),
+        source_event_keys=np.asarray(events, dtype=str),
+        frame_unit_index=np.arange(int(n_frames), dtype=np.int32),
+        frame_in_unit=np.zeros(int(n_frames), dtype=np.int32),
+        unit_keys=np.asarray(events, dtype=str),
+        unit_order=np.asarray(events, dtype=str),
+        unit_delta_time=np.full(int(n_frames), 1.0 / 390_625.0),
+        max_chunks_per_file=np.asarray(-1, dtype=np.int64),
+        weight_bank_sha256=np.asarray("bank"),
+        weight_manifest_sha256=np.asarray("manifest"),
+        weights_hash=np.asarray("weights"),
+        mask_rule=np.asarray("norm_corrected_positive_excess"),
+        detector_version=np.asarray(
+            "pilot-proxy/1.0.0 source=test kernel=2.3.0 "
+            "kernel_sha256=test pilotproxy_per_pilot_product_v1 K=128"
+        ),
+        pilot_below_data_db=np.asarray(11.3),
+        bin_enbw_hz=np.asarray(3051.7578125),
+        dtv_bandwidth_hz=np.asarray(6.0e6),
+        pilot_capture_efficiency=np.asarray(1.0),
+        rational_overflow_count=np.asarray(0, dtype=np.uint64),
+        reference_placement_json=np.asarray("{}"),
     )
-    if event_keys is not None:
-        fields["source_event_keys"] = np.asarray([str(k) for k in event_keys])
-    if contract is not None:
-        fields["detector_contract_json"] = np.asarray(str(contract))
     np.savez(path, **fields)
 
 
@@ -111,32 +181,53 @@ def test_combine_rejects_mismatched_nfft(tmp_path):
         combine_detector_products([a, b], tmp_path / "out")
 
 
-def test_combine_rejects_frame_grid_mismatch(tmp_path):
-    # same geometry, but one channel processed fewer files -> shorter, mis-aligned
-    # frame grid. Positional intersection would silently mis-time frames, so the
-    # combiner must refuse with an actionable diagnostic instead (F4).
+def test_combine_aligns_shorter_frame_grid_by_event_identity(tmp_path):
     a = tmp_path / "14.npz"
     b = tmp_path / "20.npz"
-    _write_min_detector_product(a, channel=14, nfft=16384, n_frames=3,
-                                unit_keys=("f1", "f2", "f3"))
-    _write_min_detector_product(b, channel=20, nfft=16384, n_frames=2,
-                                unit_keys=("f1", "f3"))  # f2 quarantined here
-    with pytest.raises(ValueError, match="not time-aligned"):
-        combine_detector_products([a, b], tmp_path / "out")
+    _write_min_detector_product(
+        a,
+        channel=14,
+        nfft=16384,
+        n_frames=3,
+        unit_keys=("f1", "f2", "f3"),
+    )
+    _write_min_detector_product(
+        b,
+        channel=20,
+        nfft=16384,
+        n_frames=2,
+        unit_keys=("f1", "f3"),
+    )
+    out = tmp_path / "out"
+    combine_detector_products([a, b], out)
+    with np.load(out / "chime_detector_outputs.npz") as product:
+        assert product["frame_index"].size == 2
 
 
 # -- review round 2 -----------------------------------------------------------
 
 # #1: equal frame counts but different source events must NOT stack as aligned.
-def test_combine_rejects_same_count_different_events(tmp_path):
+def test_combine_intersects_same_count_different_events(tmp_path):
     a = tmp_path / "14.npz"
     b = tmp_path / "20.npz"
-    _write_min_detector_product(a, channel=14, nfft=16384, n_frames=2,
-                                event_keys=["baseband_eventA.h5", "baseband_eventB.h5"])
-    _write_min_detector_product(b, channel=20, nfft=16384, n_frames=2,
-                                event_keys=["baseband_eventA.h5", "baseband_eventC.h5"])
-    with pytest.raises(ValueError, match="different source events"):
-        combine_detector_products([a, b], tmp_path / "out")
+    _write_min_detector_product(
+        a,
+        channel=14,
+        nfft=16384,
+        n_frames=2,
+        event_keys=["baseband_eventA.h5", "baseband_eventB.h5"],
+    )
+    _write_min_detector_product(
+        b,
+        channel=20,
+        nfft=16384,
+        n_frames=2,
+        event_keys=["baseband_eventA.h5", "baseband_eventC.h5"],
+    )
+    out = tmp_path / "out"
+    combine_detector_products([a, b], out)
+    with np.load(out / "chime_detector_outputs.npz") as product:
+        assert product["frame_index"].size == 1
 
 
 # #9: two coarse channels that resolve to the same ATSC channel must be rejected.

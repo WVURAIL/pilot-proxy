@@ -9,10 +9,11 @@ from pilot_proxy.provenance import (
     file_sha256,
     sidecar_manifest_path,
 )
+from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
 
 
 def _ver(version="1.0.0", source="aaa111", kernel="2.1.0", kernel_sha="c85f50dd",
-         schema="pilotproxy_detector_datatrawl_v3", k=128):
+         schema=PER_PILOT_PRODUCT_SCHEMA_TOKEN, k=128):
     return (f"pilot-proxy/{version} source={source} kernel={kernel} "
             f"kernel_sha256={kernel_sha} {schema} K={k}")
 
@@ -62,7 +63,7 @@ def test_geometry_drops_build_tokens_and_keeps_the_rest() -> None:
     assert detector_version_geometry(_ver()) == (
         "kernel=2.1.0",
         "kernel_sha256=c85f50dd",
-        "pilotproxy_detector_datatrawl_v3",
+        PER_PILOT_PRODUCT_SCHEMA_TOKEN,
         "K=128",
     )
 

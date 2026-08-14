@@ -157,10 +157,9 @@ operating documentation as follows:
   notebook session (skaha / `canfar` client) for the detector path.
 - `INTEGRATION.md` - detailed `pilot-proxy` <-> `datatrawl` integration notes.
 - `docs/METHOD_SPEC.md` - equation-first method contract for CHIME products.
-- `docs/product_schema_v3.md` - per-pilot detector product schema (v3,
-  current: v2 plus the time-coherent fine-reduction products).
-- `docs/product_schema_v2.md` - per-pilot detector product schema (v2; the
-  v2 arrays are unchanged in v3, and legacy products emit v2 alone).
+- `docs/PRODUCT_SCHEMA.md` - the only supported per-pilot product contract.
+- `docs/PER_PILOT_PRODUCT_FIELDS.md` - detailed shared-field reference.
+- `docs/FINE_REDUCTION_PRODUCTS.md` - fine-measurement and diagnostic fields.
 - `docs/CHIME_RUN_WORKFLOW.md` - staged-data workflow (`chime-run`) for
   already-staged HDF5 directories; use `docs/CANFAR_RUNBOOK.md` for
   archive-scale `chime-scan` runs.

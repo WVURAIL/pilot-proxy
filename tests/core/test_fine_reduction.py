@@ -141,7 +141,9 @@ def test_cfar_median_left_mode_and_detection() -> None:
     assert calibration.mode == CFAR_MODE_MEDIAN_LEFT
     assert calibration.location == pytest.approx(1.0, abs=0.05)
     assert 0.0 < calibration.scale < 0.2
-    assert calibration.nd_flag_rate < 0.05
+    assert calibration.null_bulk_exceedance_fraction < 0.05
+    assert "nd_flag_rate" not in calibration.as_dict()
+    assert "null_bulk_exceedance_fraction" in calibration.as_dict()
 
     result = reduce_and_detect(
         _random_row_sums(rng),

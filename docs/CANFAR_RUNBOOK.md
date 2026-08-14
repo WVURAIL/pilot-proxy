@@ -318,11 +318,10 @@ tables/mask_summary_by_pilot.csv
 figures/*.png
 ```
 
-An event-keyed combine also writes `chime_frame_identity.npz`. A combine of
-legacy products without identity tags uses strict positional alignment and does
-not write that sidecar.
+An event-keyed combine also writes `chime_frame_identity.npz`. Current products
+must contain event-keyed frame identity; combine refuses inputs without it.
 
-Gate S2.5 pass criteria on the smoke product (schema v3):
+Gate S2.5 pass criteria on the smoke product (current schema):
 
 ```bash
 python - <<'PY'
@@ -335,19 +334,21 @@ z = np.load(p[-1], allow_pickle=False)
 sv = str(np.asarray(z["schema_version"]).reshape(()).item())
 dv = str(np.asarray(z["detector_version"]).reshape(()).item())
 fs = str(np.asarray(z["fine_status"]).reshape(()).item())
-assert sv == "pilotproxy_detector_datatrawl_v3", sv
+assert sv == "pilotproxy_per_pilot_product_v1", sv
 assert "pilot-proxy/" in dv and "kernel=2." in dv, dv
 assert fs == "enabled", fs
 assert z["fstat_fine"].shape[1] == int(z["fine_num_bins"]), z["fstat_fine"].shape
-r = np.asarray(z["fine_nd_flag_rate"]).reshape(-1)
+r = np.asarray(z["fine_null_bulk_exceedance_fraction"]).reshape(-1)
 print("schema", sv)
-print("fine bins", int(z["fine_num_bins"]), "| nd flag rate median",
+print("fine bins", int(z["fine_num_bins"]),
+      "| null-bulk exceedance median",
       float(np.nanmedian(r)))
 PY
 ```
 
-The median non-designated flag rate should sit within a factor of a few of
-the configured `P_FA = 1e-3` on RFI-quiet frames. For the resume half of the
+The null-bulk exceedance fraction is an in-sample threshold diagnostic, not an
+independent measured false-alarm rate. Interpret it together with the stored
+fine spectrum. For the resume half of the
 gate, run the same `chime-scan` command in a **new** output directory with
 `--max-files 2` and no chunk cap; the smoke product above was built with
 `max_chunks_per_file=1`, and a capped product refuses completion under a

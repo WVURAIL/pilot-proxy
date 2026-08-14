@@ -26,6 +26,7 @@ a GPU-free plumbing parity test in the same way PilotProxy's own runner test doe
 """
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
@@ -85,6 +86,13 @@ from pilot_proxy.fine_reduction import (
     fine_bin_count,
     reduce_and_detect,
 )
+from pilot_proxy.product_contract import (
+    PER_PILOT_PRODUCT_SCHEMA_NAME,
+    PER_PILOT_PRODUCT_SCHEMA_REVISION,
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    current_decision_contract,
+    current_decision_contract_json,
+)
 
 _FINE_MODE_CODES = {
     "": 0,
@@ -100,12 +108,10 @@ from ._chime_coarse import chime_freq_id_from_hz, source_event_key
 
 import warnings
 
-# The schema version stamps every product: v3 carries the shared v2 arrays
-# (integrated spectra, per-unit absolute time axis, per-frame unit tags,
-# provenance, ``reject_mask``) plus the fine-reduction products (see
-# docs/product_schema_v3.md). ``resume()`` refuses to extend a product with a
-# different schema, so runs on different schemas are never silently mixed.
-_SCHEMA_VERSION = "pilotproxy_detector_datatrawl_v3"
+# The public product contract starts at schema revision 1 and records
+# active, diagnostic, and candidate decisions explicitly. Resume accepts only
+# this exact schema and decision contract (docs/PRODUCT_SCHEMA.md).
+_SCHEMA_VERSION = PER_PILOT_PRODUCT_SCHEMA_TOKEN
 
 # Native CHIME baseband packing: one uint8 per complex sample, high nibble = real,
 # low nibble = imag, each a 4-bit offset-binary value (stored = signed + 8). This
@@ -126,6 +132,23 @@ def _to_host(a) -> np.ndarray:
     """Bring an accumulator to host numpy (cupy ndarray -> .get(); numpy -> asarray)."""
     get = getattr(a, "get", None)
     return np.asarray(get() if callable(get) else a)
+
+
+def _callable_accepts_keyword(function: Any, keyword: str) -> bool:
+    """Return whether a callable explicitly accepts a keyword argument.
+
+    Feature discovery must happen before invocation.  Catching ``TypeError``
+    around the detector call can misclassify a real implementation defect as a
+    missing optional feature and can execute the detector twice.
+    """
+    try:
+        parameters = inspect.signature(function).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(
+        parameter.name == keyword or parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters
+    )
 
 
 def _detector_fft_backend():
@@ -194,6 +217,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._coarse_center_hz = float("nan")
         # injected detector pieces (defaults resolved lazily in begin)
         self._detector_fn = None
+        self._detector_fn_accepts_row_sums = False
         self._kernel = None
         self._weights: np.ndarray | None = None
         # dB-calibration constants (overridable)
@@ -232,7 +256,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_loc: list[float] = []
         self._fine_scale: list[float] = []
         self._fine_thr: list[float] = []
-        self._fine_ndrate: list[float] = []
+        self._fine_null_bulk_exceedance_fraction: list[float] = []
         self._fine_mode_code: list[int] = []
         self._fine_ndet: list[int] = []
         self._fine_det_frames: list[int] = []
@@ -384,6 +408,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "mask_rule",
             "detector_contract_json",
             "reference_placement_json",
+            "decision_contract_json",
         )
         missing = [name for name in required_provenance if name not in data]
         if missing:
@@ -407,10 +432,17 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         try:
             saved_contract = json.loads(_text("detector_contract_json"))
             saved_reference = json.loads(_text("reference_placement_json"))
+            saved_decision_contract = json.loads(_text("decision_contract_json"))
         except json.JSONDecodeError as exc:
             raise SystemExit(
                 f"pilot-proxy-detector: invalid resume provenance JSON in {path}: {exc}"
             ) from exc
+        if saved_decision_contract != current_decision_contract():
+            raise SystemExit(
+                "pilot-proxy-detector: existing product decision contract does not "
+                "match the current active/diagnostic decision semantics. Delete "
+                "the product and rebuild before resuming."
+            )
         self._resumed_provenance = {
             "weights_hash": _text("weights_hash"),
             "detector_version": _text("detector_version"),
@@ -448,7 +480,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             self._fine_loc = [float(x) for x in _col("fine_cfar_location")]
             self._fine_scale = [float(x) for x in _col("fine_cfar_scale")]
             self._fine_thr = [float(x) for x in _col("fine_cfar_threshold")]
-            self._fine_ndrate = [float(x) for x in _col("fine_nd_flag_rate")]
+            self._fine_null_bulk_exceedance_fraction = [
+                float(x) for x in _col("fine_null_bulk_exceedance_fraction")
+            ]
             self._fine_mode_code = [int(x) for x in _col("fine_cfar_mode")]
             self._fine_ndet = [int(x) for x in _col("fine_detected_count")]
             self._fine_det_frames = [
@@ -628,6 +662,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         if self._detector_fn is None:
             from pilot_proxy.chime.runner import detect_packed_for_positive_excess
             self._detector_fn = detect_packed_for_positive_excess
+        self._detector_fn_accepts_row_sums = _callable_accepts_keyword(
+            self._detector_fn, "emit_row_sums"
+        )
 
         self._kernel = opts.get("kernel")
         if self._kernel is None:
@@ -1018,7 +1055,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_loc.append(float("nan"))
                 self._fine_scale.append(float("nan"))
                 self._fine_thr.append(float("nan"))
-                self._fine_ndrate.append(float("nan"))
+                self._fine_null_bulk_exceedance_fraction.append(float("nan"))
                 self._fine_mode_code.append(0)
                 self._fine_ndet.append(0)
                 self._frame_unit_index.append(unit_idx)
@@ -1044,41 +1081,38 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             want_fine = self._fine_mode_opt != "off"
             if want_fine and self._fine_supported is None:
                 probe = getattr(self._kernel, "supports_row_sums", None)
-                self._fine_supported = bool(probe()) if callable(probe) else False
+                kernel_supports_row_sums = bool(probe()) if callable(probe) else False
+                self._fine_supported = bool(
+                    kernel_supports_row_sums and self._detector_fn_accepts_row_sums
+                )
                 if not self._fine_supported:
                     if self._fine_mode_opt == "on":
                         raise RuntimeError(
-                            "detector analyzer: fine_products=on but the kernel "
-                            "library does not expose the v2 row-sum front end; "
-                            "rebuild libfstatistic.so."
+                            "detector analyzer: fine_products=on but the configured "
+                            "kernel/detector backend does not explicitly support "
+                            "row-sum emission."
                         )
-                    self._fine_status = "kernel_library_lacks_row_sums"
+                    self._fine_status = (
+                        "detector_fn_lacks_row_sums"
+                        if kernel_supports_row_sums
+                        else "kernel_library_lacks_row_sums"
+                    )
                 else:
                     self._fine_status = "enabled"
             emit_fine = bool(want_fine and self._fine_supported)
-            try:
+            if emit_fine:
                 detection = self._detector_fn(
                     packed=packed.packed,
                     weights=self._weights,
                     kernel=self._kernel,
-                    emit_row_sums=emit_fine,
+                    emit_row_sums=True,
                 )
-            except TypeError:
+            else:
                 detection = self._detector_fn(
                     packed=packed.packed,
                     weights=self._weights,
                     kernel=self._kernel,
                 )
-                if emit_fine:
-                    emit_fine = False
-                    self._fine_supported = False
-                    self._fine_status = "detector_fn_lacks_row_sums"
-                    if self._fine_mode_opt == "on":
-                        raise RuntimeError(
-                            "detector analyzer: fine_products=on but the "
-                            "configured detector_fn does not accept "
-                            "emit_row_sums."
-                        )
             self._overflow += int(detection.get("rational_overflow_count", 0))
             baseband_power = np.asarray(packed.baseband_power_linear, dtype=np.float64)
             results = detection["results"]
@@ -1123,7 +1157,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_loc.append(float(fine.cfar.location))
                 self._fine_scale.append(float(fine.cfar.scale))
                 self._fine_thr.append(float(fine.cfar.threshold))
-                self._fine_ndrate.append(float(fine.cfar.nd_flag_rate))
+                self._fine_null_bulk_exceedance_fraction.append(
+                    float(fine.cfar.null_bulk_exceedance_fraction)
+                )
                 self._fine_mode_code.append(
                     int(_FINE_MODE_CODES.get(fine.cfar.mode, 0))
                 )
@@ -1144,7 +1180,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_loc.append(float("nan"))
                 self._fine_scale.append(float("nan"))
                 self._fine_thr.append(float("nan"))
-                self._fine_ndrate.append(float("nan"))
+                self._fine_null_bulk_exceedance_fraction.append(float("nan"))
                 self._fine_mode_code.append(0)
                 self._fine_ndet.append(0)
             for local_index, row in enumerate(results):
@@ -1224,6 +1260,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         np.savez_compressed(
             tmp,
             # --- chime_detector_outputs schema (single pilot) ---
+            schema_name=np.asarray(PER_PILOT_PRODUCT_SCHEMA_NAME),
+            schema_revision=np.asarray(PER_PILOT_PRODUCT_SCHEMA_REVISION, dtype=np.int64),
+            decision_contract_json=np.asarray(current_decision_contract_json()),
             physical_channel=np.asarray([self._physical_channel], dtype=np.int32),
             freq_id=np.asarray([self._freq_id], dtype=np.int64),
             pilot_in_band=np.asarray([1 if self._pilot_in_band else 0], dtype=np.uint8),
@@ -1248,8 +1287,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             fine_cfar_threshold=col_f(self._fine_thr)
             if self._fine_thr
             else np.full((n, 1), np.nan),
-            fine_nd_flag_rate=col_f(self._fine_ndrate)
-            if self._fine_ndrate
+            fine_null_bulk_exceedance_fraction=col_f(
+                self._fine_null_bulk_exceedance_fraction
+            )
+            if self._fine_null_bulk_exceedance_fraction
             else np.full((n, 1), np.nan),
             fine_cfar_mode=col_u(
                 self._fine_mode_code if self._fine_mode_code else [0] * n,

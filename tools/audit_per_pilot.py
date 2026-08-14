@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deep integrity audit for pilot-proxy per-pilot detector products (schema v3).
+"""Deep integrity audit for current PilotProxy per-pilot products.
 
 Re-derives every internally checkable quantity from first principles and the
 repository's own contract functions, and verifies provenance hashes against
@@ -26,6 +26,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from pilot_proxy.detector_contract import norm_corrected_mu0, POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.fine_reduction import fine_bin_count
+from pilot_proxy.product_contract import (
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    current_decision_contract,
+)
 
 CHIME_HZ_PER_CHANNEL = 400e6 / 1024.0          # 390625 Hz
 PILOT_BASE_MHZ = 470.309441                    # ATSC 14 pilot
@@ -66,13 +70,15 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     # ---- provenance -------------------------------------------------------
     sv = str(scalar("schema_version"))
     dv = str(scalar("detector_version"))
-    a.check(sv == "pilotproxy_detector_datatrawl_v3", f"schema_version={sv}")
+    a.check(sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN, f"schema_version={sv}")
+    a.check(json.loads(str(scalar("decision_contract_json"))) == current_decision_contract(),
+            "decision_contract_json")
     # kernel core 2.x family: additive minor bumps (2.0.0 survey cohort,
     # 2.1.0 fine-power stage) share the detector contract; a major bump
     # must still fail this check loudly. Cohort binary hashes are pinned
     # in the run ledger, not here.
     a.check(re.search(r"kernel=2\.\d+\.\d+", dv) is not None and "K=128" in dv
-            and "pilotproxy_detector_datatrawl_v3" in dv,
+            and PER_PILOT_PRODUCT_SCHEMA_TOKEN in dv,
             "detector_version tokens")
     src = next((t[len("source="):][:12] for t in dv.split() if t.startswith("source=")), "?")
     a.check(str(scalar("mask_rule")) == POSITIVE_EXCESS_MASK_RULE, "mask_rule string")
@@ -107,7 +113,8 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     per_frame = ["p_target_u64", "p_ref_sum_u64", "valid", "reject_mask",
                  "fstat_level_db", "pnr_bin_db", "snr_shelf_db",
                  "baseband_power_linear", "frame_index", "frame_unit_index",
-                 "frame_in_unit", "pilot_excess_corrected", "fine_nd_flag_rate",
+                 "frame_in_unit", "pilot_excess_corrected",
+                 "fine_null_bulk_exceedance_fraction",
                  "fine_cfar_location", "fine_cfar_scale", "fine_cfar_threshold",
                  "fine_detected_count"]
     for k in per_frame:
@@ -147,8 +154,14 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(np.array_equal(df_, np.repeat(np.arange(n), counts)),
             "fine_detected_frame == repeat(arange, counts)  [fix+repair]")
     a.check(db.min() >= 0 and db.max() < bins if db.size else True, "detected bins in range")
-    nd = r("fine_nd_flag_rate").astype(np.float64)
-    a.check(np.nanmin(nd) >= 0.0 and np.nanmax(nd) <= 1.0, "nd_flag_rate in [0,1]")
+    null_bulk_exceedance = r(
+        "fine_null_bulk_exceedance_fraction"
+    ).astype(np.float64)
+    a.check(
+        np.nanmin(null_bulk_exceedance) >= 0.0
+        and np.nanmax(null_bulk_exceedance) <= 1.0,
+        "null-bulk exceedance fraction in [0,1]",
+    )
     thr = r("fine_cfar_threshold").astype(np.float64)
     loc = r("fine_cfar_location").astype(np.float64)
     fin = np.isfinite(thr) & np.isfinite(loc)
@@ -182,7 +195,7 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
         "ch": ch, "fid": fid, "units": U, "frames": n,
         "valid%": 100.0 * v.mean(), "mask%": 100.0 * m.mean(),
         "medF/mu0": float(np.median(F[v] / mu0)) if v.any() else float("nan"),
-        "nd_med": float(np.nanmedian(nd)),
+        "null_bulk_exceedance_median": float(np.nanmedian(null_bulk_exceedance)),
         "det_rows": int(db.size),
         "span": (datetime.datetime.fromtimestamp(t0.min(), datetime.timezone.utc).strftime("%Y-%m")
                  + ".." + datetime.datetime.fromtimestamp(t0.max(), datetime.timezone.utc).strftime("%Y-%m")),
@@ -219,12 +232,14 @@ def main() -> int:
             print(f"    FAIL: {f}")
     print()
     hdr = f"{'ch':>3} {'fid':>4} {'units':>5} {'frames':>6} {'valid%':>6} " \
-          f"{'mask%':>6} {'medF/mu0':>8} {'nd_med':>6} {'det_rows':>8} {'span':>16}"
+          f"{'mask%':>6} {'medF/mu0':>8} {'null_exc':>8} " \
+          f"{'det_rows':>8} {'span':>16}"
     print(hdr)
     for s in rows:
         print(f"{s['ch']:>3} {s['fid']:>4} {s['units']:>5} {s['frames']:>6} "
               f"{s['valid%']:>6.1f} {s['mask%']:>6.1f} {s['medF/mu0']:>8.4f} "
-              f"{s['nd_med']:>6.3f} {s['det_rows']:>8} {s['span']:>16}")
+              f"{s['null_bulk_exceedance_median']:>8.3f} "
+              f"{s['det_rows']:>8} {s['span']:>16}")
     print("\nOVERALL:", "ALL PASS" if all_ok else "FAILURES PRESENT")
     return 0 if all_ok else 2
 

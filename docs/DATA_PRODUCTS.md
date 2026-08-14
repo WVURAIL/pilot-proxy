@@ -10,9 +10,11 @@ formats where those formats apply.
 Unless stated otherwise, `mask = 1` means that the frame is rejected and
 `valid = 1` means that the reference denominator is nonzero.
 
-The v3 fine-reduction products (`fstat_fine`, the CFAR calibration columns,
+The current per-pilot schema and its explicit active/diagnostic/candidate
+decision contract are defined in `PRODUCT_SCHEMA.md`. Its fine-reduction
+products (`fstat_fine`, the robust null-bulk calibration columns,
 and the ragged detection list) live only in the authoritative per-pilot
-`<freq_id>.npz` files and are defined in `product_schema_v3.md`. The combined
+`<freq_id>.npz` files. The combined
 outputs below carry no fine arrays; analyses of fine detections read the
 per-pilot products directly.
 
@@ -168,7 +170,7 @@ Bin `k` maps to baseband frequency as:
 ```
 
 The authoritative copy remains in each `_per_pilot/<freq_id>.npz`; see
-`product_schema_v2.md`. Integrated spectra are accumulated before terminal
+`PER_PILOT_PRODUCT_FIELDS.md`. Integrated spectra are accumulated before terminal
 event intersection, so they represent each pilot's full processed frame set.
 The canonical frame arrays can represent a smaller all-channel intersection.
 This distinction is recorded by the per-pilot products and

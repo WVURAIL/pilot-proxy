@@ -193,7 +193,7 @@ figures/
 ```
 
 The archive-scale `chime-scan` path additionally writes authoritative per-pilot
-products and `chime_integrated_spectra.npz`; see `docs/product_schema_v2.md` and
+products and `chime_integrated_spectra.npz`; see `docs/PER_PILOT_PRODUCT_FIELDS.md` and
 `docs/DATA_PRODUCTS.md`.
 
 Generated metadata can contain absolute paths for the receiver profile, stream

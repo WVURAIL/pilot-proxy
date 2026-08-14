@@ -278,7 +278,7 @@ def layout_from_receiver_profile(
     """Build an input-stream layout from a receiver profile."""
     return InputStreamLayout(
         frame_size_samples=int(profile.frame_size_samples),
-        detector_window_samples=128,
+        detector_window_samples=int(profile.detector_window_samples),
         num_input_streams=int(profile.num_input_streams),
         num_selected_channels=int(num_selected_channels),
         combine_mode=combine_mode,
