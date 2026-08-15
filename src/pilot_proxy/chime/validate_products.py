@@ -16,12 +16,10 @@ from pilot_proxy.detector_contract import (
     CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION,
     CHIME_RUN_CONFIG_SCHEMA_VERSION,
     CHIME_STATS_SCHEMA_VERSION,
-    LEGACY_POSITIVE_EXCESS_EQUIVALENT_RULE,
-    LEGACY_POSITIVE_EXCESS_MASK_RULE,
-    POSITIVE_EXCESS_EQUIVALENT_RULE,
-    POSITIVE_EXCESS_MASK_RULE,
-    POSITIVE_EXCESS_MASK_SOURCE,
-    POSITIVE_EXCESS_VALID_RULE,
+    NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
+    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
+    NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE,
+    COARSE_POWER_RATIO_VALID_RULE,
     WEIGHT_COORDINATE_RAW_INPUT,
     input_coordinate_system_for_weight_coordinate,
     normalize_weight_coordinate_system,
@@ -127,7 +125,7 @@ def _is_binary_array(values: np.ndarray) -> bool:
     return bool(np.all((arr == 0) | (arr == 1)))
 
 
-def _is_positive_excess_run(
+def _is_normalized_positive_excess_run(
     *,
     run_config: dict[str, Any],
     stats: dict[str, Any],
@@ -137,26 +135,13 @@ def _is_positive_excess_run(
     return bool(
         (
             isinstance(policy, dict)
-            and str(policy.get("mask_source")) == POSITIVE_EXCESS_MASK_SOURCE
+            and str(policy.get("mask_source")) == NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE
         )
         or (
             isinstance(contract, dict)
-            and str(contract.get("mask_source")) == POSITIVE_EXCESS_MASK_SOURCE
+            and str(contract.get("mask_source")) == NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE
         )
     )
-
-
-def _declared_mask_rule(
-    *,
-    run_config: dict[str, Any],
-    stats: dict[str, Any],
-) -> str:
-    """Return the mask rule the run declared (legacy runs get the legacy rule)."""
-    for payload in (stats, run_config):
-        policy = payload.get("mask_policy")
-        if isinstance(policy, dict) and policy.get("mask_rule"):
-            return str(policy["mask_rule"])
-    return LEGACY_POSITIVE_EXCESS_MASK_RULE
 
 
 def _validate_detector_contract(
@@ -238,26 +223,12 @@ def _validate_detector_contract(
             "detector_contract.reference_offset_relation",
             "reference_offset_bins must equal skipped_guard_bins + 1",
         )
-    # The contract must declare one consistent rule pair: the norm-corrected
-    # rule (current) or the legacy F>1 rule (products written before the
-    # weight-norm correction).
-    expected_policy_current = {
-        "mask_source": POSITIVE_EXCESS_MASK_SOURCE,
-        "valid_rule": POSITIVE_EXCESS_VALID_RULE,
-        "mask_rule": POSITIVE_EXCESS_MASK_RULE,
-        "equivalent_mask_rule": POSITIVE_EXCESS_EQUIVALENT_RULE,
+    expected_policy = {
+        "mask_source": NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE,
+        "valid_rule": COARSE_POWER_RATIO_VALID_RULE,
+        "mask_rule": NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
+        "equivalent_mask_rule": NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
     }
-    expected_policy_legacy = {
-        "mask_source": POSITIVE_EXCESS_MASK_SOURCE,
-        "valid_rule": POSITIVE_EXCESS_VALID_RULE,
-        "mask_rule": LEGACY_POSITIVE_EXCESS_MASK_RULE,
-        "equivalent_mask_rule": LEGACY_POSITIVE_EXCESS_EQUIVALENT_RULE,
-    }
-    expected_policy = (
-        expected_policy_legacy
-        if run_contract_typed.get("mask_rule") == LEGACY_POSITIVE_EXCESS_MASK_RULE
-        else expected_policy_current
-    )
     for key, expected in expected_policy.items():
         if run_contract_typed.get(key) != expected:
             _add_error(
@@ -375,10 +346,10 @@ def _validate_detector(
         "frame_index",
         "p_target_u64",
         "p_ref_sum_u64",
-        "fstat_raw",
-        "fstat_level_db",
-        "pnr_bin_db",
-        "snr_shelf_db",
+        "coarse_power_ratio",
+        "normalized_coarse_power_ratio_db",
+        "pilot_excess_db",
+        "estimated_data_shelf_snr_db",
         "mask",
         "valid",
     ]
@@ -398,10 +369,10 @@ def _validate_detector(
     for name in [
         "p_target_u64",
         "p_ref_sum_u64",
-        "fstat_raw",
-        "fstat_level_db",
-        "pnr_bin_db",
-        "snr_shelf_db",
+        "coarse_power_ratio",
+        "normalized_coarse_power_ratio_db",
+        "pilot_excess_db",
+        "estimated_data_shelf_snr_db",
         "mask",
         "valid",
     ]:
@@ -436,55 +407,46 @@ def _validate_detector(
             "detector.valid.denominator",
             "valid array does not match p_ref_sum_u64 > 0",
         )
-    if _is_positive_excess_run(run_config=run_config, stats=stats):
+    if _is_normalized_positive_excess_run(
+        run_config=run_config,
+        stats=stats,
+    ):
         p_target = np.asarray(detector["p_target_u64"], dtype=np.uint64)
         p_ref_sum = np.asarray(detector["p_ref_sum_u64"], dtype=np.uint64)
-        declared_rule = _declared_mask_rule(run_config=run_config, stats=stats)
-        if declared_rule == LEGACY_POSITIVE_EXCESS_MASK_RULE:
+        required_norms = {"target_norm_sq", "reference_norm_sum_sq"}
+        missing_norms = sorted(required_norms.difference(detector.files))
+        if missing_norms:
+            _add_error(
+                errors,
+                "detector.mask.norms_missing",
+                "the current normalized mask rule requires arrays: "
+                + ", ".join(missing_norms),
+            )
+        else:
+            target_norm = np.asarray(detector["target_norm_sq"]).reshape(-1)
+            reference_norm = np.asarray(
+                detector["reference_norm_sum_sq"]
+            ).reshape(-1)
+            p_target_object = p_target.astype(object)
+            p_ref_object = p_ref_sum.astype(object)
+            target_norm_object = target_norm.astype(object)[np.newaxis, :]
+            reference_norm_object = reference_norm.astype(object)[np.newaxis, :]
             expected_mask = (
                 (valid != 0)
                 & (p_ref_sum != 0)
-                & (p_target > (p_ref_sum >> 1))
+                & np.asarray(
+                    p_target_object * reference_norm_object
+                    > target_norm_object * p_ref_object,
+                    dtype=bool,
+                )
             )
             if np.any((mask != 0) != expected_mask):
                 _add_error(
                     errors,
-                    "detector.mask.positive_excess_rule",
-                    "mask does not match valid && p_target > (p_ref_sum >> 1)",
+                    "detector.mask.normalized_positive_excess_rule",
+                    "mask does not match valid && (p_target * "
+                    "reference_norm_sum_sq > target_norm_sq * p_ref_sum)",
                 )
-        else:
-            # Norm-corrected rule: mask = valid && (p_target * ref_norm_sum_sq
-            # > target_norm_sq * p_ref_sum), exact in integers. The per-pilot
-            # norms must be recorded in the detector product.
-            if "target_norm_sq" not in detector or "ref_norm_sum_sq" not in detector:
-                _add_error(
-                    errors,
-                    "detector.mask.norms_missing",
-                    "norm-corrected mask rule declared but target_norm_sq / "
-                    "ref_norm_sum_sq are missing from chime_detector_outputs",
-                )
-            else:
-                nt = np.asarray(detector["target_norm_sq"]).reshape(-1)
-                nrs = np.asarray(detector["ref_norm_sum_sq"]).reshape(-1)
-                # object dtype -> unbounded Python ints; the cross-multiplied
-                # products can exceed int64 in principle, and exactness is the
-                # entire point of the rule.
-                pt_obj = p_target.astype(object)
-                prs_obj = p_ref_sum.astype(object)
-                nt_obj = nt.astype(object)[np.newaxis, :]
-                nrs_obj = nrs.astype(object)[np.newaxis, :]
-                expected_mask = (
-                    (valid != 0)
-                    & (p_ref_sum != 0)
-                    & np.asarray(pt_obj * nrs_obj > nt_obj * prs_obj, dtype=bool)
-                )
-                if np.any((mask != 0) != expected_mask):
-                    _add_error(
-                        errors,
-                        "detector.mask.positive_excess_rule",
-                        "mask does not match valid && (p_target * "
-                        "ref_norm_sum_sq > target_norm_sq * p_ref_sum)",
-                    )
 
     if stats:
         for key, expected in [

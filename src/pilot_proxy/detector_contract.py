@@ -13,28 +13,25 @@ from pilot_proxy.json_utils import json_dumps_strict
 CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION = "pilotproxy_chime_detector_contract_v1"
 CHIME_RUN_CONFIG_SCHEMA_VERSION = "fstat_chime_run_config_v2"
 CHIME_STATS_SCHEMA_VERSION = "fstat_chime_stats_v2"
-POSITIVE_EXCESS_MASK_SOURCE = "positive_excess"
-POSITIVE_EXCESS_VALID_RULE = "p_ref_sum != 0"
+NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE = "normalized_positive_excess_decision"
+COARSE_POWER_RATIO_VALID_RULE = "p_ref_sum != 0"
 # The corrected rule compares against the H0 zero-point of F implied by the
 # int4-quantized weight norms, instead of assuming that zero-point is exactly 1.
 # For white noise E[P_term] = sigma^2 * ||w_term||^2, so
-# E[F] = mu0 = 2*target_norm_sq/ref_norm_sum_sq, and quantization leaves the
-# three norms unequal (mu0 spans ~0.985..1.011 across the shipped ATSC 14-36
+# E[F] = null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq, and quantization leaves the
+# three norms unequal (null_power_ratio spans ~0.985..1.011 across the shipped ATSC 14-36
 # bank). "F > 1" therefore pins the H0 mask fraction toward 0 or 1 per channel;
-# "F > mu0" restores a channel-independent zero-point exactly, in integers.
-POSITIVE_EXCESS_MASK_RULE = (
-    "valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)"
+# "F > null_power_ratio" restores a channel-independent zero-point exactly, in integers.
+NORMALIZED_POSITIVE_EXCESS_MASK_RULE = (
+    "valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)"
 )
-# Rule recorded by products written before the weight-norm correction. Kept so
-# validate-products can check legacy products against the rule they declared.
-LEGACY_POSITIVE_EXCESS_MASK_RULE = "valid && (p_target > (p_ref_sum >> 1))"
-LEGACY_POSITIVE_EXCESS_EQUIVALENT_RULE = "2*p_target > p_ref_sum"
-POSITIVE_EXCESS_EQUIVALENT_RULE = (
-    "F > mu0; mu0 = 2*target_norm_sq/ref_norm_sum_sq"
+NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE = (
+    "R_coarse > R_null; R_null = "
+    "2*target_norm_sq/reference_norm_sum_sq"
 )
-DETECTOR_STATISTIC = "F = 2 * P_target / (P_ref_lower + P_ref_upper)"
-ALL_ROWS_DETECTOR_STATISTIC = (
-    "F = 2 * sum(P_target) / (sum(P_ref_lower) + sum(P_ref_upper))"
+DETECTOR_POWER_RATIO_DEFINITION = "R_coarse = 2 * P_target / (P_ref_lower + P_ref_upper)"
+ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION = (
+    "R_coarse = 2 * sum(P_target) / (sum(P_ref_lower) + sum(P_ref_upper))"
 )
 COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO = "all_rows_summed_before_ratio"
 WEIGHT_COORDINATE_POST_SPECTRAL_SENSE = "post_spectral_sense_normalization"
@@ -72,20 +69,19 @@ def input_coordinate_system_for_weight_coordinate(
     return INPUT_COORDINATE_POST_SPECTRAL_SENSE_NORMALIZED
 
 
-def positive_excess_mask_policy() -> dict[str, Any]:
+def normalized_positive_excess_policy() -> dict[str, Any]:
     """Return the norm-corrected positive-excess masking policy."""
     return {
-        "mask_source": POSITIVE_EXCESS_MASK_SOURCE,
-        "valid_rule": POSITIVE_EXCESS_VALID_RULE,
-        "mask_rule": POSITIVE_EXCESS_MASK_RULE,
-        "equivalent_rule": POSITIVE_EXCESS_EQUIVALENT_RULE,
-        "legacy_mask_rule": LEGACY_POSITIVE_EXCESS_MASK_RULE,
-        "norm_correction": (
-            "target_norm_sq and ref_norm_sum_sq are the exact integer squared "
+        "mask_source": NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE,
+        "valid_rule": COARSE_POWER_RATIO_VALID_RULE,
+        "mask_rule": NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
+        "equivalent_rule": NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
+        "null_normalization": (
+            "target_norm_sq and reference_norm_sum_sq are the exact integer squared "
             "norms of the packed target and (lower+upper) reference weight "
             "vectors; they remove the per-channel H0 F zero-point that int4 "
             "weight quantization introduces (E[F] = 2*target_norm_sq/"
-            "ref_norm_sum_sq under a flat noise floor)."
+            "reference_norm_sum_sq under a flat noise floor)."
         ),
     }
 
@@ -120,33 +116,33 @@ def weight_term_norms_sq(
     return int(norms[0]), int(norms[1]), int(norms[2])
 
 
-def norm_corrected_mu0(target_norm_sq: int, ref_norm_sum_sq: int) -> float:
-    """Return mu0 = 2*target_norm_sq/ref_norm_sum_sq, the flat-floor E[F]."""
-    nrs = int(ref_norm_sum_sq)
+def null_power_ratio_from_weight_norms(target_norm_sq: int, reference_norm_sum_sq: int) -> float:
+    """Return null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq, the flat-floor E[F]."""
+    nrs = int(reference_norm_sum_sq)
     if nrs <= 0:
-        raise ValueError("ref_norm_sum_sq must be positive.")
+        raise ValueError("reference_norm_sum_sq must be positive.")
     return 2.0 * int(target_norm_sq) / nrs
 
 
-def norm_corrected_positive_excess(
+def normalized_positive_excess(
     p_target: int,
     p_ref_sum: int,
     *,
     target_norm_sq: int,
-    ref_norm_sum_sq: int,
+    reference_norm_sum_sq: int,
 ) -> int:
     """Exact integer norm-corrected positive-excess mask decision.
 
-    Implements ``valid && (p_target * ref_norm_sum_sq > target_norm_sq *
+    Implements ``valid && (p_target * reference_norm_sum_sq > target_norm_sq *
     p_ref_sum)`` in unbounded Python integers, the exact form of
-    ``F > mu0``. With ``target_norm_sq : ref_norm_sum_sq = 1 : 2`` this
+    ``F > null_power_ratio``. With ``target_norm_sq : reference_norm_sum_sq = 1 : 2`` this
     reduces to the legacy ``2*p_target > p_ref_sum`` rule.
     """
     num = int(p_target)
     den = int(p_ref_sum)
     if den == 0:
         return 0
-    return int(num * int(ref_norm_sum_sq) > int(target_norm_sq) * den)
+    return int(num * int(reference_norm_sum_sq) > int(target_norm_sq) * den)
 
 
 def build_chime_detector_contract(
@@ -166,7 +162,7 @@ def build_chime_detector_contract(
     reference_placement_summary: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the public CHIME detector contract for run products."""
-    mask_policy = positive_excess_mask_policy()
+    mask_policy = normalized_positive_excess_policy()
     weight_coordinate = normalize_weight_coordinate_system(weight_coordinate_system)
     input_coordinate = (
         input_coordinate_system_for_weight_coordinate(weight_coordinate)
@@ -183,8 +179,8 @@ def build_chime_detector_contract(
         "input_format": str(input_format),
         "power_accumulator": str(power_accumulator),
         "power_accumulator_bits": int(power_accumulator_bits),
-        "statistic": DETECTOR_STATISTIC,
-        "all_rows_statistic": ALL_ROWS_DETECTOR_STATISTIC,
+        "statistic": DETECTOR_POWER_RATIO_DEFINITION,
+        "all_rows_statistic": ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
         "combine_mode": str(combine_mode),
         "weight_coordinate_system": weight_coordinate,
         "input_coordinate_system": input_coordinate,
@@ -216,18 +212,18 @@ def detector_contract_sha256(contract: dict[str, Any]) -> str:
 
 
 __all__ = [
-    "ALL_ROWS_DETECTOR_STATISTIC",
+    "ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION",
     "CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION",
     "CHIME_RUN_CONFIG_SCHEMA_VERSION",
     "CHIME_STATS_SCHEMA_VERSION",
     "COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO",
-    "DETECTOR_STATISTIC",
+    "DETECTOR_POWER_RATIO_DEFINITION",
     "INPUT_COORDINATE_POST_SPECTRAL_SENSE_NORMALIZED",
     "INPUT_COORDINATE_RAW_INPUT",
-    "POSITIVE_EXCESS_EQUIVALENT_RULE",
-    "POSITIVE_EXCESS_MASK_RULE",
-    "POSITIVE_EXCESS_MASK_SOURCE",
-    "POSITIVE_EXCESS_VALID_RULE",
+    "NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE",
+    "NORMALIZED_POSITIVE_EXCESS_MASK_RULE",
+    "NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE",
+    "COARSE_POWER_RATIO_VALID_RULE",
     "VALID_WEIGHT_COORDINATE_SYSTEMS",
     "WEIGHT_COORDINATE_POST_SPECTRAL_SENSE",
     "WEIGHT_COORDINATE_RAW_INPUT",
@@ -235,5 +231,5 @@ __all__ = [
     "detector_contract_sha256",
     "input_coordinate_system_for_weight_coordinate",
     "normalize_weight_coordinate_system",
-    "positive_excess_mask_policy",
+    "normalized_positive_excess_policy",
 ]

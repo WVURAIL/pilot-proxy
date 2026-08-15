@@ -44,7 +44,7 @@ LD_LIBRARY_PATH="$CUDA_LD_LIBRARY_PATH" PYTHONPATH=src "$CUDA_PYTHON" \
   --physical-channel 14 \
   --frame-size-samples 16384 \
   --num-input-streams 1 \
-  --requested-snr-shelf-db -26 \
+  --requested-data-shelf-snr-db -26 \
   --noise-trials 10 \
   --noise-source gnuradio \
   --gnuradio-python "$GNURADIO_PYTHON"

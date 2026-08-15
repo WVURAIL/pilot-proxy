@@ -118,7 +118,7 @@ def test_add_complex_awgn_for_snr_accounts_for_noise_bandwidth() -> None:
 
 def test_target_snr_values_accepts_explicit_values_and_range() -> None:
     args = argparse.Namespace(
-        requested_snr_shelf_db=[SNR_EXPLICIT_DB],
+        requested_data_shelf_snr_db=[SNR_EXPLICIT_DB],
         snr_start_db=SNR_RANGE_START_DB,
         snr_stop_db=SNR_RANGE_STOP_DB,
         snr_step_db=SNR_RANGE_STEP_DB,
@@ -129,7 +129,7 @@ def test_target_snr_values_accepts_explicit_values_and_range() -> None:
 
 def test_target_snr_values_default_to_public_sweep() -> None:
     args = argparse.Namespace(
-        requested_snr_shelf_db=None,
+        requested_data_shelf_snr_db=None,
         snr_start_db=None,
         snr_stop_db=None,
         snr_step_db=None,
@@ -236,24 +236,24 @@ def test_summary_rows_report_detection_rates_with_wilson_bounds() -> None:
 
     def _trial(pe: int, mask: int) -> dict:
         return {
-            "requested_snr_shelf_db": -30.0,
+            "requested_data_shelf_snr_db": -30.0,
             "frequency_offset_hz": 0.0,
             "channel_gain_db": 0.0,
             "channel_phase_deg": 0.0,
-            "measured_truth_snr_shelf_db": -30.0,
+            "measured_truth_data_shelf_snr_db": -30.0,
             "measured_truth_composite_atsc_snr_db": -20.0,
-            "estimated_snr_shelf_db": -30.0,
+            "estimated_data_shelf_snr_db": -30.0,
             "snr_error_db": 0.0,
-            "fstat_raw": 1.0,
-            "fstat_level_db": 0.0,
-            "pnr_bin_db": 0.0,
-            "cpu_float_estimated_snr_shelf_db": -30.0,
+            "coarse_power_ratio": 1.0,
+            "normalized_coarse_power_ratio_db": 0.0,
+            "pilot_excess_db": 0.0,
+            "cpu_float_estimated_data_shelf_snr_db": -30.0,
             "cpu_float_snr_error_db": 0.0,
-            "cpu_float_fstat_raw": 1.0,
+            "cpu_float_coarse_power_ratio": 1.0,
             "cpu_gpu_abs_diff": 0.0,
             "cpu_float_gpu_snr_diff_db": 0.0,
             "num_input_streams": 4,
-            "positive_excess": pe,
+            "normalized_positive_excess_decision": pe,
             "mask": mask,
         }
 
@@ -268,10 +268,10 @@ def test_summary_rows_report_detection_rates_with_wilson_bounds() -> None:
     assert len(summary) == 1
     row = summary[0]
     assert row["trials"] == 4
-    assert row["positive_excess_detection_rate"] == pytest.approx(0.75)
+    assert row["normalized_positive_excess_detection_rate"] == pytest.approx(0.75)
     lo, hi = wilson_interval(3, 4)
-    assert row["positive_excess_detection_rate_wilson95_lo"] == pytest.approx(lo)
-    assert row["positive_excess_detection_rate_wilson95_hi"] == pytest.approx(hi)
+    assert row["normalized_positive_excess_detection_rate_wilson95_lo"] == pytest.approx(lo)
+    assert row["normalized_positive_excess_detection_rate_wilson95_hi"] == pytest.approx(hi)
     assert row["threshold_detection_rate"] == pytest.approx(0.5)
     lo, hi = wilson_interval(2, 4)
     assert row["threshold_detection_rate_wilson95_lo"] == pytest.approx(lo)
@@ -282,20 +282,20 @@ def test_summary_rows_omit_detection_rates_for_legacy_trials() -> None:
     from pilot_proxy.testbench.evaluate_snr import _summarize_rows
 
     legacy = {
-        "requested_snr_shelf_db": -30.0,
+        "requested_data_shelf_snr_db": -30.0,
         "frequency_offset_hz": 0.0,
         "channel_gain_db": 0.0,
         "channel_phase_deg": 0.0,
-        "measured_truth_snr_shelf_db": -30.0,
+        "measured_truth_data_shelf_snr_db": -30.0,
         "measured_truth_composite_atsc_snr_db": -20.0,
-        "estimated_snr_shelf_db": -30.0,
+        "estimated_data_shelf_snr_db": -30.0,
         "snr_error_db": 0.0,
-        "fstat_raw": 1.0,
-        "fstat_level_db": 0.0,
-        "pnr_bin_db": 0.0,
-        "cpu_float_estimated_snr_shelf_db": -30.0,
+        "coarse_power_ratio": 1.0,
+        "normalized_coarse_power_ratio_db": 0.0,
+        "pilot_excess_db": 0.0,
+        "cpu_float_estimated_data_shelf_snr_db": -30.0,
         "cpu_float_snr_error_db": 0.0,
-        "cpu_float_fstat_raw": 1.0,
+        "cpu_float_coarse_power_ratio": 1.0,
         "cpu_gpu_abs_diff": 0.0,
         "cpu_float_gpu_snr_diff_db": 0.0,
         "num_input_streams": 4,
@@ -307,7 +307,7 @@ def test_summary_rows_omit_detection_rates_for_legacy_trials() -> None:
         composite_to_shelf_db=10.0,
         num_input_streams=4,
     )
-    assert "positive_excess_detection_rate" not in summary[0]
+    assert "normalized_positive_excess_detection_rate" not in summary[0]
     assert "threshold_detection_rate" not in summary[0]
 
 
@@ -315,10 +315,10 @@ def test_cpu_reference_measurements_match_exact_integers() -> None:
     import numpy as np
 
     from pilot_proxy.detector_contract import (
-        norm_corrected_positive_excess,
+        normalized_positive_excess,
         weight_term_norms_sq,
     )
-    from pilot_proxy.detector_reference import fstat_cpu_reference_packed
+    from pilot_proxy.detector_reference import coarse_power_ratio_cpu_reference_packed
     from pilot_proxy.testbench.evaluate_snr import _cpu_reference_measurements
 
     rng = np.random.default_rng(42)
@@ -329,17 +329,17 @@ def test_cpu_reference_measurements_match_exact_integers() -> None:
                  pilot_capture_efficiency=1.0, dtv_bandwidth_hz=6.0e6)
     out = _cpu_reference_measurements(packed=packed, weights=weights, bits=4, **calib)
 
-    fstat, sums = fstat_cpu_reference_packed(packed, weights, 4)
+    fstat, sums = coarse_power_ratio_cpu_reference_packed(packed, weights, 4)
     assert out["p_target_u64"] == int(round(float(sums[0])))
     assert out["p_ref_sum_u64"] == int(round(float(sums[1] + sums[2])))
-    assert out["fstat_raw"] == pytest.approx(
+    assert out["coarse_power_ratio"] == pytest.approx(
         2.0 * out["p_target_u64"] / out["p_ref_sum_u64"]
     )
     assert out["diagnostic_raw_float32"] == pytest.approx(fstat, rel=1e-6)
     nt, nl, nu = weight_term_norms_sq(weights)
-    assert out["positive_excess"] == norm_corrected_positive_excess(
+    assert out["normalized_positive_excess_decision"] == normalized_positive_excess(
         out["p_target_u64"], out["p_ref_sum_u64"],
-        target_norm_sq=nt, ref_norm_sum_sq=nl + nu,
+        target_norm_sq=nt, reference_norm_sum_sq=nl + nu,
     )
     assert "mask" not in out  # no threshold requested
 

@@ -26,7 +26,7 @@ checkpoints on disk -- no GPU session required. Stages:
   5. validate   pilot-proxy validate-products (+ JSON report)
   6. plot       pilot-proxy chime-plot (figures/, tables/)
   7. h0         H0 zero-point tables: stack quicklook AND full-depth
-                per-channel mean F vs mu0 over every valid frame, with the
+                per-channel mean F vs null_power_ratio over every valid frame, with the
                 pilot's offset from the coarse-channel DC in fine bins
   8. tradeoff   pilot-proxy analyze-cleaning-tradeoff on the stack
   9. fulldepth  per-channel full-depth tradeoff: single-channel combine +
@@ -418,10 +418,10 @@ def h0_quicklook(combined: Path, out_dir: Path, runner: Runner) -> dict:
     det = np.load(str(combined / "chime_detector_outputs.npz"))
     valid = np.asarray(det["valid"]).astype(bool)
     mask = np.asarray(det["mask"]).astype(bool)
-    mu0 = np.asarray(det["mu0"], np.float64).reshape(-1)
+    null_power_ratio = np.asarray(det["null_power_ratio"], np.float64).reshape(-1)
     chan = np.asarray(det["physical_channel"]).reshape(-1).astype(int)
-    if "fstat_raw" in det:
-        fstat = np.asarray(det["fstat_raw"], np.float64)
+    if "coarse_power_ratio" in det:
+        fstat = np.asarray(det["coarse_power_ratio"], np.float64)
     else:
         with np.errstate(divide="ignore", invalid="ignore"):
             fstat = 2.0 * np.asarray(det["p_target_u64"], np.float64) / \
@@ -439,8 +439,8 @@ def h0_quicklook(combined: Path, out_dir: Path, runner: Runner) -> dict:
         n = int(f.size)
         mean = float(f.mean()) if n else float("nan")
         sem = float(f.std(ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
-        gap = abs(mean - mu0[i]) if n else float("nan")
-        bound = abs(mu0[i] - 1.0) / 3.0
+        gap = abs(mean - null_power_ratio[i]) if n else float("nan")
+        bound = abs(null_power_ratio[i] - 1.0) / 3.0
         mask_frac = float((mask[:, i] & v).sum() / v.sum()) if v.any() else float("nan")
         rows.append({
             "physical_channel": int(ch),
@@ -448,10 +448,10 @@ def h0_quicklook(combined: Path, out_dir: Path, runner: Runner) -> dict:
             "n_valid": n,
             "mean_fstat": mean,
             "sem_fstat": sem,
-            "mu0": float(mu0[i]),
-            "abs_mean_minus_mu0": gap,
-            "acceptance_bound_abs_mu0_minus_1_over_3": bound,
-            "mean_tracks_mu0": bool(n and gap < bound),
+            "null_power_ratio": float(null_power_ratio[i]),
+            "abs_mean_minus_null_power_ratio": gap,
+            "acceptance_bound_abs_null_power_ratio_minus_1_over_3": bound,
+            "mean_tracks_null_power_ratio": bool(n and gap < bound),
             "mask_fraction_valid": mask_frac,
         })
         if n:
@@ -469,29 +469,29 @@ def h0_quicklook(combined: Path, out_dir: Path, runner: Runner) -> dict:
         w.writerows(rows)
     if hists:
         np.savez_compressed(str(out_dir / "h0_fstat_histograms.npz"), **hists)
-    n_track = sum(1 for r in rows if r["mean_tracks_mu0"])
+    n_track = sum(1 for r in rows if r["mean_tracks_null_power_ratio"])
     return {"rows": rows, "csv": str(csv_path),
-            "channels_tracking_mu0": n_track, "channels_total": len(rows)}
+            "channels_tracking_null_power_ratio": n_track, "channels_total": len(rows)}
 
 
 def h0_fulldepth_table(metas: list[dict], out_dir: Path, runner: Runner) -> dict:
-    """Per-channel mean F vs mu0 over EVERY valid frame (full depth), with
+    """Per-channel mean F vs null_power_ratio over EVERY valid frame (full depth), with
     the pilot's offset from the coarse-channel DC in fine bins."""
     rows, hists = [], {}
     for m in sorted(metas, key=lambda m: m.get("physical_channel", 0)):
         with np.load(str(m["path"])) as z:
             valid = np.asarray(z["valid"]).reshape(-1).astype(bool)
             rej = np.asarray(z["reject_mask"]).reshape(-1).astype(bool)
-            f = np.asarray(z["fstat_raw"], np.float64).reshape(-1)[valid]
+            f = np.asarray(z["coarse_power_ratio"], np.float64).reshape(-1)[valid]
             f = f[np.isfinite(f)]
-            mu0 = float(np.asarray(z["mu0"]).reshape(-1)[0])
+            null_power_ratio = float(np.asarray(z["null_power_ratio"]).reshape(-1)[0])
             pilot = float(np.asarray(z["pilot_frequency_hz"]).reshape(-1)[0])
             center = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
         n = int(f.size)
         mean = float(f.mean()) if n else float("nan")
         sem = float(f.std(ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
-        gap = abs(mean - mu0) if n else float("nan")
-        bound = abs(mu0 - 1.0) / 3.0
+        gap = abs(mean - null_power_ratio) if n else float("nan")
+        bound = abs(null_power_ratio - 1.0) / 3.0
         ch = m.get("physical_channel")
         rows.append({
             "physical_channel": ch,
@@ -499,10 +499,10 @@ def h0_fulldepth_table(metas: list[dict], out_dir: Path, runner: Runner) -> dict
             "n_valid": n,
             "mean_fstat": mean,
             "sem_fstat": sem,
-            "mu0": mu0,
-            "abs_mean_minus_mu0": gap,
-            "acceptance_bound_abs_mu0_minus_1_over_3": bound,
-            "mean_tracks_mu0": bool(n and gap < bound),
+            "null_power_ratio": null_power_ratio,
+            "abs_mean_minus_null_power_ratio": gap,
+            "acceptance_bound_abs_null_power_ratio_minus_1_over_3": bound,
+            "mean_tracks_null_power_ratio": bool(n and gap < bound),
             "mask_fraction_valid":
                 float(rej.sum() / valid.sum()) if valid.any() else float("nan"),
             "pilot_offset_from_dc_finebins": (pilot - center) / FINE_BIN_HZ,
@@ -522,9 +522,9 @@ def h0_fulldepth_table(metas: list[dict], out_dir: Path, runner: Runner) -> dict
     if hists:
         np.savez_compressed(str(out_dir / "h0_fulldepth_fstat_histograms.npz"),
                             **hists)
-    n_track = sum(1 for r in rows if r["mean_tracks_mu0"])
+    n_track = sum(1 for r in rows if r["mean_tracks_null_power_ratio"])
     return {"rows": rows, "csv": str(csv_path),
-            "channels_tracking_mu0": n_track, "channels_total": len(rows)}
+            "channels_tracking_null_power_ratio": n_track, "channels_total": len(rows)}
 
 
 # --------------------------------------------------------------------------
@@ -591,9 +591,9 @@ def fulldepth_tradeoff(metas: list[dict], out_dir: Path, runner: Runner, *,
         total_mhz = n_ch * CHIME_COARSE_MHZ
         headline = {
             "n_channels": n_ch,
-            "recovered_mhz_at_mu0": recovered_by_x.get(0.0),
+            "recovered_mhz_at_null_power_ratio": recovered_by_x.get(0.0),
             "total_affected_mhz": total_mhz,
-            "recovered_percent_at_mu0":
+            "recovered_percent_at_null_power_ratio":
                 (100.0 * recovered_by_x[0.0] / total_mhz
                  if total_mhz and 0.0 in recovered_by_x else None),
             "control_run_dir": str(control_dir) if control_dir else None,
@@ -1062,10 +1062,10 @@ def main(argv: list[str] | None = None) -> int:
             runner.say(f"[h0] full-depth table failed: {exc}")
         detail = []
         if h0fd:
-            detail.append(f"full-depth {h0fd['channels_tracking_mu0']}/"
-                          f"{h0fd['channels_total']} track mu0")
+            detail.append(f"full-depth {h0fd['channels_tracking_null_power_ratio']}/"
+                          f"{h0fd['channels_total']} track null_power_ratio")
         if h0:
-            detail.append(f"stack {h0['channels_tracking_mu0']}/"
+            detail.append(f"stack {h0['channels_tracking_null_power_ratio']}/"
                           f"{h0['channels_total']}")
         runner.record("h0", bool(h0fd or h0), "; ".join(detail) or "no table")
     else:
@@ -1128,11 +1128,11 @@ def main(argv: list[str] | None = None) -> int:
             survey_hours=args.survey_hours, formats=formats,
             keep_products=args.keep_perchannel_products)
         head = fd.get("headline") or {}
-        ok = not fd["failed_freq_ids"] and head.get("recovered_mhz_at_mu0") is not None
+        ok = not fd["failed_freq_ids"] and head.get("recovered_mhz_at_null_power_ratio") is not None
         detail = ""
-        if head.get("recovered_mhz_at_mu0") is not None:
-            detail = (f"recovered {head['recovered_mhz_at_mu0']:.2f} of "
-                      f"{head['total_affected_mhz']:.2f} MHz at tau=mu0 over "
+        if head.get("recovered_mhz_at_null_power_ratio") is not None:
+            detail = (f"recovered {head['recovered_mhz_at_null_power_ratio']:.2f} of "
+                      f"{head['total_affected_mhz']:.2f} MHz at tau=null_power_ratio over "
                       f"{head['n_channels']} channels")
         if fd["failed_freq_ids"]:
             detail += f"; FAILED freq_ids {fd['failed_freq_ids']}"
@@ -1260,7 +1260,7 @@ def main(argv: list[str] | None = None) -> int:
         lines.append(f"  survey span: {hours['survey_span_days']:.1f} days")
     if tradeoff_summary:
         op = tradeoff_summary.get("operating_point", {})
-        lines.append(f"  stack recovered bandwidth at tau=mu0: "
+        lines.append(f"  stack recovered bandwidth at tau=null_power_ratio: "
                      f"{op.get('recovered_mhz', float('nan')):.2f} MHz of "
                      f"{op.get('total_affected_mhz', float('nan')):.2f} MHz")
         if tradeoff_summary.get("control_floor_db") is not None:
@@ -1268,17 +1268,17 @@ def main(argv: list[str] | None = None) -> int:
                          f"{tradeoff_summary['control_floor_db']:.2f} dB")
     if fd and fd.get("headline"):
         h = fd["headline"]
-        if h.get("recovered_mhz_at_mu0") is not None:
+        if h.get("recovered_mhz_at_null_power_ratio") is not None:
             lines.append(
-                f"  FULL-DEPTH recovered bandwidth at tau=mu0: "
-                f"{h['recovered_mhz_at_mu0']:.2f} of "
+                f"  FULL-DEPTH recovered bandwidth at tau=null_power_ratio: "
+                f"{h['recovered_mhz_at_null_power_ratio']:.2f} of "
                 f"{h['total_affected_mhz']:.2f} MHz "
-                f"({h.get('recovered_percent_at_mu0', float('nan')):.1f}%) "
+                f"({h.get('recovered_percent_at_null_power_ratio', float('nan')):.1f}%) "
                 f"over {h['n_channels']} channels")
     if h0fd:
-        lines.append(f"  H0 full depth: {h0fd['channels_tracking_mu0']}/"
-                     f"{h0fd['channels_total']} channels track mu0 within "
-                     "|mu0-1|/3")
+        lines.append(f"  H0 full depth: {h0fd['channels_tracking_null_power_ratio']}/"
+                     f"{h0fd['channels_total']} channels track null_power_ratio within "
+                     "|null_power_ratio-1|/3")
     text = "\n".join(lines) + "\n"
     (out_dir / "RESULTS_SUMMARY.txt").write_text(text, encoding="utf-8")
     runner.say("\n" + text)

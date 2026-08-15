@@ -88,7 +88,7 @@ def test_summarize_result_json_skips_histograms_for_sweep_by_default(tmp_path) -
 
     assert summary["fstat_histogram_png"] is None
     assert summary["snr_shelf_histogram_png"] is None
-    assert "multiple requested_snr_shelf_db" in summary["histograms_skipped_reason"]
+    assert "multiple requested_data_shelf_snr_db" in summary["histograms_skipped_reason"]
     assert not (output_dir / FSTAT_HISTOGRAM_NAME).exists()
     assert not (output_dir / SNR_SHELF_HISTOGRAM_NAME).exists()
 

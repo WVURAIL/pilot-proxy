@@ -65,7 +65,7 @@ ax.set_xlabel("fine bins from the target (bin width 3051.76 Hz)")
 ax.set_ylabel(r"$|W(f)|^2$ [dB rel. target peak]")
 ax.set_title(f"(a) int4 weight-term responses, K=128 "
              f"(ch18; target/guard/reference cells shaded; "
-             f"$\\mu_0$={lay18['mu0']:.4f})", fontsize=10)
+             f"$\\mu_0$={lay18['null_power_ratio']:.4f})", fontsize=10)
 ax.legend(fontsize=8, loc="upper right")
 ax.grid(color="0.93", lw=0.5)
 ax.set_axisbelow(True)

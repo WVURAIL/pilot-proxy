@@ -2,9 +2,9 @@
 """Exact-integer threshold constants for the measured zero points.
 
 Kernel form (unchanged): the shipped ceiling rule is
-    mask_hi :  p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum
-i.e. pt*Q > P*pr with P/Q = mu0/2. Deploying the measured zero point is a
-CONSTANTS SWAP: replace (P,Q) = (target_norm_sq, ref_norm_sum_sq) with a
+    mask_hi :  p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum
+i.e. pt*Q > P*pr with P/Q = null_power_ratio/2. Deploying the measured zero point is a
+CONSTANTS SWAP: replace (P,Q) = (target_norm_sq, reference_norm_sum_sq) with a
 rational approximation of mu_hat/2. The band floor is the same compare with
 its own (P_lo, Q_lo) and the opposite sense:
     mask_lo :  p_target * Q_lo < P_lo * p_ref_sum
@@ -12,7 +12,7 @@ Untrusted channels (ch24, ch30) keep the exact analytic constants and no
 floor (one-sided manifest ceiling, matching the adopted operating point).
 
 Verification: the integer masks are compared frame-for-frame against the
-float rules (F > mu_hat, F < mu_hat - 12e-3*mu0) on all perframe data.
+float rules (F > mu_hat, F < mu_hat - 12e-3*null_power_ratio) on all perframe data.
 """
 import csv
 import sys
@@ -34,10 +34,10 @@ rows = []
 worst_bits = 0
 for ch in chans:
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     trusted = s["zero_point_trusted"] == "1"
-    scal = PF[f"ch{ch}_scalars"]          # [mu0, tns, rnss, fid, ...]
+    scal = PF[f"ch{ch}_scalars"]          # [null_power_ratio, tns, rnss, fid, ...]
     tns, rnss = int(scal[1]), int(scal[2])
     pt = PF[f"ch{ch}_p_target_u64"]
     pr = PF[f"ch{ch}_p_ref_sum_u64"]
@@ -49,7 +49,7 @@ for ch in chans:
     if trusted:
         hf = Fraction(mu_hat / 2.0).limit_denominator(DEN_LIMIT)
         P, Q = hf.numerator, hf.denominator
-        tau_lo = mu_hat - 12e-3 * mu0
+        tau_lo = mu_hat - 12e-3 * null_power_ratio
         lf = Fraction(tau_lo / 2.0).limit_denominator(DEN_LIMIT)
         P_lo, Q_lo = lf.numerator, lf.denominator
     else:
@@ -60,7 +60,7 @@ for ch in chans:
     ptQ = pt.astype(object) * Q
     Ppr = pr.astype(object) * P
     m_hi_int = np.array([a > b for a, b in zip(ptQ, Ppr)]) & ok
-    mu_cmp = mu_hat if trusted else mu0
+    mu_cmp = mu_hat if trusted else null_power_ratio
     m_hi_flt = ok & (f > mu_cmp)
     mm_hi = int((m_hi_int != m_hi_flt).sum())
 
@@ -75,7 +75,7 @@ for ch in chans:
     bits = max(int(pt.max()) * max(Q, Q_lo) if trusted else int(pt.max()) * Q,
                int(pr.max()) * max(P, P_lo)).bit_length()
     worst_bits = max(worst_bits, bits)
-    err_hi = abs(2 * P / Q - (mu_hat if trusted else mu0))
+    err_hi = abs(2 * P / Q - (mu_hat if trusted else null_power_ratio))
     err_lo = abs(2 * P_lo / Q_lo - tau_lo) if trusted else 0.0
     rows.append(dict(ch=ch, fid=int(float(s["freq_id"])), trusted=int(trusted),
                      P=P, Q=Q, P_lo=P_lo, Q_lo=Q_lo, err_hi=err_hi,

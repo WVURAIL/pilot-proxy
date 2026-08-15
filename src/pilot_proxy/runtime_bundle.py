@@ -16,7 +16,7 @@ from pilot_proxy.detector_contract import (
     build_chime_detector_contract,
     detector_contract_sha256,
     input_coordinate_system_for_weight_coordinate,
-    norm_corrected_mu0,
+    null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
     weight_term_norms_sq,
 )
@@ -286,7 +286,7 @@ def _validate_runtime_profile_offsets(
         # but when declared they must match the exact integer norms recomputed
         # from the bundled weight bytes, and the half-threshold rational must
         # be nt:(nl+nu).
-        if "target_norm_sq" in row or "ref_norm_sum_sq" in row:
+        if "target_norm_sq" in row or "reference_norm_sum_sq" in row:
             if 0 <= offset and offset + nbytes <= weights_size and nbytes > 0:
                 raw = weights_path.read_bytes()[offset : offset + nbytes]
                 packed = np.frombuffer(raw, dtype=np.int8).reshape(3, -1)
@@ -294,7 +294,7 @@ def _validate_runtime_profile_offsets(
                 got_nrs = int(got_nl + got_nu)
                 declared = {
                     "target_norm_sq": got_nt,
-                    "ref_norm_sum_sq": got_nrs,
+                    "reference_norm_sum_sq": got_nrs,
                     "positive_excess_half_threshold_num": got_nt,
                     "positive_excess_half_threshold_den": got_nrs,
                 }
@@ -307,14 +307,14 @@ def _validate_runtime_profile_offsets(
                             f"{row[key]!r} but the bundled weights give "
                             f"{expected_value}",
                         )
-                if "mu0" in row and got_nrs > 0:
-                    expected_mu0 = norm_corrected_mu0(got_nt, got_nrs)
-                    if abs(float(row["mu0"]) - expected_mu0) > 1e-12:
+                if "null_power_ratio" in row and got_nrs > 0:
+                    expected_null_power_ratio = null_power_ratio_from_weight_norms(got_nt, got_nrs)
+                    if abs(float(row["null_power_ratio"]) - expected_null_power_ratio) > 1e-12:
                         _add_error(
                             errors,
-                            "pilot_profiles.mu0",
-                            f"profile row {index} declares mu0={row['mu0']!r} "
-                            f"but the bundled weights give {expected_mu0!r}",
+                            "pilot_profiles.null_power_ratio",
+                            f"profile row {index} declares null_power_ratio={row['null_power_ratio']!r} "
+                            f"but the bundled weights give {expected_null_power_ratio!r}",
                         )
         ranges.append((offset, offset + nbytes, index))
     for previous, current in zip(sorted(ranges), sorted(ranges)[1:]):
@@ -940,11 +940,11 @@ def export_runtime_weight_bundle(
                 "weight_bank_nbytes": int(profile_nbytes),
                 # Exact integer weight-norm zero-point for this channel. The
                 # kernel's rational half-threshold half_num:half_den = nt:(nl+nu)
-                # sets the mask threshold at F = mu0 (the norm-corrected
+                # sets the mask threshold at F = null_power_ratio (the norm-corrected
                 # positive-excess rule) with zero kernel changes.
                 "target_norm_sq": int(row_nt),
-                "ref_norm_sum_sq": row_nrs,
-                "mu0": float(norm_corrected_mu0(row_nt, row_nrs)),
+                "reference_norm_sum_sq": row_nrs,
+                "null_power_ratio": float(null_power_ratio_from_weight_norms(row_nt, row_nrs)),
                 "positive_excess_half_threshold_num": int(row_nt),
                 "positive_excess_half_threshold_den": row_nrs,
                 "reference_placement_status": str(

@@ -31,36 +31,41 @@ from pilot_proxy.detector_geometry import (  # noqa: E402
 )
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz  # noqa: E402
 from pilot_proxy.detector_contract import (
-    norm_corrected_positive_excess,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import (  # noqa: E402
     REFERENCE_LOWER_TERM_INDEX,
     REFERENCE_TARGET_TERM_INDEX,
     REFERENCE_UPPER_TERM_INDEX,
-    fstat_cpu_reference,
-    fstat_cpu_reference_packed,
+    coarse_power_ratio_cpu_reference,
+    coarse_power_ratio_cpu_reference_packed,
 )
 from pilot_proxy.detector_weights import DetectorWeightBank  # noqa: E402
 from pilot_proxy.dtv_units import (  # noqa: E402
     DB_LINEAR_BASE,
+    COARSE_POWER_RATIO_SCALE,
     DB_POWER_FACTOR,
     DEFAULT_THRESHOLD_MAX_DENOMINATOR,
     DTV_BANDWIDTH_HZ,
     EFFECTIVE_BIN_BW_HZ,
-    NO_PILOT_EXCESS_FSTAT,
+    UNIT_DATA_SHELF_POWER,
+    UNIT_NORMALIZED_POWER_RATIO,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
     composite_to_data_shelf_snr_correction_db,
-    fstat_raw_to_pnr_bin_db,
-    fstat_num_den_to_fstat_level_db,
-    fstat_num_den_to_pilot_excess_linear,
-    fstat_num_den_to_pnr_bin_db,
-    fstat_num_den_to_raw,
+    coarse_power_ratio_to_raw_pilot_excess_db,
+    power_terms_to_normalized_coarse_power_ratio_db,
+    power_terms_to_raw_pilot_excess,
+    normalized_pilot_excess_to_db,
+    normalize_coarse_power_ratio,
+    normalized_coarse_power_ratio_to_pilot_excess,
+    power_terms_to_normalized_pilot_excess,
+    power_terms_to_coarse_power_ratio,
     pilot_to_data_power_ratio,
-    pnr_bin_db_to_snr_shelf_db,
-    pnr_bin_to_snr_shelf_metadata,
-    snr_shelf_threshold_fields,
+    pilot_excess_db_to_data_shelf_snr_db,
+    pilot_excess_to_data_shelf_metadata,
+    data_shelf_snr_threshold_fields,
 )
 from pilot_proxy.json_utils import write_json_strict  # noqa: E402
 from pilot_proxy.kernel import FStatKernel  # noqa: E402
@@ -347,7 +352,7 @@ def _resolve_rf_center_hz(args: argparse.Namespace) -> float:
 
 
 def _requested_snr_shelf_values(args: argparse.Namespace) -> list[float]:
-    values = [float(v) for v in args.requested_snr_shelf_db or []]
+    values = [float(v) for v in args.requested_data_shelf_snr_db or []]
     if args.snr_start_db is not None:
         if args.snr_stop_db is None or args.snr_step_db is None:
             raise SystemExit(
@@ -556,14 +561,14 @@ def _cpu_reference_measurements(
 ) -> dict[str, Any]:
     """CPU exact-integer sibling of ``_kernel_measurements``.
 
-    Uses the validated CPU reference (``fstat_cpu_reference_packed``) for the
+    Uses the validated CPU reference (``coarse_power_ratio_cpu_reference_packed``) for the
     power sums and Python-integer arithmetic for the rational-half threshold
     decision, so the fields are the kernel's semantics without a GPU. The
     kernel <-> reference equivalence itself is CI-gated by the kernel parity
     suite; a small same-seed GPU spot check ties a CPU-produced sweep to the
     deployed kernel (see docs/PUBLICATION_VALIDATION.md, item 2).
     """
-    fstat, sums = fstat_cpu_reference_packed(packed, weights, int(bits))
+    fstat, sums = coarse_power_ratio_cpu_reference_packed(packed, weights, int(bits))
     p_target = int(round(float(sums[0])))
     p_ref_lower = int(round(float(sums[1])))
     p_ref_upper = int(round(float(sums[2])))
@@ -610,20 +615,43 @@ def _measurements_from_powers(
 ) -> dict[str, Any]:
     """Backend-agnostic measurement fields from the three integer powers."""
     p_ref_sum = int(p_ref_lower + p_ref_upper)
-    fstat_raw = float(fstat_num_den_to_raw(p_target, p_ref_sum))
-    fstat_level_db = float(fstat_num_den_to_fstat_level_db(p_target, p_ref_sum))
-    pilot_excess = float(fstat_num_den_to_pilot_excess_linear(p_target, p_ref_sum))
-    pnr_bin_db = float(fstat_num_den_to_pnr_bin_db(p_target, p_ref_sum))
-    snr_shelf_db = float(
-        pnr_bin_db_to_snr_shelf_db(
-            pnr_bin_db,
-            pilot_below_data_db=float(pilot_below_data_db),
-            bin_enbw_hz=float(bin_enbw_hz),
-            dtv_bandwidth_hz=float(dtv_bandwidth_hz),
-            pilot_capture_efficiency=float(pilot_capture_efficiency),
-        )
+    coarse_power_ratio = float(
+        power_terms_to_coarse_power_ratio(p_target, p_ref_sum)
+    )
+    raw_pilot_excess = float(
+        power_terms_to_raw_pilot_excess(p_target, p_ref_sum)
     )
     _nt, _nl, _nu = weight_term_norms_sq(np.asarray(weights, dtype=np.int8))
+    normalized_coarse_power_ratio_db = float(
+        power_terms_to_normalized_coarse_power_ratio_db(
+            p_target,
+            p_ref_sum,
+            target_norm_sq=_nt,
+            reference_norm_sum_sq=_nl + _nu,
+        )
+    )
+    normalized_pilot_excess = float(
+        power_terms_to_normalized_pilot_excess(
+            p_target,
+            p_ref_sum,
+            target_norm_sq=_nt,
+            reference_norm_sum_sq=_nl + _nu,
+        )
+    )
+    pilot_excess_db = float(
+        normalized_pilot_excess_to_db(normalized_pilot_excess)
+    )
+    estimated_data_shelf_snr_db = float(
+        pilot_excess_db_to_data_shelf_snr_db(
+            pilot_excess_db,
+            pilot_below_data_db=float(
+                pilot_below_data_db
+            ),
+            bin_enbw_hz=float(bin_enbw_hz),
+            pilot_capture_efficiency=float(pilot_capture_efficiency),
+            dtv_bandwidth_hz=float(dtv_bandwidth_hz),
+        )
+    )
     out = {
         "diagnostic_raw_float32": diagnostic_float,
         "diagnostic_level_db_float32": _positive_to_db(diagnostic_float),
@@ -631,16 +659,16 @@ def _measurements_from_powers(
         "p_ref_lower_u64": p_ref_lower,
         "p_ref_upper_u64": p_ref_upper,
         "p_ref_sum_u64": p_ref_sum,
-        "fstat_raw": fstat_raw,
-        "fstat_level_db": fstat_level_db,
-        "pilot_excess_linear": pilot_excess,
-        "pnr_bin_db": pnr_bin_db,
-        "estimated_snr_shelf_db": snr_shelf_db,
-        "positive_excess": norm_corrected_positive_excess(
+        "coarse_power_ratio": coarse_power_ratio,
+        "normalized_coarse_power_ratio_db": normalized_coarse_power_ratio_db,
+        "raw_pilot_excess": raw_pilot_excess,
+        "pilot_excess_db": pilot_excess_db,
+        "estimated_data_shelf_snr_db": estimated_data_shelf_snr_db,
+        "normalized_positive_excess_decision": normalized_positive_excess(
             p_target,
             p_ref_sum,
             target_norm_sq=_nt,
-            ref_norm_sum_sq=_nl + _nu,
+            reference_norm_sum_sq=_nl + _nu,
         ),
     }
     if threshold is not None:
@@ -713,7 +741,7 @@ def _evaluate_one_trial(
     channel_index: int,
     n_blocks: int,
     threshold: dict[str, Any] | None,
-    requested_snr_shelf_db: float,
+    requested_data_shelf_snr_db: float,
     requested_composite_atsc_snr_db: float,
     pilot_data_ratio: float,
     frequency_offset_hz: float,
@@ -738,7 +766,7 @@ def _evaluate_one_trial(
             if args.save_noisy_iq:
                 noise_iq_file = noisy_iq_dir / (
                     "snr_shelf_"
-                    f"{_safe_snr_label(float(requested_snr_shelf_db))}_"
+                    f"{_safe_snr_label(float(requested_data_shelf_snr_db))}_"
                     "freq_offset_"
                     f"{_safe_snr_label(float(frequency_offset_hz))}_hz_"
                     f"trial_{trial:04d}_feed_{feed_index:04d}_"
@@ -826,9 +854,9 @@ def _evaluate_one_trial(
         combined_signal_power / realized_in_band_noise_power
     )
     measured_data_shelf_power = float(
-        combined_signal_power / (NO_PILOT_EXCESS_FSTAT + pilot_data_ratio)
+        combined_signal_power / (UNIT_DATA_SHELF_POWER + pilot_data_ratio)
     )
-    measured_truth_snr_shelf_db = _positive_to_db(
+    measured_truth_data_shelf_snr_db = _positive_to_db(
         measured_data_shelf_power / realized_in_band_noise_power
     )
 
@@ -862,14 +890,36 @@ def _evaluate_one_trial(
         detector_window_samples=int(args.detector_window_samples),
         spectral_sense=str(args.spectral_sense),
     )
-    cpu_float_fstat, cpu_float_powers = fstat_cpu_reference(
+    cpu_float_fstat, cpu_float_powers = coarse_power_ratio_cpu_reference(
         cpu_float_rows,
         cpu_float_weights,
     )
-    cpu_float_pnr_bin_db = float(fstat_raw_to_pnr_bin_db(cpu_float_fstat))
-    cpu_float_estimated_snr_shelf_db = float(
-        pnr_bin_db_to_snr_shelf_db(
-            cpu_float_pnr_bin_db,
+    cpu_float_target_norm_sq = float(
+        np.sum(np.abs(cpu_float_weights[REFERENCE_TARGET_TERM_INDEX]) ** 2)
+    )
+    cpu_float_reference_norm_sum_sq = float(
+        np.sum(np.abs(cpu_float_weights[REFERENCE_LOWER_TERM_INDEX]) ** 2)
+        + np.sum(np.abs(cpu_float_weights[REFERENCE_UPPER_TERM_INDEX]) ** 2)
+    )
+    cpu_float_null_power_ratio = float(
+        COARSE_POWER_RATIO_SCALE
+        * cpu_float_target_norm_sq
+        / cpu_float_reference_norm_sum_sq
+    )
+    cpu_float_normalized_ratio = normalize_coarse_power_ratio(
+        cpu_float_fstat,
+        cpu_float_null_power_ratio,
+    )
+    cpu_float_pilot_excess_db = float(
+        normalized_pilot_excess_to_db(
+            normalized_coarse_power_ratio_to_pilot_excess(
+                cpu_float_normalized_ratio
+            )
+        )
+    )
+    cpu_float_estimated_data_shelf_snr_db = float(
+        pilot_excess_db_to_data_shelf_snr_db(
+            cpu_float_pilot_excess_db,
             pilot_below_data_db=float(args.pilot_below_data_db),
             bin_enbw_hz=float(args.bin_enbw_hz),
             dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
@@ -894,7 +944,7 @@ def _evaluate_one_trial(
         scale=scale,
         spectral_sense=str(args.spectral_sense),
     )
-    cpu_packed_fstat, _ = fstat_cpu_reference_packed(packed, weights, int(args.bits))
+    cpu_packed_fstat, _ = coarse_power_ratio_cpu_reference_packed(packed, weights, int(args.bits))
     if str(getattr(args, "detector_backend", "cuda")) == "cpu-reference":
         gpu = _cpu_reference_measurements(
             packed=packed,
@@ -918,15 +968,15 @@ def _evaluate_one_trial(
             dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
             threshold=threshold,
         )
-    estimated_snr_shelf_db = float(gpu["estimated_snr_shelf_db"])
+    estimated_data_shelf_snr_db = float(gpu["estimated_data_shelf_snr_db"])
     row = {
         "detector_backend": str(getattr(args, "detector_backend", "cuda")),
-        "requested_snr_shelf_db": float(requested_snr_shelf_db),
+        "requested_data_shelf_snr_db": float(requested_data_shelf_snr_db),
         "requested_composite_atsc_snr_db": float(requested_composite_atsc_snr_db),
         "frequency_offset_hz": float(frequency_offset_hz),
         "channel_gain_db": float(args.channel_gain_db),
         "channel_phase_deg": float(args.channel_phase_deg),
-        "measured_truth_snr_shelf_db": measured_truth_snr_shelf_db,
+        "measured_truth_data_shelf_snr_db": measured_truth_data_shelf_snr_db,
         "measured_truth_composite_atsc_snr_db": measured_truth_composite_atsc_snr_db,
         "measured_data_shelf_power": measured_data_shelf_power,
         "measured_composite_atsc_power": float(combined_signal_power),
@@ -938,28 +988,28 @@ def _evaluate_one_trial(
         "measured_in_band_noise_power_per_feed_mean": float(
             np.mean(realized_in_band_noise_power_by_feed)
         ),
-        "fstat_raw": float(gpu["fstat_raw"]),
-        "fstat_level_db": float(gpu["fstat_level_db"]),
-        "pilot_excess_linear": float(gpu["pilot_excess_linear"]),
-        "pnr_bin_db": float(gpu["pnr_bin_db"]),
-        "estimated_snr_shelf_db": estimated_snr_shelf_db,
-        "gpu_estimated_snr_shelf_db": estimated_snr_shelf_db,
-        "snr_error_db": estimated_snr_shelf_db - measured_truth_snr_shelf_db,
+        "coarse_power_ratio": float(gpu["coarse_power_ratio"]),
+        "normalized_coarse_power_ratio_db": float(gpu["normalized_coarse_power_ratio_db"]),
+        "raw_pilot_excess": float(gpu["raw_pilot_excess"]),
+        "pilot_excess_db": float(gpu["pilot_excess_db"]),
+        "estimated_data_shelf_snr_db": estimated_data_shelf_snr_db,
+        "gpu_estimated_data_shelf_snr_db": estimated_data_shelf_snr_db,
+        "snr_error_db": estimated_data_shelf_snr_db - measured_truth_data_shelf_snr_db,
         "p_target_u64": int(gpu["p_target_u64"]),
         "p_ref_lower_u64": int(gpu["p_ref_lower_u64"]),
         "p_ref_upper_u64": int(gpu["p_ref_upper_u64"]),
         "p_ref_sum_u64": int(gpu["p_ref_sum_u64"]),
-        "positive_excess": int(gpu["positive_excess"]),
+        "normalized_positive_excess_decision": int(gpu["normalized_positive_excess_decision"]),
         "diagnostic_raw_float32": float(gpu["diagnostic_raw_float32"]),
         "diagnostic_level_db_float32": float(gpu["diagnostic_level_db_float32"]),
-        "cpu_float_fstat_raw": float(cpu_float_fstat),
+        "cpu_float_coarse_power_ratio": float(cpu_float_fstat),
         "cpu_float_p_target": float(cpu_float_powers[REFERENCE_TARGET_TERM_INDEX]),
         "cpu_float_p_ref_lower": float(cpu_float_powers[REFERENCE_LOWER_TERM_INDEX]),
         "cpu_float_p_ref_upper": float(cpu_float_powers[REFERENCE_UPPER_TERM_INDEX]),
-        "cpu_float_pnr_bin_db": cpu_float_pnr_bin_db,
-        "cpu_float_estimated_snr_shelf_db": cpu_float_estimated_snr_shelf_db,
+        "cpu_float_pilot_excess_db": cpu_float_pilot_excess_db,
+        "cpu_float_estimated_data_shelf_snr_db": cpu_float_estimated_data_shelf_snr_db,
         "cpu_float_snr_error_db": (
-            cpu_float_estimated_snr_shelf_db - measured_truth_snr_shelf_db
+            cpu_float_estimated_data_shelf_snr_db - measured_truth_data_shelf_snr_db
         ),
         "trial": int(trial),
         "num_input_streams": int(args.num_input_streams),
@@ -985,20 +1035,20 @@ def _evaluate_one_trial(
             math.sqrt(mean_requested_noise_power / COMPLEX_COMPONENT_COUNT)
         ),
         "quantization_scale": float(scale),
-        "cpu_fstat_raw": float(cpu_packed_fstat),
-        "cpu_packed_fstat_raw": float(cpu_packed_fstat),
-        "cpu_gpu_abs_diff": abs(float(gpu["fstat_raw"]) - float(cpu_packed_fstat)),
+        "cpu_coarse_power_ratio": float(cpu_packed_fstat),
+        "cpu_packed_coarse_power_ratio": float(cpu_packed_fstat),
+        "cpu_gpu_abs_diff": abs(float(gpu["coarse_power_ratio"]) - float(cpu_packed_fstat)),
         "cpu_float_gpu_snr_diff_db": (
-            cpu_float_estimated_snr_shelf_db - estimated_snr_shelf_db
+            cpu_float_estimated_data_shelf_snr_db - estimated_data_shelf_snr_db
         ),
     }
     if threshold is not None:
         row.update(
             {
                 "mask": int(gpu["mask"]),
-                "threshold_snr_shelf_db": float(threshold["threshold_snr_shelf_db"]),
-                "threshold_pnr_bin_db": float(threshold["threshold_pnr_bin_db"]),
-                "threshold_fstat_raw": float(threshold["threshold_fstat_raw"]),
+                "threshold_data_shelf_snr_db": float(threshold["threshold_data_shelf_snr_db"]),
+                "threshold_pilot_excess_db": float(threshold["threshold_pilot_excess_db"]),
+                "threshold_coarse_power_ratio": float(threshold["threshold_coarse_power_ratio"]),
                 "threshold_half_num": int(threshold["threshold_half_num"]),
                 "threshold_half_den": int(threshold["threshold_half_den"]),
                 "rational_overflow_count": int(gpu["rational_overflow_count"]),
@@ -1040,12 +1090,12 @@ def _detection_rate_fields(group: list[dict]) -> dict:
     """Detection-rate summary fields with Wilson 95% bounds for one group."""
     fields: dict = {}
     n = len(group)
-    if n and all("positive_excess" in row for row in group):
-        detected = sum(int(row["positive_excess"]) for row in group)
+    if n and all("normalized_positive_excess_decision" in row for row in group):
+        detected = sum(int(row["normalized_positive_excess_decision"]) for row in group)
         lo, hi = wilson_interval(detected, n)
-        fields["positive_excess_detection_rate"] = detected / n
-        fields["positive_excess_detection_rate_wilson95_lo"] = lo
-        fields["positive_excess_detection_rate_wilson95_hi"] = hi
+        fields["normalized_positive_excess_detection_rate"] = detected / n
+        fields["normalized_positive_excess_detection_rate_wilson95_lo"] = lo
+        fields["normalized_positive_excess_detection_rate_wilson95_hi"] = hi
     if n and all("mask" in row for row in group):
         detected = sum(int(row["mask"]) for row in group)
         lo, hi = wilson_interval(detected, n)
@@ -1066,31 +1116,31 @@ def _summarize_rows(
     """Summarize validation rows by requested SNR and frequency offset."""
     summary_rows: list[dict[str, Any]] = []
     for frequency_offset_hz in frequency_offset_values:
-        for requested_snr_shelf_db in requested_values:
+        for requested_data_shelf_snr_db in requested_values:
             group = [
                 row
                 for row in rows
-                if row["requested_snr_shelf_db"] == float(requested_snr_shelf_db)
+                if row["requested_data_shelf_snr_db"] == float(requested_data_shelf_snr_db)
                 and row["frequency_offset_hz"] == float(frequency_offset_hz)
             ]
             if not group:
                 continue
             estimates = np.asarray(
-                [row["estimated_snr_shelf_db"] for row in group],
+                [row["estimated_data_shelf_snr_db"] for row in group],
                 dtype=np.float64,
             )
             errors = np.asarray(
                 [row["snr_error_db"] for row in group],
                 dtype=np.float64,
             )
-            fstats = np.asarray([row["fstat_raw"] for row in group], dtype=np.float64)
+            fstats = np.asarray([row["coarse_power_ratio"] for row in group], dtype=np.float64)
             fstat_levels = np.asarray(
-                [row["fstat_level_db"] for row in group],
+                [row["normalized_coarse_power_ratio_db"] for row in group],
                 dtype=np.float64,
             )
-            pnr_bin = np.asarray([row["pnr_bin_db"] for row in group], dtype=np.float64)
+            pnr_bin = np.asarray([row["pilot_excess_db"] for row in group], dtype=np.float64)
             truth_shelf = np.asarray(
-                [row["measured_truth_snr_shelf_db"] for row in group],
+                [row["measured_truth_data_shelf_snr_db"] for row in group],
                 dtype=np.float64,
             )
             truth_composite = np.asarray(
@@ -1098,7 +1148,7 @@ def _summarize_rows(
                 dtype=np.float64,
             )
             cpu_float_estimates = np.asarray(
-                [row["cpu_float_estimated_snr_shelf_db"] for row in group],
+                [row["cpu_float_estimated_data_shelf_snr_db"] for row in group],
                 dtype=np.float64,
             )
             cpu_float_errors = np.asarray(
@@ -1106,7 +1156,7 @@ def _summarize_rows(
                 dtype=np.float64,
             )
             cpu_float_fstats = np.asarray(
-                [row["cpu_float_fstat_raw"] for row in group],
+                [row["cpu_float_coarse_power_ratio"] for row in group],
                 dtype=np.float64,
             )
             diffs = np.asarray(
@@ -1119,31 +1169,31 @@ def _summarize_rows(
             )
             summary_rows.append(
                 {
-                    "requested_snr_shelf_db": float(requested_snr_shelf_db),
+                    "requested_data_shelf_snr_db": float(requested_data_shelf_snr_db),
                     "frequency_offset_hz": float(frequency_offset_hz),
                     "channel_gain_db": float(group[0]["channel_gain_db"]),
                     "channel_phase_deg": float(group[0]["channel_phase_deg"]),
                     "requested_composite_atsc_snr_db": float(
-                        float(requested_snr_shelf_db) - composite_to_shelf_db
+                        float(requested_data_shelf_snr_db) - composite_to_shelf_db
                     ),
-                    "measured_truth_snr_shelf_db_mean": _nanmean_or_nan(
+                    "measured_truth_data_shelf_snr_db_mean": _nanmean_or_nan(
                         truth_shelf
                     ),
                     "measured_truth_composite_atsc_snr_db_mean": _nanmean_or_nan(
                         truth_composite
                     ),
-                    "fstat_raw_mean": _nanmean_or_nan(fstats),
-                    "fstat_level_db_mean": _nanmean_or_nan(fstat_levels),
-                    "pnr_bin_db_mean": _nanmean_or_nan(pnr_bin),
-                    "estimated_snr_shelf_db_mean": _nanmean_or_nan(estimates),
-                    "estimated_snr_shelf_db_std": _nanstd_or_nan(estimates),
+                    "coarse_power_ratio_mean": _nanmean_or_nan(fstats),
+                    "normalized_coarse_power_ratio_db_mean": _nanmean_or_nan(fstat_levels),
+                    "pilot_excess_db_mean": _nanmean_or_nan(pnr_bin),
+                    "estimated_data_shelf_snr_db_mean": _nanmean_or_nan(estimates),
+                    "estimated_data_shelf_snr_db_std": _nanstd_or_nan(estimates),
                     "snr_error_db_mean": _nanmean_or_nan(errors),
                     "snr_error_db_std": _nanstd_or_nan(errors),
-                    "cpu_float_fstat_raw_mean": _nanmean_or_nan(cpu_float_fstats),
-                    "cpu_float_estimated_snr_shelf_db_mean": _nanmean_or_nan(
+                    "cpu_float_coarse_power_ratio_mean": _nanmean_or_nan(cpu_float_fstats),
+                    "cpu_float_estimated_data_shelf_snr_db_mean": _nanmean_or_nan(
                         cpu_float_estimates
                     ),
-                    "cpu_float_estimated_snr_shelf_db_std": _nanstd_or_nan(
+                    "cpu_float_estimated_data_shelf_snr_db_std": _nanstd_or_nan(
                         cpu_float_estimates
                     ),
                     "cpu_float_snr_error_db_mean": _nanmean_or_nan(
@@ -1179,7 +1229,7 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
         default=REPO_ROOT / "generated" / "dtv_snr_eval",
     )
     parser.add_argument(
-        "--requested-snr-shelf-db",
+        "--requested-data-shelf-snr-db",
         type=float,
         action="append",
         default=None,
@@ -1302,7 +1352,7 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
         type=float,
         default=PILOT_CAPTURE_EFFICIENCY,
     )
-    parser.add_argument("--threshold-snr-shelf-db", type=float, default=None)
+    parser.add_argument("--threshold-data-shelf-snr-db", type=float, default=None)
     parser.add_argument(
         "--max-denominator",
         type=int,
@@ -1472,15 +1522,22 @@ def run(args: argparse.Namespace) -> int:
     pilot_data_ratio = pilot_to_data_power_ratio(
         pilot_below_data_db=float(args.pilot_below_data_db)
     )
+    threshold_target_norm_sq, threshold_ref_lower_norm_sq, threshold_ref_upper_norm_sq = (
+        weight_term_norms_sq(np.asarray(weights, dtype=np.int8))
+    )
     threshold = None
-    if args.threshold_snr_shelf_db is not None:
-        threshold = snr_shelf_threshold_fields(
-            float(args.threshold_snr_shelf_db),
+    if args.threshold_data_shelf_snr_db is not None:
+        threshold = data_shelf_snr_threshold_fields(
+            float(args.threshold_data_shelf_snr_db),
             max_denominator=int(args.max_denominator),
             pilot_below_data_db=float(args.pilot_below_data_db),
             bin_enbw_hz=float(args.bin_enbw_hz),
             dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
             pilot_capture_efficiency=float(args.pilot_capture_efficiency),
+            target_norm_sq=int(threshold_target_norm_sq),
+            reference_norm_sum_sq=int(
+                threshold_ref_lower_norm_sq + threshold_ref_upper_norm_sq
+            ),
         )
     cpu_float_weights = _ideal_float_weights_from_layout(
         selected_weight_layout,
@@ -1508,9 +1565,9 @@ def run(args: argparse.Namespace) -> int:
             channel_input_iq_path = Path(channel_temp.name) / "channel_iq.cfile"
             channel_clean_iq.tofile(channel_input_iq_path)
         try:
-            for requested_snr_shelf_db in requested_values:
+            for requested_data_shelf_snr_db in requested_values:
                 requested_composite_atsc_snr_db = (
-                    float(requested_snr_shelf_db) - composite_to_shelf_db
+                    float(requested_data_shelf_snr_db) - composite_to_shelf_db
                 )
                 for trial in range(int(args.noise_trials)):
                     row = _evaluate_one_trial(
@@ -1531,7 +1588,7 @@ def run(args: argparse.Namespace) -> int:
                         channel_index=channel_index,
                         n_blocks=n_blocks,
                         threshold=threshold,
-                        requested_snr_shelf_db=float(requested_snr_shelf_db),
+                        requested_data_shelf_snr_db=float(requested_data_shelf_snr_db),
                         requested_composite_atsc_snr_db=(
                             requested_composite_atsc_snr_db
                         ),
@@ -1567,7 +1624,7 @@ def run(args: argparse.Namespace) -> int:
         writer.writeheader()
         writer.writerows(summary_rows)
 
-    conversion_metadata = pnr_bin_to_snr_shelf_metadata()
+    conversion_metadata = pilot_excess_to_data_shelf_metadata()
     conversion_metadata.update(
         {
             "bin_enbw_hz": float(args.bin_enbw_hz),
@@ -1657,9 +1714,9 @@ def run(args: argparse.Namespace) -> int:
                 "integrated over dtv_bandwidth_hz; pilot power is excluded "
                 "from the shelf truth."
             ),
-            "requested_snr_shelf_db_values": [float(v) for v in requested_values],
-            "requested_snr_shelf_db_min": float(DEFAULT_SNR_SWEEP_MIN_DB),
-            "requested_snr_shelf_db_max": float(DEFAULT_SNR_SWEEP_MAX_DB),
+            "requested_data_shelf_snr_db_values": [float(v) for v in requested_values],
+            "requested_data_shelf_snr_db_min": float(DEFAULT_SNR_SWEEP_MIN_DB),
+            "requested_data_shelf_snr_db_max": float(DEFAULT_SNR_SWEEP_MAX_DB),
             "composite_to_shelf_snr_correction_db": float(composite_to_shelf_db),
             "pilot_to_data_power_ratio": float(pilot_data_ratio),
         },
@@ -1684,11 +1741,11 @@ def run(args: argparse.Namespace) -> int:
         },
         "detector_output": {
             "fstat_definition": "F = 2*P_target/(P_ref_lower + P_ref_upper)",
-            "fstat_level_db_definition": "10*log10(F)",
-            "pilot_excess_linear_definition": "rho = F - 1",
-            "pnr_bin_db_definition": "10*log10(F - 1)",
-            "estimated_snr_shelf_db_definition": (
-                "pnr_bin_db - 10*log10(dtv_bandwidth_hz / bin_enbw_hz) "
+            "normalized_coarse_power_ratio_db_definition": "10*log10(F)",
+            "raw_pilot_excess_definition": "rho = F - 1",
+            "pilot_excess_db_definition": "10*log10(F - 1)",
+            "estimated_data_shelf_snr_db_definition": (
+                "pilot_excess_db - 10*log10(dtv_bandwidth_hz / bin_enbw_hz) "
                 "+ pilot_below_data_db - 10*log10(pilot_capture_efficiency)"
             ),
             "uses_exact_uint64_powers": True,
@@ -1739,34 +1796,34 @@ def run(args: argparse.Namespace) -> int:
             "conversion_metadata": conversion_metadata,
         },
         "csv_columns": {
-            "requested_snr_shelf_db": (
+            "requested_data_shelf_snr_db": (
                 "Requested ATSC data-shelf SNR relative to non-DTV noise."
             ),
             "frequency_offset_hz": (
                 "Baseband frequency offset applied before AWGN injection."
             ),
-            "measured_truth_snr_shelf_db": (
+            "measured_truth_data_shelf_snr_db": (
                 "Measured data-shelf truth from clean composite power, "
                 "pilot/data correction, and realized in-band noise."
             ),
             "measured_truth_composite_atsc_snr_db": (
                 "Measured clean composite ATSC IQ power over realized in-band noise."
             ),
-            "fstat_raw": "2*P_target/(P_ref_lower + P_ref_upper).",
-            "fstat_level_db": "10*log10(fstat_raw).",
-            "pilot_excess_linear": "fstat_raw - 1.",
-            "pnr_bin_db": "10*log10(pilot_excess_linear).",
-            "estimated_snr_shelf_db": "DTV shelf SNR inferred from pnr_bin_db.",
+            "coarse_power_ratio": "2*P_target/(P_ref_lower + P_ref_upper).",
+            "normalized_coarse_power_ratio_db": "10*log10(coarse_power_ratio).",
+            "raw_pilot_excess": "coarse_power_ratio - 1.",
+            "pilot_excess_db": "10*log10(raw_pilot_excess).",
+            "estimated_data_shelf_snr_db": "DTV shelf SNR inferred from pilot_excess_db.",
             "snr_error_db": (
-                "estimated_snr_shelf_db minus measured_truth_snr_shelf_db."
+                "estimated_data_shelf_snr_db minus measured_truth_data_shelf_snr_db."
             ),
-            "cpu_float_estimated_snr_shelf_db": (
+            "cpu_float_estimated_data_shelf_snr_db": (
                 "DTV shelf SNR from the unquantized CPU float reference."
             ),
             "cpu_float_snr_error_db": (
-                "cpu_float_estimated_snr_shelf_db minus measured truth."
+                "cpu_float_estimated_data_shelf_snr_db minus measured truth."
             ),
-            "cpu_fstat_raw": (
+            "cpu_coarse_power_ratio": (
                 "Packed NumPy CPU reference F-statistic for fixed-point "
                 "CPU/GPU agreement diagnostics."
             ),
@@ -1781,17 +1838,17 @@ def run(args: argparse.Namespace) -> int:
     print(f"Wrote {summary_csv_path}")
     print(f"Wrote {json_path}")
     print(
-        "frequency_offset_hz, requested_snr_shelf_db, "
-        "measured_truth_snr_shelf_db, cpu_float_snr_shelf_db, "
-        "gpu_snr_shelf_db, gpu_snr_error_db"
+        "frequency_offset_hz, requested_data_shelf_snr_db, "
+        "measured_truth_data_shelf_snr_db, cpu_float_estimated_data_shelf_snr_db, "
+        "gpu_estimated_data_shelf_snr_db, gpu_snr_error_db"
     )
     for row in summary_rows:
         print(
             f"{row['frequency_offset_hz']:10.3f}, "
-            f"{row['requested_snr_shelf_db']:8.3f}, "
-            f"{row['measured_truth_snr_shelf_db_mean']:8.3f}, "
-            f"{row['cpu_float_estimated_snr_shelf_db_mean']:8.3f}, "
-            f"{row['estimated_snr_shelf_db_mean']:8.3f}, "
+            f"{row['requested_data_shelf_snr_db']:8.3f}, "
+            f"{row['measured_truth_data_shelf_snr_db_mean']:8.3f}, "
+            f"{row['cpu_float_estimated_data_shelf_snr_db_mean']:8.3f}, "
+            f"{row['estimated_data_shelf_snr_db_mean']:8.3f}, "
             f"{row['snr_error_db_mean']:8.3f}"
         )
     return 0

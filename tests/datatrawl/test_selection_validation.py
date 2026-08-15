@@ -130,20 +130,20 @@ def _write_min_detector_product(
         frame_index=np.arange(int(n_frames), dtype=np.int64),
         p_target_u64=np.ones(shape, dtype=np.uint64),
         p_ref_sum_u64=np.full(shape, 2, dtype=np.uint64),
-        fstat_raw=np.ones(shape, dtype=np.float64),
-        fstat_level_db=np.zeros(shape, dtype=np.float64),
-        pnr_bin_db=np.full(shape, np.nan, dtype=np.float64),
-        snr_shelf_db=np.full(shape, np.nan, dtype=np.float64),
+        coarse_power_ratio=np.ones(shape, dtype=np.float64),
+        normalized_coarse_power_ratio_db=np.zeros(shape, dtype=np.float64),
+        pilot_excess_db=np.full(shape, np.nan, dtype=np.float64),
+        estimated_data_shelf_snr_db=np.full(shape, np.nan, dtype=np.float64),
         reject_mask=np.zeros(shape, dtype=np.uint8),
         valid=np.ones(shape, dtype=np.uint8),
         target_norm_sq=np.asarray([1], dtype=np.int64),
-        ref_norm_sum_sq=np.asarray([2], dtype=np.int64),
-        mu0=np.asarray([1.0], dtype=np.float64),
-        pilot_excess_corrected=np.zeros(shape, dtype=np.float64),
+        reference_norm_sum_sq=np.asarray([2], dtype=np.int64),
+        null_power_ratio=np.asarray([1.0], dtype=np.float64),
+        normalized_pilot_excess=np.zeros(shape, dtype=np.float64),
         baseband_power_linear=np.ones(shape, dtype=np.float64),
         integrated_spectrum_before_mask=np.zeros(int(nfft), dtype=np.float64),
         integrated_spectrum_after_mask=np.zeros(int(nfft), dtype=np.float64),
-        fstat_fine=np.zeros((int(n_frames), 0), dtype=np.float32),
+        fine_power_ratio=np.zeros((int(n_frames), 0), dtype=np.float32),
         fine_null_bulk_exceedance_fraction=np.full(
             shape, np.nan, dtype=np.float64
         ),
@@ -157,7 +157,7 @@ def _write_min_detector_product(
         weight_bank_sha256=np.asarray("bank"),
         weight_manifest_sha256=np.asarray("manifest"),
         weights_hash=np.asarray("weights"),
-        mask_rule=np.asarray("norm_corrected_positive_excess"),
+        mask_rule=np.asarray("normalized_positive_excess"),
         detector_version=np.asarray(
             "pilot-proxy/1.0.0 source=test kernel=2.3.0 "
             "kernel_sha256=test pilotproxy_per_pilot_product_v1 K=128"

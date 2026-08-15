@@ -14,9 +14,9 @@ import numpy as np
 
 from .atsc_channels import physical_channel_to_pilot_hz
 from .detector_contract import (
-    POSITIVE_EXCESS_MASK_RULE,
-    norm_corrected_mu0,
-    norm_corrected_positive_excess,
+    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
+    null_power_ratio_from_weight_norms,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from .detector_reference import (
@@ -31,11 +31,12 @@ from .dtv_units import (
     EFFECTIVE_BIN_BW_HZ,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
-    fstat_num_den_to_fstat_level_db,
-    fstat_num_den_to_pilot_excess_linear,
-    fstat_num_den_to_pnr_bin_db,
-    fstat_num_den_to_raw,
-    pnr_bin_db_to_snr_shelf_db,
+    power_terms_to_normalized_coarse_power_ratio_db,
+    power_terms_to_raw_pilot_excess,
+    normalized_pilot_excess_to_db,
+    power_terms_to_normalized_pilot_excess,
+    power_terms_to_coarse_power_ratio,
+    pilot_excess_db_to_data_shelf_snr_db,
 )
 from .json_utils import write_json_strict
 from .kernel import FStatKernel
@@ -173,12 +174,12 @@ def detect_packed_detector_input(
     packed: np.ndarray,
     weights: np.ndarray,
     kernel: FStatKernel,
-    emit_row_sums: bool = False,
+    emit_row_projections: bool = False,
 ) -> dict[str, Any]:
     """Run fixed-point detection and return exact power ratios.
 
     The positive-excess mask is norm-corrected: it compares against the H0
-    zero-point ``mu0 = 2*target_norm_sq/ref_norm_sum_sq`` implied by the
+    zero-point ``null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq`` implied by the
     supplied int4 weights (exactly, in integers), not against ``F > 1``.
     """
     _validate_kernel_inputs(packed=packed, weights=weights, kernel=kernel)
@@ -191,14 +192,14 @@ def detect_packed_detector_input(
     target_norm_sq, ref_lower_norm_sq, ref_upper_norm_sq = weight_term_norms_sq(
         weights
     )
-    ref_norm_sum_sq = int(ref_lower_norm_sq + ref_upper_norm_sq)
-    if target_norm_sq <= 0 or ref_norm_sum_sq <= 0:
+    reference_norm_sum_sq = int(ref_lower_norm_sq + ref_upper_norm_sq)
+    if target_norm_sq <= 0 or reference_norm_sum_sq <= 0:
         raise ValueError(
             "weights have a zero-power term (target_norm_sq="
-            f"{target_norm_sq}, ref_norm_sum_sq={ref_norm_sum_sq}); "
+            f"{target_norm_sq}, reference_norm_sum_sq={reference_norm_sum_sq}); "
             "an all-zero steering vector cannot form a detector."
         )
-    mu0 = norm_corrected_mu0(target_norm_sq, ref_norm_sum_sq)
+    null_power_ratio = null_power_ratio_from_weight_norms(target_norm_sq, reference_norm_sum_sq)
 
     import cupy as cp
 
@@ -219,40 +220,40 @@ def detect_packed_detector_input(
         raise ValueError("packed must be a 2D or 3D detector matrix array.")
 
     d_powers = cp.zeros((batch, REFERENCE_WEIGHT_TERMS), dtype=cp.uint64)
-    d_row_sums = None
-    if emit_row_sums:
-        if not kernel.supports_row_sums():
+    d_matched_filter_row_projections = None
+    if emit_row_projections:
+        if not kernel.supports_row_projections():
             raise RuntimeError(
                 "row sums requested but the kernel library does not expose "
                 "FStat_Compute_RowSums_I32; rebuild libfstatistic.so from the "
                 "v2 CUDA sources."
             )
-        d_row_sums = cp.zeros(
+        d_matched_filter_row_projections = cp.zeros(
             batch * REFERENCE_WEIGHT_TERMS * rows * 2, dtype=cp.int32
         )
     try:
         kernel.compute_powers_u64(handle, weights.ctypes.data, d_powers.data.ptr)
-        if d_row_sums is not None:
-            kernel.compute_row_sums_i32(
-                handle, weights.ctypes.data, d_row_sums.data.ptr
+        if d_matched_filter_row_projections is not None:
+            kernel.compute_row_projections_i32(
+                handle, weights.ctypes.data, d_matched_filter_row_projections.data.ptr
             )
         cp.cuda.Device().synchronize()
         powers = cp.asnumpy(d_powers).astype(np.uint64, copy=False)
     finally:
         kernel.destroy(handle)
 
-    row_sums = None
-    if d_row_sums is not None:
-        row_sums = d_row_sums.reshape(batch, REFERENCE_WEIGHT_TERMS, rows, 2)
+    matched_filter_row_projections = None
+    if d_matched_filter_row_projections is not None:
+        matched_filter_row_projections = d_matched_filter_row_projections.reshape(batch, REFERENCE_WEIGHT_TERMS, rows, 2)
         # Exact all-bin marginal identity against the deployed u64 powers.
         # Any mismatch means stage-1 output is corrupt; fail immediately.
-        from .fine_reduction import check_v1_marginal_identity, exact_marginal_powers
+        from .fine_reduction import check_coarse_power_marginal_identity, exact_coarse_power_by_term
 
         for b_idx in range(batch):
-            marginal = exact_marginal_powers(
-                row_sums[b_idx], num_weight_terms=REFERENCE_WEIGHT_TERMS, xp=cp
+            marginal = exact_coarse_power_by_term(
+                matched_filter_row_projections[b_idx], num_weight_terms=REFERENCE_WEIGHT_TERMS, xp=cp
             )
-            check_v1_marginal_identity(marginal, powers[b_idx])
+            check_coarse_power_marginal_identity(marginal, powers[b_idx])
 
     rows_out: list[dict[str, Any]] = []
     for idx in range(batch):
@@ -260,45 +261,63 @@ def detect_packed_detector_input(
         p_ref_lower = int(powers[idx, REFERENCE_LOWER_TERM_INDEX])
         p_ref_upper = int(powers[idx, REFERENCE_UPPER_TERM_INDEX])
         p_ref_sum = int(p_ref_lower + p_ref_upper)
-        fstat_raw = float(fstat_num_den_to_raw(p_target, p_ref_sum))
-        fstat_level_db = float(fstat_num_den_to_fstat_level_db(p_target, p_ref_sum))
-        pilot_excess = float(fstat_num_den_to_pilot_excess_linear(p_target, p_ref_sum))
-        pnr_bin_db = float(fstat_num_den_to_pnr_bin_db(p_target, p_ref_sum))
-        positive_excess = norm_corrected_positive_excess(
+        coarse_power_ratio = float(
+            power_terms_to_coarse_power_ratio(p_target, p_ref_sum)
+        )
+        normalized_coarse_power_ratio_db = float(
+            power_terms_to_normalized_coarse_power_ratio_db(
+                p_target,
+                p_ref_sum,
+                target_norm_sq=target_norm_sq,
+                reference_norm_sum_sq=reference_norm_sum_sq,
+            )
+        )
+        raw_pilot_excess = float(
+            power_terms_to_raw_pilot_excess(p_target, p_ref_sum)
+        )
+        normalized_pilot_excess = float(
+            power_terms_to_normalized_pilot_excess(
+                p_target,
+                p_ref_sum,
+                target_norm_sq=target_norm_sq,
+                reference_norm_sum_sq=reference_norm_sum_sq,
+            )
+        )
+        pilot_excess_db = float(
+            normalized_pilot_excess_to_db(normalized_pilot_excess)
+        )
+        positive_excess = normalized_positive_excess(
             p_target,
             p_ref_sum,
             target_norm_sq=target_norm_sq,
-            ref_norm_sum_sq=ref_norm_sum_sq,
-        )
-        pilot_excess_corrected = (
-            (fstat_raw / mu0) - 1.0 if p_ref_sum != 0 else 0.0
+            reference_norm_sum_sq=reference_norm_sum_sq,
         )
         rows_out.append(
             {
                 "block_index": int(idx),
                 "mask": positive_excess,
-                "positive_excess_mask": positive_excess,
+                "normalized_positive_excess_mask": positive_excess,
                 "p_target_u64": p_target,
                 "p_ref_lower_u64": p_ref_lower,
                 "p_ref_upper_u64": p_ref_upper,
                 "p_ref_sum_u64": p_ref_sum,
-                "fstat_raw": fstat_raw,
-                "fstat_level_db": fstat_level_db,
-                "pilot_excess_linear": pilot_excess,
-                "pilot_excess_corrected": float(pilot_excess_corrected),
-                "pnr_bin_db": pnr_bin_db,
+                "coarse_power_ratio": coarse_power_ratio,
+                "normalized_coarse_power_ratio_db": normalized_coarse_power_ratio_db,
+                "raw_pilot_excess": raw_pilot_excess,
+                "normalized_pilot_excess": float(normalized_pilot_excess),
+                "pilot_excess_db": pilot_excess_db,
             }
         )
 
     return {
         "batch": int(batch),
         "detector_rows_per_block": int(rows),
-        "row_sums": row_sums,
-        "mask_source": "positive_excess",
-        "mask_rule": POSITIVE_EXCESS_MASK_RULE,
+        "matched_filter_row_projections": matched_filter_row_projections,
+        "mask_source": "normalized_positive_excess_decision",
+        "mask_rule": NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
         "target_norm_sq": int(target_norm_sq),
-        "ref_norm_sum_sq": int(ref_norm_sum_sq),
-        "mu0": float(mu0),
+        "reference_norm_sum_sq": int(reference_norm_sum_sq),
+        "null_power_ratio": float(null_power_ratio),
         "results": rows_out,
     }
 
@@ -319,7 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=Path("generated/detections/detect.json"),
     )
     parser.add_argument(
-        "--threshold-snr-shelf-db",
+        "--threshold-data-shelf-snr-db",
         type=float,
         default=None,
         help=argparse.SUPPRESS,
@@ -537,9 +556,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     detection_results = cast(list[dict[str, Any]], detection["results"])
     for row in detection_results:
-        row["estimated_snr_shelf_db"] = float(
-            pnr_bin_db_to_snr_shelf_db(
-                row["pnr_bin_db"],
+        row["estimated_data_shelf_snr_db"] = float(
+            pilot_excess_db_to_data_shelf_snr_db(
+                row["pilot_excess_db"],
                 pilot_below_data_db=float(args.pilot_below_data_db),
                 bin_enbw_hz=float(args.bin_enbw_hz),
                 dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),
@@ -578,27 +597,27 @@ def main(argv: list[str] | None = None) -> int:
     write_json_strict(args.output_json, payload, indent=2)
     print(f"Wrote {args.output_json}")
     positive_excess_set = sum(
-        int(row["positive_excess_mask"]) for row in detection_results
+        int(row["normalized_positive_excess_mask"]) for row in detection_results
     )
-    fstat_raw_values = np.asarray(
-        [float(row["fstat_raw"]) for row in detection_results],
+    coarse_power_ratio_values = np.asarray(
+        [float(row["coarse_power_ratio"]) for row in detection_results],
         dtype=np.float64,
     )
     snr_shelf_values = np.asarray(
-        [float(row["estimated_snr_shelf_db"]) for row in detection_results],
+        [float(row["estimated_data_shelf_snr_db"]) for row in detection_results],
         dtype=np.float64,
     )
-    fstat_raw_mean = float(np.nanmean(fstat_raw_values))
-    snr_shelf_db_mean = float(np.nanmean(snr_shelf_values))
+    coarse_power_ratio_mean = float(np.nanmean(coarse_power_ratio_values))
+    estimated_data_shelf_snr_db_mean = float(np.nanmean(snr_shelf_values))
     print(
-        "blocks, positive_excess_set, fstat_raw_mean, "
-        "estimated_snr_shelf_db_mean"
+        "blocks, positive_excess_set, coarse_power_ratio_mean, "
+        "estimated_data_shelf_snr_db_mean"
     )
     print(
         f"{int(cast(int, detection['batch']))}, "
         f"{int(positive_excess_set)}, "
-        f"{fstat_raw_mean:.9g}, "
-        f"{snr_shelf_db_mean:.3f}"
+        f"{coarse_power_ratio_mean:.9g}, "
+        f"{estimated_data_shelf_snr_db_mean:.3f}"
     )
     return 0
 

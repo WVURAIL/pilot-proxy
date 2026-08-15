@@ -19,7 +19,7 @@ from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     WEIGHT_COORDINATE_RAW_INPUT,
     input_coordinate_system_for_weight_coordinate,
-    norm_corrected_mu0,
+    null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
     weight_term_norms_sq,
 )
@@ -579,7 +579,7 @@ def generate_weight_table_from_receiver_profile(
             bits_per_component=int(core.sample_bits_per_component),
         )
         # Exact integer squared norms of the packed (post-quantization) weight
-        # terms, recorded for provenance. mu0 = 2*nt/(nl+nu) is the flat-floor
+        # terms, recorded for provenance. null_power_ratio = 2*nt/(nl+nu) is the flat-floor
         # H0 zero-point of F; the norm-corrected positive-excess mask and the
         # kernel rational half-threshold nt:(nl+nu) divide it out.
         norm_nt, norm_nl, norm_nu = weight_term_norms_sq(
@@ -590,8 +590,8 @@ def generate_weight_table_from_receiver_profile(
         layout["target_norm_sq"] = int(norm_nt)
         layout["lower_reference_norm_sq"] = int(norm_nl)
         layout["upper_reference_norm_sq"] = int(norm_nu)
-        layout["ref_norm_sum_sq"] = int(norm_nl + norm_nu)
-        layout["mu0"] = float(norm_corrected_mu0(norm_nt, norm_nl + norm_nu))
+        layout["reference_norm_sum_sq"] = int(norm_nl + norm_nu)
+        layout["null_power_ratio"] = float(null_power_ratio_from_weight_norms(norm_nt, norm_nl + norm_nu))
         layouts.append(layout)
     return np.ascontiguousarray(table), layouts
 

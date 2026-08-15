@@ -8,7 +8,7 @@ Run on the CANFAR notebook session (venv active):
 WORK_DIR defaults to ~/pilot_proxy_runs/chime-pilots/_per_pilot.
 
 Outputs (written to the current directory):
-  h0_fulldepth.csv                per-channel mean F vs mu0 over ALL valid
+  h0_fulldepth.csv                per-channel mean F vs null_power_ratio over ALL valid
                                   frames (Fig. 4 / Table 3 inputs at depth)
   event_presence_signatures.npz   compact presence structure (freq_id list +
                                   per-signature bitmask counts) for offline
@@ -38,16 +38,16 @@ for p in paths:
         ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
         valid = np.asarray(z["valid"]).reshape(-1).astype(bool)
         rej = np.asarray(z["reject_mask"]).reshape(-1).astype(bool)
-        f = np.asarray(z["fstat_raw"]).reshape(-1)[valid]
+        f = np.asarray(z["coarse_power_ratio"]).reshape(-1)[valid]
         f = f[np.isfinite(f)]
-        mu0 = float(np.asarray(z["mu0"]).reshape(-1)[0])
+        null_power_ratio = float(np.asarray(z["null_power_ratio"]).reshape(-1)[0])
         ev = set(np.asarray(z["source_event_keys"]).reshape(-1)
                  .astype(str).tolist())
     n = f.size
     mean = float(f.mean()) if n else float("nan")
     sem = float(f.std(ddof=1) / np.sqrt(n)) if n > 1 else float("nan")
-    gap, bound = abs(mean - mu0), abs(mu0 - 1.0) / 3.0
-    rows.append((ch, fid, n, mean, sem, mu0, gap, bound,
+    gap, bound = abs(mean - null_power_ratio), abs(null_power_ratio - 1.0) / 3.0
+    rows.append((ch, fid, n, mean, sem, null_power_ratio, gap, bound,
                  bool(n and gap < bound),
                  float(rej.sum() / valid.sum()) if valid.any() else float("nan")))
     fids.append(fid)
@@ -55,16 +55,16 @@ for p in paths:
     events.append(ev)
 
 rows.sort()
-hdr = ("ch,freq_id,n_valid,mean_fstat,sem_fstat,mu0,abs_mean_minus_mu0,"
-       "bound_abs_mu0_minus_1_over_3,mean_tracks_mu0,mask_fraction_valid")
+hdr = ("ch,freq_id,n_valid,mean_fstat,sem_fstat,null_power_ratio,abs_mean_minus_null_power_ratio,"
+       "bound_abs_null_power_ratio_minus_1_over_3,mean_tracks_null_power_ratio,mask_fraction_valid")
 lines = [hdr] + [",".join(str(x) for x in r) for r in rows]
 Path("h0_fulldepth.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 print("Full-depth H0 zero-point table (all valid frames per channel):")
 print(f"{'ch':>3} {'fid':>4} {'n_valid':>8} {'meanF':>9} {'sem':>8} "
-      f"{'mu0':>8} {'|m-mu0|':>9} {'bound':>8} {'ok':>3} {'maskfrac':>8}")
-for ch, fid, n, mean, sem, mu0, gap, bound, ok, mf in rows:
-    print(f"{ch:>3} {fid:>4} {n:>8} {mean:>9.5f} {sem:>8.5f} {mu0:>8.5f} "
+      f"{'null_power_ratio':>8} {'|m-null_power_ratio|':>9} {'bound':>8} {'ok':>3} {'maskfrac':>8}")
+for ch, fid, n, mean, sem, null_power_ratio, gap, bound, ok, mf in rows:
+    print(f"{ch:>3} {fid:>4} {n:>8} {mean:>9.5f} {sem:>8.5f} {null_power_ratio:>8.5f} "
           f"{gap:>9.5f} {bound:>8.5f} {str(ok):>3} {mf:>8.4f}")
 
 # ---- exact subset search over observed presence signatures ---------------

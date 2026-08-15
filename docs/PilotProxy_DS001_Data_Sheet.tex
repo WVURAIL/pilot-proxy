@@ -93,7 +93,7 @@
 \newcommand{\field}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\dB}{\,\mathrm{dB}}
 
-% Single-sourced numeric specifications (versions, geometry, mu0 range,
+% Single-sourced numeric specifications (versions, geometry, null_power_ratio range,
 % digests). Regenerate with: python tools/generate_doc_specs.py
 \input{generated/specs.tex}
 
@@ -175,7 +175,7 @@ Power accumulation & \code{uint64} \\ \hline
 \multicolumn{2}{|c|}{\bfseries User-Facing Controls}\\ \hline
 Target selection & \code{physical_channel} or \code{dtv_pilot_mhz} selects precomputed weights \\ \hline
 Frame size & Matched to the correlator frame; CHIME F-engine target $2^{14}$ \\ \hline
-Synthetic threshold & \code{threshold_snr_shelf_db}; converted by evaluator host software \\ \hline
+Synthetic threshold & \code{threshold_data_shelf_snr_db}; converted by evaluator host software \\ \hline
 \multicolumn{2}{|c|}{\bfseries Reference Testbench}\\ \hline
 Reference ADC rate & 800 MS/s real input \\ \hline
 Reference band & 400-800 MHz \\ \hline
@@ -424,7 +424,7 @@ $F>\mu_0$ flag and the bit-exact marginal check of the fine path's inputs
 
 \section{Threshold Interpretation}
 
-For synthetic threshold tests, the user supplies \code{threshold_snr_shelf_db}. Host software converts this shelf-SNR threshold to the raw F-statistic coordinate and then to the rational half-threshold used by the kernel:
+For synthetic threshold tests, the user supplies \code{threshold_data_shelf_snr_db}. Host software converts this shelf-SNR threshold to the raw F-statistic coordinate and then to the rational half-threshold used by the kernel:
 
 \begin{align}
 \mathrm{PNR}_{\mathrm{bin,thr},dB} &= S_{\mathrm{shelf,thr},dB} - \mathrm{pilot\_below\_data\_db} + 10\log_{10}(B_{\mathrm{DTV}}/B_{\mathrm{bin}})+10\log_{10}(\eta_p),\\
@@ -515,7 +515,7 @@ false-alarm points leak weak channels, and an ROC-derived point such as
 the Youden maximum assumes equal costs, which masking does not have. The
 adopted deployed decision is instead the fine designated-set CFAR
 computed in the kernel, which holds the fixed false-alarm policy on the
-fine axis (\code{docs/DESIGN_DECISIONS.md}). Because \field{fstat_raw}
+fine axis (\code{docs/DESIGN_DECISIONS.md}). Because \field{coarse_power_ratio}
 and the fine spectrum are persisted per frame, previously recorded epochs
 can be re-scored offline under any such rule.
 
@@ -643,7 +643,7 @@ The repository provides separate Python, CPU, CUDA, and GNU Radio checks. A rele
   \item Receiver profiles define an adapter contract; they do not establish that a telescope pipeline has been deployed or validated.
   \item The CHIME mask uses $F>\mu_0$, where $\mu_0$ comes from fixed weight norms. It is not a threshold fitted to telescope null statistics, and no operational false-positive rate is claimed.
   \item The kernel measures pilot excess. It does not decode an ATSC transport stream or prove that every excess is DTV.
-  \item Fine products require a library that exposes the row-sum entry. \code{fine_products=auto} degrades with \field{fine_status=kernel_library_lacks_row_sums}; \code{fine_products=on} hard-fails on a stale library, which is the intended production behavior.
+  \item Fine products require a library that exposes the row-sum entry. \code{fine_products=auto} degrades with \field{fine_status=kernel_library_lacks_matched_filter_row_projections}; \code{fine_products=on} hard-fails on a stale library, which is the intended production behavior.
   \item On DTV-occupied channels, a real pilot at a nonzero frequency offset occupies non-designated fine bins; an elevated non-designated flag rate can therefore be signal rather than CFAR miscalibration. The stored fine spectrum resolves which.
   \item Standard conversion uses the ATSC 11.3 dB relationship. Any calibrated override must be recorded with the result that used it.
 \end{itemize}

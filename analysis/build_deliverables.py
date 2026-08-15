@@ -42,14 +42,14 @@ rows = []
 for r in h0:
     ch = int(r["physical_channel"])
     fid = int(r["freq_id"])
-    mu0 = float(r["mu0"])
+    null_power_ratio = float(r["null_power_ratio"])
     mean = float(r["mean_fstat"])
     sem = float(r["sem_fstat"])
     n = int(r["n_valid"])
     mf = float(r["mask_fraction_valid"])
     tdc = float(r["pilot_offset_from_dc_finebins"])
-    dev = mean / mu0 - 1.0
-    dev_sem = sem / mu0
+    dev = mean / null_power_ratio - 1.0
+    dev_sem = sem / null_power_ratio
     refs = [tdc - REF_OFF, tdc + REF_OFF]
     ref_dc = min(abs(x) for x in refs)
     ref_edge = min(HALF - abs(x) for x in refs)
@@ -60,7 +60,7 @@ for r in h0:
            "elevated" if dev > 3e-3 else "nominal")
     rows.append(dict(
         ch=ch, fid=fid, n_valid=n, hours=n * FRAME_S / 3600.0,
-        mu0=mu0, mean=mean, sem=sem, dev=dev, dev_sem=dev_sem,
+        null_power_ratio=null_power_ratio, mean=mean, sem=sem, dev=dev, dev_sem=dev_sem,
         mask_frac=mf, kept_frac=kept_frac,
         recovered_khz=kept_frac * COARSE_KHZ,
         in_stack=fid in kept_stack,
@@ -80,14 +80,14 @@ print(f"total processed exposure: {sum(r['hours'] for r in rows):.2f} h")
 with open(OUT / "table3_fulldepth.csv", "w", newline="") as fh:
     w = csv.writer(fh)
     w.writerow(["atsc_channel", "freq_id", "n_valid_frames", "exposure_hours",
-                "mu0", "mean_F", "sem_F", "dev_1e3", "dev_sem_1e3",
-                "mask_fraction", "kept_fraction", "recovered_khz_at_mu0",
+                "null_power_ratio", "mean_F", "sem_F", "dev_1e3", "dev_sem_1e3",
+                "mask_fraction", "kept_fraction", "recovered_khz_at_null_power_ratio",
                 "in_stack", "census_lines",
                 "pilot_offset_dc_bins", "min_ref_dist_dc_bins",
                 "min_ref_dist_edge_bins", "ref_wrapped", "class"])
     for r in rows:
         w.writerow([r["ch"], r["fid"], r["n_valid"], f"{r['hours']:.4f}",
-                    f"{r['mu0']:.6f}", f"{r['mean']:.6f}", f"{r['sem']:.6f}",
+                    f"{r['null_power_ratio']:.6f}", f"{r['mean']:.6f}", f"{r['sem']:.6f}",
                     f"{1e3*r['dev']:.3f}", f"{1e3*r['dev_sem']:.3f}",
                     f"{r['mask_frac']:.4f}", f"{r['kept_frac']:.4f}",
                     f"{r['recovered_khz']:.1f}",
@@ -99,8 +99,8 @@ with open(OUT / "table3_fulldepth.csv", "w", newline="") as fh:
 def tex_num(x, fmt):
     return f"${x:{fmt}}$"
 
-tex = [r"""% Table 3: per-channel survey summary (full depth, tau = mu0).
-% Requires \usepackage{booktabs}. Deviation is (mean F - mu0)/mu0 in units of 1e-3.
+tex = [r"""% Table 3: per-channel survey summary (full depth, tau = null_power_ratio).
+% Requires \usepackage{booktabs}. Deviation is (mean F - null_power_ratio)/null_power_ratio in units of 1e-3.
 \begin{table*}
   \centering
   \caption{Per-channel survey summary at full depth. $N_{\rm valid}$ is the
@@ -124,7 +124,7 @@ for r in rows:
     dev_cell = f"${1e3*r['dev']:+.2f}" + r"\," + f"({1e3*r['dev_sem']:.2f})$"
     tex.append(
         f"    {r['ch']} & {r['fid']} & {r['n_valid']} & {r['hours']:.3f} & "
-        f"{r['mu0']:.4f} & {r['mean']:.4f} & "
+        f"{r['null_power_ratio']:.4f} & {r['mean']:.4f} & "
         f"{dev_cell} & "
         f"{r['mask_frac']:.3f} & {r['recovered_khz']:.0f} & "
         f"{stack_mark} & {r['n_lines']} \\\\\n")
@@ -254,13 +254,13 @@ fig.savefig(OUT / "fig_zero_point_fulldepth.png", dpi=300, bbox_inches="tight")
 fig.savefig(OUT / "fig_zero_point_fulldepth.pdf", bbox_inches="tight")
 plt.close(fig)
 
-# ---- Figure B: F distributions around mu0 -------------------------------------
-mu0_by_ch = {r["ch"]: r["mu0"] for r in rows}
+# ---- Figure B: F distributions around null_power_ratio -------------------------------------
+null_power_ratio_by_ch = {r["ch"]: r["null_power_ratio"] for r in rows}
 fig, ax = plt.subplots(figsize=(7.0, 4.4))
 PAL4 = {"21": "#D55E00", "14": "#7B4FA6", "28": "#00795A", "25": "#0072B2"}
 for ch in (35,):
     cnt, edg = hist[f"ch{ch}_counts"], hist[f"ch{ch}_edges"]
-    mu = mu0_by_ch[ch]
+    mu = null_power_ratio_by_ch[ch]
     x = 1e3 * ((0.5 * (edg[:-1] + edg[1:])) / mu - 1.0)
     dens = cnt / cnt.sum() / np.diff(1e3 * (edg / mu - 1.0))
     ax.plot(x, dens, color="0.25", ls="--", lw=1.4,
@@ -268,7 +268,7 @@ for ch in (35,):
 for ch_s, c in PAL4.items():
     ch = int(ch_s)
     cnt, edg = hist[f"ch{ch}_counts"], hist[f"ch{ch}_edges"]
-    mu = mu0_by_ch[ch]
+    mu = null_power_ratio_by_ch[ch]
     x = 1e3 * ((0.5 * (edg[:-1] + edg[1:])) / mu - 1.0)
     dens = cnt / cnt.sum() / np.diff(1e3 * (edg / mu - 1.0))
     ax.plot(x, dens, color=c, lw=1.6, label=f"ch{ch}")
@@ -287,10 +287,10 @@ fig.savefig(OUT / "fig_f_distributions_suppressed.pdf", bbox_inches="tight")
 plt.close(fig)
 
 # distribution width stats for the memo
-print("\np5-p95 widths in (F/mu0-1) x 1e3:")
+print("\np5-p95 widths in (F/null_power_ratio-1) x 1e3:")
 for ch in (35, 33, 21, 14, 25, 28):
     cnt, edg = hist[f"ch{ch}_counts"], hist[f"ch{ch}_edges"]
-    mu = mu0_by_ch[ch]
+    mu = null_power_ratio_by_ch[ch]
     mids = 0.5 * (edg[:-1] + edg[1:])
     cum = np.cumsum(cnt) / cnt.sum()
     q = lambda p: 1e3 * (mids[np.searchsorted(cum, p)] / mu - 1)

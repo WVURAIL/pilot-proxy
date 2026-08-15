@@ -4,7 +4,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from pilot_proxy.detector_reference import fstat_cpu_reference_packed
+from pilot_proxy.detector_reference import coarse_power_ratio_cpu_reference_packed
 from pilot_proxy.detector_geometry import (
     DetectorFrameLayout,
     STREAM_LAYOUT_SCHEMA_VERSION,
@@ -40,7 +40,7 @@ REFERENCE_WEIGHT_TERMS = 3
 COMBINED_TEST_WINDOW = 4
 COMBINED_TEST_FEEDS = 2
 COMBINED_TEST_WINDOWS_PER_FEED = 3
-RAW_FSTAT_REFERENCE_SCALE = 2.0
+COARSE_POWER_RATIO_SCALE = 2.0
 INT4_COMPONENT_BITS = 4
 COMBINED_TEST_RNG_SEED = 12345
 COMBINED_PACKED_LOW = -64
@@ -242,21 +242,21 @@ def test_combined_feed_cpu_reference_equals_manual_power_sum() -> None:
         COMBINED_TEST_WINDOW,
     )
 
-    combined_fstat, combined_powers = fstat_cpu_reference_packed(
+    combined_fstat, combined_powers = coarse_power_ratio_cpu_reference_packed(
         combined,
         weights,
         bits=INT4_COMPONENT_BITS,
     )
     manual_powers = np.zeros(REFERENCE_WEIGHT_TERMS, dtype=np.float64)
     for feed_index in range(COMBINED_TEST_FEEDS):
-        _, feed_powers = fstat_cpu_reference_packed(
+        _, feed_powers = coarse_power_ratio_cpu_reference_packed(
             packed_by_feed[feed_index],
             weights,
             bits=INT4_COMPONENT_BITS,
         )
         manual_powers += feed_powers
     manual_fstat = (
-        RAW_FSTAT_REFERENCE_SCALE
+        COARSE_POWER_RATIO_SCALE
         * manual_powers[0]
         / (manual_powers[1] + manual_powers[2])
     )

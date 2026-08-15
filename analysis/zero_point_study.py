@@ -26,14 +26,14 @@ z = np.load(_paths.PERFRAME)
 chans = sorted({int(k[2:].split("_")[0]) for k in z.files})
 
 
-def core_zero(f, mu0):
+def core_zero(f, null_power_ratio):
     """Mode-anchored H0 core: locate the distribution mode, then iterate the
-    median inside a +/-6e-3*mu0 window (~2.5 sigma_H0). Robust to BOTH the
+    median inside a +/-6e-3*null_power_ratio window (~2.5 sigma_H0). Robust to BOTH the
     signal high tail and the reference-contamination low tail."""
     lo, hi = np.percentile(f, [0.5, 99.5])
     hist, edges = np.histogram(f, bins=512, range=(lo, hi))
     m = 0.5 * (edges[np.argmax(hist)] + edges[np.argmax(hist) + 1])
-    win = 6e-3 * mu0
+    win = 6e-3 * null_power_ratio
     for _ in range(20):
         w = f[np.abs(f - m) <= win]
         if w.size < 100:
@@ -47,19 +47,19 @@ def core_zero(f, mu0):
     mu_hat = float(w.mean())
     err = float(w.std(ddof=1) / np.sqrt(w.size)) if w.size > 1 else float("nan")
     window_frac = w.size / f.size
-    tail = 12e-3 * mu0            # ~5 sigma_H0 from the core
+    tail = 12e-3 * null_power_ratio            # ~5 sigma_H0 from the core
     low_frac = float((f < mu_hat - tail).mean())
     high_frac = float((f > mu_hat + tail).mean())
     return mu_hat, err, window_frac, low_frac, high_frac
 
 
-def block_err(fv, fui_v, mu_hat, mu0, n_boot=400, seed=11):
+def block_err(fv, fui_v, mu_hat, null_power_ratio, n_boot=400, seed=11):
     """Per-event (unit) block-bootstrap error on the core-window mean.
 
     Frames within a capture unit share conditions, so the naive SEM
     understates the zero-point uncertainty; resampling whole units is the
     honest interval."""
-    win = 6e-3 * mu0
+    win = 6e-3 * null_power_ratio
     sel = np.abs(fv - mu_hat) <= win
     fw, uw = fv[sel], fui_v[sel]
     if fw.size < 2:
@@ -88,14 +88,14 @@ for ch in chans:
     rej = z[f"ch{ch}_reject_mask"].astype(bool)
     fui = z[f"ch{ch}_frame_unit_index"].astype(int)
     t0 = z[f"ch{ch}_unit_time0_ctime"]
-    mu0, tns, rnss, fid, pilot, center = z[f"ch{ch}_scalars"]
+    null_power_ratio, tns, rnss, fid, pilot, center = z[f"ch{ch}_scalars"]
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
     okf = valid & np.isfinite(f)
     fv = f[okf]
     fui_v = fui[okf]
-    mu_hat, mu_err, window_frac, low_frac, high_frac = core_zero(fv, mu0)
-    mu_err_blk = block_err(fv, fui_v, mu_hat, mu0)
+    mu_hat, mu_err, window_frac, low_frac, high_frac = core_zero(fv, null_power_ratio)
+    mu_err_blk = block_err(fv, fui_v, mu_hat, null_power_ratio)
     mf_now = float(rej[valid].mean())
     # Distrust the empirical zero point when the H0 core is not
     # identifiable. One criterion, two measurements, plus a range check
@@ -117,9 +117,9 @@ for ch in chans:
     # archive and is deliberately not enacted post hoc.)
     signal_dom = (2.0 * (1.0 - mf_now) < F_NULL_MIN_MASK_IMPLIED
                   or window_frac < F_NULL_MIN_DIRECT
-                  or abs(mu_hat - mu0) / mu0 > GEO_RANGE_BOUND)
+                  or abs(mu_hat - null_power_ratio) / null_power_ratio > GEO_RANGE_BOUND)
     mf_hat = float((fv > mu_hat).mean())
-    veto = 12e-3 * mu0
+    veto = 12e-3 * null_power_ratio
     kept_2sided = float(((fv <= mu_hat) & (fv >= mu_hat - veto)).mean())
     # solar-hour mask fractions (diurnal diagnostic)
     tf = t0[fui] + 0.0
@@ -133,9 +133,9 @@ for ch in chans:
             prof[h] = mask_ok[selh].mean()
     rows.append(dict(
         ch=ch, fid=int(fid), n_valid=int(fv.size),
-        mu0=float(mu0), mu_hat=mu_hat, mu_err=mu_err,
+        null_power_ratio=float(null_power_ratio), mu_hat=mu_hat, mu_err=mu_err,
         mu_err_blk=mu_err_blk,
-        gap_1e3=1e3 * (mu_hat - mu0) / mu0,
+        gap_1e3=1e3 * (mu_hat - null_power_ratio) / null_power_ratio,
         window_frac=window_frac, low_frac=low_frac, high_frac=high_frac,
         signal_dominated=signal_dom,
         mask_frac_manifest=mf_now, mask_frac_empirical=mf_hat,
@@ -155,14 +155,14 @@ total = len(rows) * COARSE_MHZ
 
 with open(OUT / "empirical_zero_points.csv", "w", newline="") as fh:
     w = csv.writer(fh)
-    w.writerow(["atsc_channel", "freq_id", "n_valid", "mu0_analytic",
-                "mu0_empirical", "mu0_empirical_err", "gap_1e3",
+    w.writerow(["atsc_channel", "freq_id", "n_valid", "null_power_ratio_analytic",
+                "null_power_ratio_empirical", "null_power_ratio_empirical_err", "gap_1e3",
                 "core_window_frac", "low_tail_frac", "high_tail_frac",
                 "zero_point_trusted",
                 "mask_frac_analytic_tau", "mask_frac_empirical_tau",
-                "kept_frac_2sided_veto", "mu0_empirical_err_block"])
+                "kept_frac_2sided_veto", "null_power_ratio_empirical_err_block"])
     for r in rows:
-        w.writerow([r["ch"], r["fid"], r["n_valid"], f"{r['mu0']:.6f}",
+        w.writerow([r["ch"], r["fid"], r["n_valid"], f"{r['null_power_ratio']:.6f}",
                     f"{r['mu_hat']:.6f}", f"{r['mu_err']:.6f}",
                     f"{r['gap_1e3']:+.3f}", f"{r['window_frac']:.3f}",
                     f"{r['low_frac']:.4f}", f"{r['high_frac']:.4f}",
@@ -172,16 +172,16 @@ with open(OUT / "empirical_zero_points.csv", "w", newline="") as fh:
                     f"{r['kept_2sided']:.4f}",
                     f"{r['mu_err_blk']:.6f}"])
 
-print(f"{'ch':>3} {'n':>6} {'mu0':>8} {'mu_hat':>8} {'gap(1e-3)':>9} "
-      f"{'mf@mu0':>7} {'mf@hat':>7} {'low%':>6} {'high%':>6} {'trust':>5}")
+print(f"{'ch':>3} {'n':>6} {'null_power_ratio':>8} {'mu_hat':>8} {'gap(1e-3)':>9} "
+      f"{'mf@null_power_ratio':>7} {'mf@hat':>7} {'low%':>6} {'high%':>6} {'trust':>5}")
 for r in rows:
-    print(f"{r['ch']:>3} {r['n_valid']:>6} {r['mu0']:>8.5f} "
+    print(f"{r['ch']:>3} {r['n_valid']:>6} {r['null_power_ratio']:>8.5f} "
           f"{r['mu_hat']:>8.5f} {r['gap_1e3']:>+9.2f} "
           f"{r['mask_frac_manifest']:>7.3f} {r['mask_frac_empirical']:>7.3f} "
           f"{100*r['low_frac']:>5.1f}% {100*r['high_frac']:>5.1f}% "
           f"{'' if r['signal_dominated'] else 'Y':>5}")
-print(f"\nrecovered MHz, tau = manifest mu0        : {rec_man:.3f} / {total:.3f}")
-print(f"recovered MHz, tau = empirical mu0_hat   : {rec_emp:.3f} / {total:.3f}")
+print(f"\nrecovered MHz, tau = manifest null_power_ratio        : {rec_man:.3f} / {total:.3f}")
+print(f"recovered MHz, tau = empirical null_power_ratio_hat   : {rec_emp:.3f} / {total:.3f}")
 print(f"recovered MHz, empirical + low-side veto : {rec_2s:.3f} / {total:.3f}")
 
 # ---- figure: gaps + mask-fraction correction ---------------------------------
@@ -209,7 +209,7 @@ for r in rows:
                      arrowprops=dict(arrowstyle="->", color=c, lw=1))
         continue
     yerr = r["mu_err_blk"] if np.isfinite(r["mu_err_blk"]) else r["mu_err"]
-    ax1.errorbar(r["ch"], g, yerr=1e3 * yerr / r["mu0"],
+    ax1.errorbar(r["ch"], g, yerr=1e3 * yerr / r["null_power_ratio"],
                  fmt="o", ms=4.5, color=c, capsize=2, lw=1)
 ax1.axhline(0, color="0.4", lw=0.8)
 ax1.set_ylim(-YLIM, YLIM)

@@ -23,12 +23,12 @@ from pilot_proxy.datatrawl_plugins.packed_reader import (  # noqa: E402
     ChimeBasebandPackedReader,
 )
 from pilot_proxy.detector_contract import (  # noqa: E402
-    norm_corrected_positive_excess,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import (  # noqa: E402
     INT4_COMPONENT_BITS,
-    fstat_cpu_reference,
+    coarse_power_ratio_cpu_reference,
     unpack_packed_complex,
 )
 from pilot_proxy.datatrawl_plugins._chime_coarse import chime_freq_id_from_hz  # noqa: E402
@@ -51,13 +51,13 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
     results = []
     for b in range(int(pk.shape[0])):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
-        _fstat, sums = fstat_cpu_reference(samples, w)
+        _fstat, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
         den = int(round(float(sums[1] + sums[2])))
         results.append({
             "block_index": b,
-            "mask": norm_corrected_positive_excess(
-                num, den, target_norm_sq=nt, ref_norm_sum_sq=int(nl + nu)
+            "mask": normalized_positive_excess(
+                num, den, target_norm_sq=nt, reference_norm_sum_sq=int(nl + nu)
             ),
             "p_target_u64": num,
             "p_ref_sum_u64": den,

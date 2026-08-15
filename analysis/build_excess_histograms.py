@@ -3,14 +3,14 @@
 channels. This is the merged diagnostic (it absorbed the former
 fig_f_histograms_all23, which plotted the identical variable).
 
-x = pilot excess F/mu0 - 1 (the stored product variable, 1e-3 units); the
+x = pilot excess F/null_power_ratio - 1 (the stored product variable, 1e-3 units); the
 mask fires for x > 0. Kept region shaded blue, masked region orange; the
 measured core mu_hat, the mu_hat +/- 12e-3 tail bounds, the gap Delta, and
 the low/high tail fractions are annotated per panel. The sub-threshold
 signal leak -- the part of the elevated tail the mask KEEPS -- is estimated
 by mirroring the measured H0 core's lower half and subtracting:
 leak = sum over (core, 0] of max(n(x) - n(2c - x), 0).
-Writes the grid figure and subthreshold_leakage.csv (leak at tau = mu0 and
+Writes the grid figure and subthreshold_leakage.csv (leak at tau = null_power_ratio and
 at tau = mu_hat; estimator grid fixed at BINW independent of display bins).
 """
 import csv
@@ -66,11 +66,11 @@ for j, ch in enumerate(chans):
         f = 2.0 * pt / pr
     fv = f[valid & np.isfinite(f)]
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     trusted = s["zero_point_trusted"] == "1"
-    x = 1e3 * (fv / mu0 - 1.0)          # pilot excess, tau at 0
-    c = 1e3 * (mu_hat - mu0) / mu0      # measured core in excess units
+    x = 1e3 * (fv / null_power_ratio - 1.0)          # pilot excess, tau at 0
+    c = 1e3 * (mu_hat - null_power_ratio) / null_power_ratio      # measured core in excess units
     if ch == 30:
         lo, hi = np.percentile(x, [0.2, 99.8])
         pad = 0.06 * (hi - lo)
@@ -99,15 +99,15 @@ for j, ch in enumerate(chans):
         for tb in (c - 12.0, c + 12.0):     # tail bounds about the core
             if abs(tb) < SPAN:
                 ax.axvline(tb, color=C_TAIL, ls=":", lw=0.7)
-        leak_mu0_f, leak_mu0_s = leak_estimate(x, c, 0.0)
+        leak_null_power_ratio_f, leak_null_power_ratio_s = leak_estimate(x, c, 0.0)
         # leak at tau = mu_hat: threshold sits AT the measured core
         leak_hat_f, leak_hat_s = leak_estimate(x, c, c)
         ax.text(0.03, 0.76,
-                f"sub-$\\tau$ signal {100*leak_mu0_f:.1f}{PCT} of frames "
-                f"({100*leak_mu0_s:.0f}{PCT} of tail)",
+                f"sub-$\\tau$ signal {100*leak_null_power_ratio_f:.1f}{PCT} of frames "
+                f"({100*leak_null_power_ratio_s:.0f}{PCT} of tail)",
                 transform=ax.transAxes, fontsize=5.8)
     else:
-        leak_mu0_f = leak_mu0_s = leak_hat_f = leak_hat_s = float("nan")
+        leak_null_power_ratio_f = leak_null_power_ratio_s = leak_hat_f = leak_hat_s = float("nan")
         ax.text(0.03, 0.76, "core untrusted", transform=ax.transAxes,
                 fontsize=6, color="0.4")
     ax.text(0.03, 0.92,
@@ -125,12 +125,12 @@ for j, ch in enumerate(chans):
     ax.set_axisbelow(True)
     rows_out.append({
         "atsc_channel": ch, "freq_id": s["freq_id"],
-        "kept_frac_at_tau_mu0": f"{kept_frac:.4f}",
+        "kept_frac_at_tau_null_power_ratio": f"{kept_frac:.4f}",
         "core_excess_1e3": f"{c:+.2f}",
-        "subthreshold_signal_frac_of_valid_tau_mu0":
-            f"{leak_mu0_f:.4f}" if trusted else "",
-        "subthreshold_signal_frac_of_tail_tau_mu0":
-            f"{leak_mu0_s:.4f}" if trusted else "",
+        "subthreshold_signal_frac_of_valid_tau_null_power_ratio":
+            f"{leak_null_power_ratio_f:.4f}" if trusted else "",
+        "subthreshold_signal_frac_of_tail_tau_null_power_ratio":
+            f"{leak_null_power_ratio_s:.4f}" if trusted else "",
         "subthreshold_signal_frac_of_valid_tau_muhat":
             f"{leak_hat_f:.4f}" if trusted else "",
         "zero_point_trusted": int(trusted),
@@ -166,9 +166,9 @@ with open(OUT / "subthreshold_leakage.csv", "w", newline="") as fh:
     w.writerows(rows_out)
 print("wrote fig_excess_threshold_all23 + subthreshold_leakage.csv")
 for r in rows_out:
-    if r["subthreshold_signal_frac_of_valid_tau_mu0"]:
-        v = float(r["subthreshold_signal_frac_of_valid_tau_mu0"])
-        t = float(r["subthreshold_signal_frac_of_tail_tau_mu0"])
+    if r["subthreshold_signal_frac_of_valid_tau_null_power_ratio"]:
+        v = float(r["subthreshold_signal_frac_of_valid_tau_null_power_ratio"])
+        t = float(r["subthreshold_signal_frac_of_tail_tau_null_power_ratio"])
         if v > 0.005:
             print(f"  ch{r['atsc_channel']}: sub-threshold signal "
                   f"{100*v:.1f}% of frames ({100*t:.0f}% of its tail)")

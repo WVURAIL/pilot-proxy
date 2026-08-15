@@ -21,9 +21,9 @@ PER_PILOT_PRODUCT_SCHEMA_TOKEN = (
     f"{PER_PILOT_PRODUCT_SCHEMA_NAME}_v{PER_PILOT_PRODUCT_SCHEMA_REVISION}"
 )
 
-COARSE_MEASUREMENT_METHOD = "coarse_local_reference_f_statistic"
-FINE_MEASUREMENT_METHOD = "fine_local_reference_f_statistic"
-ACTIVE_DECISION_METHOD = "coarse_norm_corrected_positive_excess"
+COARSE_MEASUREMENT_METHOD = "coarse_local_reference_power_ratio"
+FINE_MEASUREMENT_METHOD = "fine_local_reference_power_ratio"
+ACTIVE_DECISION_METHOD = "coarse_normalized_positive_excess"
 ACTIVE_DECISION_IMPLEMENTATION = "host_exact_integer_comparison"
 FINE_DIAGNOSTIC_METHOD = "per_frame_robust_null_bulk_threshold"
 FINE_DIAGNOSTIC_ROLE = "diagnostic_only"
@@ -43,7 +43,7 @@ def current_decision_contract() -> dict[str, Any]:
         "fine_diagnostic": {
             "method": FINE_DIAGNOSTIC_METHOD,
             "role": FINE_DIAGNOSTIC_ROLE,
-            "ratio_field": "fstat_fine",
+            "ratio_field": "fine_power_ratio",
             "threshold_field": "fine_cfar_threshold",
             "exceedance_fraction_field": (
                 "fine_null_bulk_exceedance_fraction"
@@ -116,20 +116,20 @@ def validate_current_product_identity(product: Mapping[str, Any]) -> None:
         "frame_index",
         "p_target_u64",
         "p_ref_sum_u64",
-        "fstat_raw",
-        "fstat_level_db",
-        "pnr_bin_db",
-        "snr_shelf_db",
+        "coarse_power_ratio",
+        "normalized_coarse_power_ratio_db",
+        "pilot_excess_db",
+        "estimated_data_shelf_snr_db",
         "reject_mask",
         "valid",
         "target_norm_sq",
-        "ref_norm_sum_sq",
-        "mu0",
-        "pilot_excess_corrected",
+        "reference_norm_sum_sq",
+        "null_power_ratio",
+        "normalized_pilot_excess",
         "baseband_power_linear",
         "integrated_spectrum_before_mask",
         "integrated_spectrum_after_mask",
-        "fstat_fine",
+        "fine_power_ratio",
         "fine_null_bulk_exceedance_fraction",
         "source_event_keys",
         "frame_unit_index",

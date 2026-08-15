@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # coding=utf-8
 """
-Pure-NumPy reference implementation for the F-statistic kernel.
+Pure-NumPy reference implementation for the local-reference power ratio kernel.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ REFERENCE_WEIGHT_TERMS = 3
 REFERENCE_TARGET_TERM_INDEX = 0
 REFERENCE_LOWER_TERM_INDEX = 1
 REFERENCE_UPPER_TERM_INDEX = 2
-RAW_FSTAT_REFERENCE_SCALE = 2.0
+COARSE_POWER_RATIO_SCALE = 2.0
 
 
 def packed_dtype_for_component_bits(bits: int) -> np.dtype:
@@ -71,11 +71,11 @@ def unpack_packed_complex(
     return real.astype(dtype) + 1j * imag.astype(dtype)  # type: ignore[arg-type]
 
 
-def fstat_cpu_reference(
+def coarse_power_ratio_cpu_reference(
     samples: np.ndarray,
     weights: np.ndarray,
 ) -> tuple[float, np.ndarray]:
-    """Compute F-statistic using natural weights and x * conj(w) dot products."""
+    """Compute local-reference power ratio using natural weights and x * conj(w) dot products."""
     if samples.ndim != 2:
         raise ValueError(f"samples must be 2D (M, K). Got shape {samples.shape}.")
     if weights.ndim != 2:
@@ -92,18 +92,18 @@ def fstat_cpu_reference(
     eps = np.finfo(np.float64).tiny
     if denom <= eps:
         return 0.0, sums
-    fstat = float(
-        RAW_FSTAT_REFERENCE_SCALE * sums[REFERENCE_TARGET_TERM_INDEX] / denom
+    power_ratio = float(
+        COARSE_POWER_RATIO_SCALE * sums[REFERENCE_TARGET_TERM_INDEX] / denom
     )
-    return fstat, sums
+    return power_ratio, sums
 
 
-def fstat_cpu_reference_packed(
+def coarse_power_ratio_cpu_reference_packed(
     packed_samples: np.ndarray,
     packed_weights: np.ndarray,
     bits: int,
 ) -> tuple[float, np.ndarray]:
-    """Compute F-statistic from packed integer samples and weights."""
+    """Compute local-reference power ratio from packed integer samples and weights."""
     samples = unpack_packed_complex(packed_samples, bits)
     weights = unpack_packed_complex(packed_weights, bits)
-    return fstat_cpu_reference(samples, weights)
+    return coarse_power_ratio_cpu_reference(samples, weights)

@@ -9,7 +9,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from pilot_proxy.detector_contract import POSITIVE_EXCESS_MASK_RULE
+from pilot_proxy.detector_contract import NORMALIZED_POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.json_utils import write_json_strict
 from .hdf5_input import ChimePilotDataset, dataset_manifest
 
@@ -142,16 +142,16 @@ def write_detector_outputs(
     frame_index: np.ndarray,
     p_target_u64: np.ndarray,
     p_ref_sum_u64: np.ndarray,
-    fstat_raw: np.ndarray,
-    fstat_level_db: np.ndarray,
-    pnr_bin_db: np.ndarray,
-    snr_shelf_db: np.ndarray,
+    coarse_power_ratio: np.ndarray,
+    normalized_coarse_power_ratio_db: np.ndarray,
+    pilot_excess_db: np.ndarray,
+    estimated_data_shelf_snr_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
     target_norm_sq: np.ndarray | None = None,
-    ref_norm_sum_sq: np.ndarray | None = None,
-    mu0: np.ndarray | None = None,
-    pilot_excess_corrected: np.ndarray | None = None,
+    reference_norm_sum_sq: np.ndarray | None = None,
+    null_power_ratio: np.ndarray | None = None,
+    normalized_pilot_excess: np.ndarray | None = None,
 ) -> Path:
     path = Path(run_dir) / CHIME_DETECTOR_OUTPUTS_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,10 +165,10 @@ def write_detector_outputs(
         frame_index=np.asarray(frame_index, dtype=np.int64),
         p_target_u64=np.asarray(p_target_u64, dtype=np.uint64),
         p_ref_sum_u64=np.asarray(p_ref_sum_u64, dtype=np.uint64),
-        fstat_raw=np.asarray(fstat_raw, dtype=np.float64),
-        fstat_level_db=np.asarray(fstat_level_db, dtype=np.float64),
-        pnr_bin_db=np.asarray(pnr_bin_db, dtype=np.float64),
-        snr_shelf_db=np.asarray(snr_shelf_db, dtype=np.float64),
+        coarse_power_ratio=np.asarray(coarse_power_ratio, dtype=np.float64),
+        normalized_coarse_power_ratio_db=np.asarray(normalized_coarse_power_ratio_db, dtype=np.float64),
+        pilot_excess_db=np.asarray(pilot_excess_db, dtype=np.float64),
+        estimated_data_shelf_snr_db=np.asarray(estimated_data_shelf_snr_db, dtype=np.float64),
         mask=np.asarray(mask, dtype=np.uint8),
         valid=np.asarray(valid, dtype=np.uint8),
     )
@@ -176,13 +176,13 @@ def write_detector_outputs(
     # combine of legacy per-pilot products can still write a legacy-shaped file.
     if target_norm_sq is not None:
         arrays["target_norm_sq"] = np.asarray(target_norm_sq, dtype=np.int64)
-    if ref_norm_sum_sq is not None:
-        arrays["ref_norm_sum_sq"] = np.asarray(ref_norm_sum_sq, dtype=np.int64)
-    if mu0 is not None:
-        arrays["mu0"] = np.asarray(mu0, dtype=np.float64)
-    if pilot_excess_corrected is not None:
-        arrays["pilot_excess_corrected"] = np.asarray(
-            pilot_excess_corrected, dtype=np.float64
+    if reference_norm_sum_sq is not None:
+        arrays["reference_norm_sum_sq"] = np.asarray(reference_norm_sum_sq, dtype=np.int64)
+    if null_power_ratio is not None:
+        arrays["null_power_ratio"] = np.asarray(null_power_ratio, dtype=np.float64)
+    if normalized_pilot_excess is not None:
+        arrays["normalized_pilot_excess"] = np.asarray(
+            normalized_pilot_excess, dtype=np.float64
         )
     np.savez_compressed(path, **arrays)
     return path
@@ -350,8 +350,8 @@ def write_mask_summary(
     chime_frequency_hz: Sequence[float] | None = None,
     mask: np.ndarray,
     valid: np.ndarray | None = None,
-    mask_source: str = "positive_excess",
-    mask_rule: str = POSITIVE_EXCESS_MASK_RULE,
+    mask_source: str = "normalized_positive_excess_decision",
+    mask_rule: str = NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     valid_rule: str = "p_ref_sum != 0",
 ) -> Path:
     counts = valid_mask_counts(mask, valid)

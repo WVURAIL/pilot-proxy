@@ -4,7 +4,7 @@
 
 The plotted statistic is
 
-    F_norm = p_target * ref_norm_sum_sq /
+    F_norm = p_target * reference_norm_sum_sq /
              (p_ref_sum * target_norm_sq),
 
 so the fixed analytic decision is F_norm > 1. Crossing counts are evaluated
@@ -91,7 +91,7 @@ for j, ch in enumerate(chans):
         "crossing_fraction_strict": f"{frac:.8f}",
         "n_exact_equality": int(equality.sum()),
         "target_norm_sq": tns,
-        "ref_norm_sum_sq": rnss,
+        "reference_norm_sum_sq": rnss,
     })
 
 for j in range(len(chans), 24):

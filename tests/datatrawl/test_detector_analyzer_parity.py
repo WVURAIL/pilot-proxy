@@ -27,13 +27,13 @@ from datatrawl.interfaces import RunContext
 
 from pilot_proxy.chime.runner import run_chime_analysis
 from pilot_proxy.detector_contract import (
-    norm_corrected_positive_excess,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED
 from pilot_proxy.detector_reference import (
     INT4_COMPONENT_BITS,
-    fstat_cpu_reference,
+    coarse_power_ratio_cpu_reference,
     unpack_packed_complex,
 )
 from pilot_proxy.integration.receiver_profile import default_reference_receiver_profile
@@ -61,13 +61,13 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
     results = []
     for b in range(int(pk.shape[0])):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
-        _fstat, sums = fstat_cpu_reference(samples, w)
+        _fstat, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
         den = int(round(float(sums[1] + sums[2])))
         results.append({
             "block_index": b,
-            "mask": norm_corrected_positive_excess(
-                num, den, target_norm_sq=nt, ref_norm_sum_sq=nrs
+            "mask": normalized_positive_excess(
+                num, den, target_norm_sq=nt, reference_norm_sum_sq=nrs
             ),
             "p_target_u64": num,
             "p_ref_sum_u64": den,
@@ -154,7 +154,7 @@ def test_detector_analyzer_matches_runner(tmp_path):
     ), "reject_mask"
 
     # float metrics
-    for name in ("fstat_raw", "fstat_level_db", "pnr_bin_db", "snr_shelf_db",
+    for name in ("coarse_power_ratio", "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
                  "pilot_frequency_hz", "chime_frequency_hz"):
         a = np.asarray(ref[name], dtype=np.float64)
         b = np.asarray(got[name], dtype=np.float64)

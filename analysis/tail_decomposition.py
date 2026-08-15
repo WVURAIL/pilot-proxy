@@ -2,7 +2,7 @@
 """Decompose the F tails: is the low tail hot references or cold targets?
 
 Per frame, normalize p_target and p_ref_sum by their unit's core-frame
-baseline (median over frames with |F-mu_hat| < 6e-3*mu0 in the same unit;
+baseline (median over frames with |F-mu_hat| < 6e-3*null_power_ratio in the same unit;
 fallback: channel median). Then compare the normalized target/ref power of
 low-tail, core, and high-tail frames -- and test event-level coincidence and
 diurnal structure of the two tails.
@@ -31,8 +31,8 @@ SHOW = [32, 31, 35, 21]
 
 def analyze(ch):
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
     valid = z[f"ch{ch}_valid"].astype(bool)
@@ -41,9 +41,9 @@ def analyze(ch):
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
     ok = valid & np.isfinite(f)
-    core_win = np.abs(f - mu_hat) <= 6e-3 * mu0
-    low = ok & (f < mu_hat - 12e-3 * mu0)
-    high = ok & (f > mu_hat + 12e-3 * mu0)
+    core_win = np.abs(f - mu_hat) <= 6e-3 * null_power_ratio
+    low = ok & (f < mu_hat - 12e-3 * null_power_ratio)
+    high = ok & (f > mu_hat + 12e-3 * null_power_ratio)
     core = ok & core_win
 
     # per-unit baselines from core frames only

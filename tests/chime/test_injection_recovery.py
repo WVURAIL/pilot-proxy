@@ -40,15 +40,15 @@ def _write_point(point_dir, amplitude: float, *, seed: int,
     valid = np.ones((N_FRAMES, 1), dtype=np.uint8)
     detector = {
         "physical_channel": np.asarray([14], dtype=np.int32),
-        "fstat_raw": fstat,
-        "pilot_excess_corrected": rho,
+        "coarse_power_ratio": fstat,
+        "normalized_pilot_excess": rho,
         "valid": valid,
         "mask": (fstat > MU0).astype(np.uint8),
         "p_target_u64": np.full((N_FRAMES, 1), 1, dtype=np.uint64),
         "p_ref_sum_u64": np.full((N_FRAMES, 1), 2, dtype=np.uint64),
         "target_norm_sq": np.asarray([5], dtype=np.int64),
-        "ref_norm_sum_sq": np.asarray([9], dtype=np.int64),
-        "mu0": np.asarray([MU0]),
+        "reference_norm_sum_sq": np.asarray([9], dtype=np.int64),
+        "null_power_ratio": np.asarray([MU0]),
     }
     np.savez_compressed(point_dir / CHIME_DETECTOR_OUTPUTS_FILENAME, **detector)
     # Radiometer statistic: weakly shifted by the tone (a one-bin tone barely

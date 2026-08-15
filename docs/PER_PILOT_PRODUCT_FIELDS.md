@@ -51,16 +51,16 @@ integrated spectrum receives the frame.
 | `frame_index` | `(N,)` | `int64` | Zero-based positional frame counter |
 | `p_target_u64` | `(N, 1)` | `uint64` | Target-bin power from the fixed-point detector |
 | `p_ref_sum_u64` | `(N, 1)` | `uint64` | Lower plus upper reference power |
-| `fstat_raw` | `(N, 1)` | `float64` | `2*p_target/p_ref_sum` |
-| `fstat_level_db` | `(N, 1)` | `float64` | `10*log10(F)` |
-| `pnr_bin_db` | `(N, 1)` | `float64` | One-bin pilot-excess PNR |
-| `snr_shelf_db` | `(N, 1)` | `float64` | Estimated ATSC data-shelf SNR |
+| `coarse_power_ratio` | `(N, 1)` | `float64` | `2*p_target/p_ref_sum` |
+| `normalized_coarse_power_ratio_db` | `(N, 1)` | `float64` | `10*log10(F)` |
+| `pilot_excess_db` | `(N, 1)` | `float64` | One-bin pilot-excess PNR |
+| `estimated_data_shelf_snr_db` | `(N, 1)` | `float64` | Estimated ATSC data-shelf SNR |
 | `valid` | `(N, 1)` | `uint8` | `p_ref_sum != 0` |
 | `reject_mask` | `(N, 1)` | `uint8` | `1 = discard` under the recorded positive-excess rule |
-| `pilot_excess_corrected` | `(N, 1)` | `float64` | `F/mu0 - 1`, or NaN when invalid |
+| `normalized_pilot_excess` | `(N, 1)` | `float64` | `F/null_power_ratio - 1`, or NaN when invalid |
 | `target_norm_sq` | `(1,)` | `int64` | Exact `||w_target||^2` of the int4 weights |
-| `ref_norm_sum_sq` | `(1,)` | `int64` | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
-| `mu0` | `(1,)` | `float64` | `2*target_norm_sq/ref_norm_sum_sq` |
+| `reference_norm_sum_sq` | `(1,)` | `int64` | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
+| `null_power_ratio` | `(1,)` | `float64` | `2*target_norm_sq/reference_norm_sum_sq` |
 | `baseband_power_linear` | `(N, 1)` | `float64` | Mean non-coherent baseband power for the frame |
 
 The product stores `p_target_u64` and `p_ref_sum_u64` without converting them to
@@ -74,14 +74,14 @@ The current `reject_mask` compares the target and reference powers after
 correcting for unequal quantized weight norms. A valid frame is rejected when:
 
 ```text
-reject_mask = valid && (p_target_u64 * ref_norm_sum_sq
+reject_mask = valid && (p_target_u64 * reference_norm_sum_sq
                         > target_norm_sq * p_ref_sum_u64)
-            = valid && (F > mu0)
+            = valid && (F > null_power_ratio)
 ```
 
 The integer cross multiplication is the recorded `mask_rule`. It avoids a
 floating-point threshold decision and uses the weight-norm flat-floor reference
-`mu0 = 2*target_norm_sq/ref_norm_sum_sq` rather than assuming `mu0 = 1`.
+`null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq` rather than assuming `null_power_ratio = 1`.
 
 Reporting can derive `keep_mask = 1 - reject_mask`; the per-pilot product does
 not store a second copy.
@@ -185,7 +185,7 @@ The frame-level fields support these downstream products without another CUDA
 detector pass:
 
 - `keep_mask = 1 - reject_mask`;
-- F-statistic histograms and survival curves from the raw integer powers;
+- local-reference power ratio histograms and survival curves from the raw integer powers;
 - alternative frame-level thresholds from the raw powers and norms;
 - masked fraction from `reject_mask` and `valid`;
 - baseband before/after summaries from `baseband_power_linear` and a selected

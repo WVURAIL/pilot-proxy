@@ -43,7 +43,7 @@ venue.
    placement, summarize the 500-mile transmitter census, and explain why the
    CHIME workflow makes a frame-level mask useful.
 3. **Method.** Derive the F-statistic from the three per-row matched filters.
-   Then introduce the int4 weights, the exact `F > mu0` comparison, and the
+   Then introduce the int4 weights, the exact `F > null_power_ratio` comparison, and the
    dynamic-range and capture-loss bounds in `docs/METHOD_SPEC.md`.
 4. **Implementation.** Describe the PilotProxy CUDA kernel, rational
    thresholds, and product provenance. Describe datatrawl only to the degree
@@ -66,7 +66,7 @@ venue.
 | 1 | Pilot/census context: transmitter map or pilot-frequency vs CHIME channel layout | manuscript-side from the census CSV | UHF station catalog | data done; figure at writing time |
 | 2 | Detector geometry / weight response `|W(f)|^2` schematic | small script over `DetectorWeightBank` (writing time) | shipped weight bank | pending (trivial) |
 | 3 | Synthetic detection curves: `P_d`(shelf SNR) per offset, Wilson bars, -32 dB threshold | `pilot-proxy evaluate-snr` (300-trial shakedown; 1500-trial publication grid) + `analysis/fig3_publication.py` | evaluate-snr summary CSV/JSON | runnable now on CPU (`--detector-backend cpu-reference`); same-seed GPU spot check ties it to the kernel (item 2) |
-| 4 | On-sky H0 zero-point: mean F vs `mu0` per channel + mask-fraction before/after | `chime-scan` runs + small notebook over `stats.json` / detector NPZ | item-1 run products | **pending on-sky** (item 1) |
+| 4 | On-sky H0 zero-point: mean F vs `null_power_ratio` per channel + mask-fraction before/after | `chime-scan` runs + small notebook over `stats.json` / detector NPZ | item-1 run products | **pending on-sky** (item 1) |
 | 5 | Injection--recovery linearity (`injection_recovery_linearity`) | `pilot-proxy analyze-injection-recovery` | item-3 ladder products | injection tooling exists; **blocked on realized-power coordinate, then runs** |
 | 6 | F-statistic vs radiometer `P_d` at matched `P_fa` (`detector_vs_radiometer_pd`) | same command as Fig. 5 | same | same realized-power and matched-frame preconditions as Fig. 5; **pending** |
 | 7 | Cleaning operating curve (`cleaning_tradeoff_operating_curve`) | `pilot-proxy analyze-cleaning-tradeoff` | combined survey + control | tooling shipped; **pending survey** |
@@ -104,7 +104,7 @@ numbers in the PilotProxy paper.
 |---|-------|--------|--------|
 | 1 | Detector parameters (K, offsets, guard bins, int4, thresholds) | `docs/METHOD_SPEC.md` / detector contract | done |
 | 2 | Census summary (channels, nearest transmitters, measured offsets) | merged-emitter census v2 + `--lines-from-run` extraction | catalog done (v2, sharing partners merged); offsets extract from survey product spectra |
-| 3 | Per-channel survey summary (mask fraction, `mu0`, mean excess) | combined `stats.json` + tradeoff CSV | **pending survey** |
+| 3 | Per-channel survey summary (mask fraction, `null_power_ratio`, mean excess) | combined `stats.json` + tradeoff CSV | **pending survey** |
 | 4 | Validation acceptance summary (items 1--5, pass criteria, measured values) | `docs/PUBLICATION_VALIDATION.md` acceptance lines | pending runs |
 
 ## Pre-registered analysis decisions
@@ -183,7 +183,7 @@ production pass and before any relaunch.
   that crossing difference, so add and retain the interval method before
   reporting one in dB.
 - **Recovered bandwidth:** use the `analyze-cleaning-tradeoff` result, "X of
-  Y MHz recovered at `tau = mu0`; Z MHz-hours," with the affected-band
+  Y MHz recovered at `tau = null_power_ratio`; Z MHz-hours," with the affected-band
   denominator stated explicitly.
 - **Zero-point behavior:** use the Fig. 4 ratio test and cite the Monte Carlo
   regression gate in `tests/core/test_mask_zero_point.py`.

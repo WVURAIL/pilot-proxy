@@ -29,9 +29,9 @@ for p in paths:
             out[f"ch{ch}_{k}"] = np.asarray(z[k]).reshape(-1)
         out[f"ch{ch}_unit_time0_ctime"] = np.asarray(z["unit_time0_ctime"])
         out[f"ch{ch}_scalars"] = np.asarray([
-            float(z["mu0"][0]),
+            float(z["null_power_ratio"][0]),
             float(z["target_norm_sq"][0]),
-            float(z["ref_norm_sum_sq"][0]),
+            float(z["reference_norm_sum_sq"][0]),
             float(np.asarray(z["freq_id"]).reshape(-1)[0]),
             float(z["pilot_frequency_hz"][0]),
             float(z["chime_frequency_hz"][0]),

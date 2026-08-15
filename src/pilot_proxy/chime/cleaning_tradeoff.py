@@ -4,7 +4,7 @@
 The product schema keeps the raw ``p_target_u64``/``p_ref_sum_u64`` verbatim
 and records the per-pilot weight norms precisely so alternative thresholds are
 a recompute, never a re-run. This module sweeps a mask threshold
-``tau = mu0 * 10^(x/10)`` over a run (or combined survey) directory and
+``tau = null_power_ratio * 10^(x/10)`` over a run (or combined survey) directory and
 reports, per channel and per ``x``:
 
 * masked / kept fraction over valid frames,
@@ -53,7 +53,7 @@ def _load_run(run_dir: Path) -> dict[str, np.ndarray]:
     detector = np.load(detector_path)
     cache = np.load(cache_path)
     required = ("p_target_u64", "p_ref_sum_u64", "valid", "mask",
-                "target_norm_sq", "ref_norm_sum_sq", "mu0", "physical_channel")
+                "target_norm_sq", "reference_norm_sum_sq", "null_power_ratio", "physical_channel")
     missing = [key for key in required if key not in detector]
     if missing:
         raise SystemExit(
@@ -71,7 +71,7 @@ def _load_run(run_dir: Path) -> dict[str, np.ndarray]:
         "p_ref": detector["p_ref_sum_u64"].astype(np.float64),
         "valid": detector["valid"].astype(bool),
         "stored_mask": detector["mask"].astype(bool),
-        "mu0": detector["mu0"].astype(np.float64),
+        "null_power_ratio": detector["null_power_ratio"].astype(np.float64),
         "physical_channel": detector["physical_channel"].astype(int),
         "power": cache["baseband_power_linear"].astype(np.float64),
     }
@@ -107,7 +107,7 @@ def sweep_cleaning_tradeoff(
 
     # Exact anchor: at x = 0 the float recompute must reproduce the stored
     # (exact-integer) mask on every valid frame.
-    anchor = run["valid"] & (fstat > run["mu0"][np.newaxis, :])
+    anchor = run["valid"] & (fstat > run["null_power_ratio"][np.newaxis, :])
     if not np.array_equal(anchor, run["stored_mask"] & run["valid"]):
         mismatches = int(np.count_nonzero(anchor != (run["stored_mask"] & run["valid"])))
         raise SystemExit(
@@ -124,7 +124,7 @@ def sweep_cleaning_tradeoff(
     recovered_mhz_by_x: dict[float, float] = {}
     for x in grid:
         factor = 10.0 ** (float(x) / 10.0)
-        mask_x = run["valid"] & (fstat > run["mu0"][np.newaxis, :] * factor)
+        mask_x = run["valid"] & (fstat > run["null_power_ratio"][np.newaxis, :] * factor)
         recovered = 0.0
         for pilot_index, channel in enumerate(channels):
             valid = run["valid"][:, pilot_index]
@@ -308,7 +308,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     operating = report["operating_point"]
     headline = (
         f"{operating['recovered_mhz']:.3f} of "
-        f"{operating['total_affected_mhz']:.3f} MHz recovered at tau = mu0"
+        f"{operating['total_affected_mhz']:.3f} MHz recovered at tau = null_power_ratio"
     )
     if "recovered_mhz_hours" in operating:
         headline += f" ({operating['recovered_mhz_hours']:.1f} MHz-hours)"

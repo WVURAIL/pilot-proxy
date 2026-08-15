@@ -27,11 +27,11 @@ from datatrawl.interfaces import RunContext
 from pilot_proxy.chime.runner import run_chime_analysis
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED
 from pilot_proxy.detector_contract import (
-    norm_corrected_positive_excess,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import (
-    INT4_COMPONENT_BITS, fstat_cpu_reference, unpack_packed_complex,
+    INT4_COMPONENT_BITS, coarse_power_ratio_cpu_reference, unpack_packed_complex,
 )
 from pilot_proxy.integration.receiver_profile import default_reference_receiver_profile
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
@@ -57,11 +57,11 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
     results = []
     for b in range(int(pk.shape[0])):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
-        _f, sums = fstat_cpu_reference(samples, w)
+        _f, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
         den = int(round(float(sums[1] + sums[2])))
-        results.append({"block_index": b, "mask": norm_corrected_positive_excess(
-                num, den, target_norm_sq=_nt, ref_norm_sum_sq=_nrs
+        results.append({"block_index": b, "mask": normalized_positive_excess(
+                num, den, target_norm_sq=_nt, reference_norm_sum_sq=_nrs
             ),
                         "p_target_u64": num, "p_ref_sum_u64": den})
     return {"batch": int(pk.shape[0]), "detector_rows_per_block": int(pk.shape[1]),

@@ -24,10 +24,10 @@ Wrote generated/detector_input/detector_matrix_i4.npy
 Wrote generated/quickstart/dtv_snr_eval/dtv_snr_eval.csv
 Wrote generated/quickstart/dtv_snr_eval/dtv_snr_summary.csv
 Wrote generated/quickstart/dtv_snr_eval/dtv_snr_eval.json
-frequency_offset_hz, requested_snr_shelf_db, measured_truth_snr_shelf_db, cpu_float_snr_shelf_db, gpu_snr_shelf_db, gpu_snr_error_db
+frequency_offset_hz, requested_data_shelf_snr_db, measured_truth_data_shelf_snr_db, cpu_float_estimated_data_shelf_snr_db, gpu_estimated_data_shelf_snr_db, gpu_snr_error_db
      0.000,  -26.000, <measured>, <measured>, <measured>, <measured>
 
 Pilot frequency from sidecar generated/detector_input/metadata.json: <measured> MHz
 Wrote generated/detections/detect.json
-blocks, positive_excess_set, fstat_raw_mean, estimated_snr_shelf_db_mean
+blocks, positive_excess_set, coarse_power_ratio_mean, estimated_data_shelf_snr_db_mean
 1, <0-or-1>, <measured>, <measured>

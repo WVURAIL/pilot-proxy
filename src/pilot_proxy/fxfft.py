@@ -380,7 +380,7 @@ def fxfft256_scalar(x_in) -> list[tuple[int, int]]:
 
 
 def fine_power_fx(
-    row_sums: Any,
+    matched_filter_row_projections: Any,
     *,
     num_streams: int,
     windows_per_stream: int = N_IN,
@@ -388,18 +388,18 @@ def fine_power_fx(
 ) -> np.ndarray:
     """Exact-integer fine power spectra via the frozen FFT.
 
-    ``row_sums``: integer array ``[terms, streams * windows, 2]`` (the
+    ``matched_filter_row_projections``: integer array ``[terms, streams * windows, 2]`` (the
     kernel's stream-major row-sum layout, as in ``fine_reduction``).
     Returns uint64 ``S[terms, 256]`` = sum over streams of ``|X|**2`` ---
     exact integers, the deployed fine-statistic numerators/denominators.
     """
     if int(windows_per_stream) != N_IN:
         raise ValueError("fxfft256 is frozen at 128 windows per stream.")
-    arr = np.asarray(row_sums)
+    arr = np.asarray(matched_filter_row_projections)
     terms = int(num_weight_terms)
     streams = int(num_streams)
     if arr.ndim != 3 or arr.shape[0] != terms or arr.shape[-1] != 2:
-        raise ValueError("row_sums must have shape [terms, rows, 2].")
+        raise ValueError("matched_filter_row_projections must have shape [terms, rows, 2].")
     if arr.shape[1] != streams * N_IN:
         raise ValueError("rows must equal num_streams * 128.")
     z = arr.reshape(terms, streams, N_IN, 2)
@@ -408,7 +408,7 @@ def fine_power_fx(
     return mag.sum(axis=1, dtype=np.uint64)
 
 
-def fstat_fine_fx(power: np.ndarray) -> np.ndarray:
+def fine_power_ratio_fx(power: np.ndarray) -> np.ndarray:
     """``F2[b] = 2 S_t / (S_l + S_u)`` from exact fx powers (float64 out)."""
     p = np.asarray(power, dtype=np.float64)
     den = p[1] + p[2]

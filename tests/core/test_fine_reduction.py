@@ -9,15 +9,15 @@ from pilot_proxy.fine_reduction import (
     CFAR_MODE_QUANTILE_FALLBACK,
     FINE_PAD_FACTOR,
     calibrate_cfar,
-    check_v1_marginal_identity,
-    exact_marginal_powers,
+    check_coarse_power_marginal_identity,
+    exact_coarse_power_by_term,
     fine_bin_count,
     fine_bin_frequencies_hz,
     fine_reduce,
     independent_bin_mask,
     p_fa_to_threshold_k,
     reduce_and_detect,
-    v1_fstat_from_powers,
+    coarse_power_ratio_from_powers,
 )
 
 TERMS = 3
@@ -28,7 +28,7 @@ RNG_SEED = 0xC0FFEE
 MAX_COMPONENT = 14336  # kernel bound for the locked 4-bit path
 
 
-def _random_row_sums(rng: np.random.Generator) -> np.ndarray:
+def _random_matched_filter_row_projections(rng: np.random.Generator) -> np.ndarray:
     return rng.integers(
         -MAX_COMPONENT, MAX_COMPONENT + 1, size=(TERMS, ROWS, 2), dtype=np.int32
     )
@@ -36,47 +36,47 @@ def _random_row_sums(rng: np.random.Generator) -> np.ndarray:
 
 def test_exact_marginal_matches_brute_force_and_kernel_convention() -> None:
     rng = np.random.default_rng(RNG_SEED)
-    row_sums = _random_row_sums(rng)
+    matched_filter_row_projections = _random_matched_filter_row_projections(rng)
 
-    marginal = exact_marginal_powers(row_sums, num_weight_terms=TERMS)
+    marginal = exact_coarse_power_by_term(matched_filter_row_projections, num_weight_terms=TERMS)
 
     brute = np.zeros(TERMS, dtype=np.int64)
     for n in range(TERMS):
         for m in range(ROWS):
-            zr = int(row_sums[n, m, 0])
-            zi = int(row_sums[n, m, 1])
+            zr = int(matched_filter_row_projections[n, m, 0])
+            zi = int(matched_filter_row_projections[n, m, 1])
             brute[n] += zr * zr + zi * zi
     np.testing.assert_array_equal(marginal, brute)
 
-    check_v1_marginal_identity(marginal, brute)
-    with pytest.raises(AssertionError, match="v1 marginal identity"):
-        check_v1_marginal_identity(marginal, brute + 1)
+    check_coarse_power_marginal_identity(marginal, brute)
+    with pytest.raises(AssertionError, match="coarse marginal identity"):
+        check_coarse_power_marginal_identity(marginal, brute + 1)
 
 
 def test_exact_marginal_rejects_complex_input() -> None:
     z = np.zeros((TERMS, ROWS), dtype=np.complex128)
     with pytest.raises(TypeError, match="integer row sums"):
-        exact_marginal_powers(z, num_weight_terms=TERMS)
+        exact_coarse_power_by_term(z, num_weight_terms=TERMS)
 
 
 def test_fine_reduce_parseval_and_identity() -> None:
     rng = np.random.default_rng(RNG_SEED + 1)
-    row_sums = _random_row_sums(rng)
+    matched_filter_row_projections = _random_matched_filter_row_projections(rng)
 
     result = fine_reduce(
-        row_sums, num_streams=STREAMS, windows_per_stream=WINDOWS
+        matched_filter_row_projections, num_streams=STREAMS, windows_per_stream=WINDOWS
     )
     p2 = fine_bin_count(WINDOWS)
     assert result.fine_power.shape == (TERMS, p2)
-    assert result.fstat_fine.shape == (p2,)
+    assert result.fine_power_ratio.shape == (p2,)
 
     # Parseval with zero padding: sum_b S[n, b] == p2 * P[n]
     sums = result.fine_power.astype(np.float64).sum(axis=-1)
-    expected = float(p2) * result.marginal_powers.astype(np.float64)
+    expected = float(p2) * result.coarse_power_by_term.astype(np.float64)
     np.testing.assert_allclose(sums, expected, rtol=1e-6)
 
-    assert result.v1_fstat == pytest.approx(
-        v1_fstat_from_powers(result.marginal_powers)
+    assert result.coarse_power_ratio_from_marginal == pytest.approx(
+        coarse_power_ratio_from_powers(result.coarse_power_by_term)
     )
 
 
@@ -106,7 +106,7 @@ def test_synthetic_tone_lands_in_correct_padded_bin() -> None:
     )
     peak = int(np.argmax(result.fine_power[0]))
     assert peak == q * FINE_PAD_FACTOR
-    assert int(np.argmax(result.fstat_fine)) == peak
+    assert int(np.argmax(result.fine_power_ratio)) == peak
 
     freqs = fine_bin_frequencies_hz(WINDOWS, envelope_rate_hz=3051.7578125)
     assert freqs[peak] == pytest.approx(q * 3051.7578125 / WINDOWS)
@@ -146,7 +146,7 @@ def test_cfar_median_left_mode_and_detection() -> None:
     assert "null_bulk_exceedance_fraction" in calibration.as_dict()
 
     result = reduce_and_detect(
-        _random_row_sums(rng),
+        _random_matched_filter_row_projections(rng),
         num_streams=STREAMS,
         windows_per_stream=WINDOWS,
     )
@@ -174,18 +174,18 @@ def test_threshold_k_matches_gaussian_tail() -> None:
 
 def test_kernel_powers_identity_enforced_in_reduce_and_detect() -> None:
     rng = np.random.default_rng(RNG_SEED + 4)
-    row_sums = _random_row_sums(rng)
-    powers = exact_marginal_powers(row_sums, num_weight_terms=TERMS)
+    matched_filter_row_projections = _random_matched_filter_row_projections(rng)
+    powers = exact_coarse_power_by_term(matched_filter_row_projections, num_weight_terms=TERMS)
     result = reduce_and_detect(
-        row_sums,
+        matched_filter_row_projections,
         num_streams=STREAMS,
         windows_per_stream=WINDOWS,
         kernel_powers=powers,
     )
-    assert result.v1_fstat == pytest.approx(v1_fstat_from_powers(powers))
+    assert result.coarse_power_ratio_from_marginal == pytest.approx(coarse_power_ratio_from_powers(powers))
     with pytest.raises(AssertionError):
         reduce_and_detect(
-            row_sums,
+            matched_filter_row_projections,
             num_streams=STREAMS,
             windows_per_stream=WINDOWS,
             kernel_powers=powers + 1,

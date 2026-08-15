@@ -57,15 +57,15 @@ failure.
 
 2. **CUDA regression + exact v2 parity.**
    `make -C cuda test_cuda`
-   Pass: exit 0. Includes `test_row_sums_exact` and
-   `test_row_sums_batch_exact`: GPU row sums equal the CPU reference
+   Pass: exit 0. Includes `test_matched_filter_row_projections_exact` and
+   `test_matched_filter_row_projections_batch_exact`: GPU row sums equal the CPU reference
    exactly (integers, no tolerance) across grid-stride row counts and
    batches, and the GPU marginal reproduces `Compute_Powers_U64`
    bit-for-bit.
 
 3. **GPU pytest gates.**
    `PYTHONPATH=src python3 -m pytest tests/kernel -q`
-   Pass: zero failures, zero skips. `test_row_sums_gpu.py` enforces the
+   Pass: zero failures, zero skips. `test_matched_filter_row_projections_gpu.py` enforces the
    numpy-reference equality, the marginal identity, and the pre-registered
    ULP gate (cupy complex64 fine reduction within 5e-6 relative of the
    float64 prototype). Note: this test *fails* rather than skips if the
@@ -99,7 +99,7 @@ failure.
    - `detector_version` embeds the installed `pilot-proxy/<version>`,
      kernel 2.1.x, the library sha, and the profile hash via the weight
      bank;
-   - `fine_status == enabled`, `fstat_fine.shape == (n_frames, 256)`;
+   - `fine_status == enabled`, `fine_power_ratio.shape == (n_frames, 256)`;
    - no v1-marginal identity assertion fired (the run raises on
      mismatch);
    - `fine_null_bulk_exceedance_fraction` is bounded to `[0, 1]` on valid

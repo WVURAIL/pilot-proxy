@@ -89,7 +89,7 @@ per-channel measured-line anchors, designated-set widths, and CFAR
 threshold multipliers, with their calibration provenance (epoch lists,
 quantiles, source product hashes); anchors need on-epochs only, while
 multiplier depth follows the verified-null program. The survey's recorded
-mu0 flag is unchanged mid-survey; the deployed-contract change lands at a
+null_power_ratio flag is unchanged mid-survey; the deployed-contract change lands at a
 survey epoch boundary.
 
 The proposed handoff exploits that asymmetry with a per-node FIFO queue:
@@ -222,7 +222,7 @@ For the norm-corrected positive-excess rule, the bundle stores:
 
 ```text
 positive_excess_half_threshold_num = target_norm_sq
-positive_excess_half_threshold_den = ref_norm_sum_sq
+positive_excess_half_threshold_den = reference_norm_sum_sq
 ```
 
 These values are data, not architecture: a future deployment can move the
@@ -261,7 +261,7 @@ mask path.
 The deployed CUDA comparison for that coarse flag is:
 
 ```text
-mask = (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
+mask = (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
 When `p_ref_sum == 0`, the CUDA API forces `mask = 0`. A consumer can therefore

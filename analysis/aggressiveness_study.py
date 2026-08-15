@@ -44,9 +44,9 @@ for ch in chans:
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
     fv = f[valid & np.isfinite(f)]
-    mu0 = float(s["mu0_analytic"])
-    c = float(s["mu0_empirical"])
-    w = fv[np.abs(fv - c) <= 6e-3 * mu0]
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    c = float(s["null_power_ratio_empirical"])
+    w = fv[np.abs(fv - c) <= 6e-3 * null_power_ratio]
     sigma = float(w.std(ddof=1)) / TRUNC
     n = fv.size
     kept_1s, cont_1s, kept_bk, cont_bk = [], [], [], []
@@ -121,7 +121,7 @@ fig.savefig(OUT / "fig_aggressive_masking_tradeoff.pdf", bbox_inches="tight")
 
 with open(OUT / "aggressive_masking.csv", "w", newline="") as fh:
     w = csv.writer(fh)
-    w.writerow(["atsc_channel", "sigma_core_1e3_of_mu0",
+    w.writerow(["atsc_channel", "sigma_core_1e3_of_null_power_ratio",
                 "kept_km1", "contfrac_km1",
                 "kept_k0", "contfrac_k0", "kept_k1", "contfrac_k1",
                 "kept_k165", "contfrac_k165", "kept_k233", "contfrac_k233",
@@ -131,8 +131,8 @@ with open(OUT / "aggressive_masking.csv", "w", newline="") as fh:
         return int(np.argmin(np.abs(KS - kk)))
     for ch, p in sorted(per.items()):
         s = study[ch]
-        mu0 = float(s["mu0_analytic"])
-        row = [ch, f"{1e3*p['sigma']/mu0:.2f}"]
+        null_power_ratio = float(s["null_power_ratio_analytic"])
+        row = [ch, f"{1e3*p['sigma']/null_power_ratio:.2f}"]
         for kk in (-1.0, 0.0, 1.0, 1.65, 2.33):
             i = kidx(kk)
             row += [f"{p['kept_1s'][i]:.4f}", f"{p['cont_1s'][i]:.4f}"]

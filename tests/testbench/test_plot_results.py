@@ -8,8 +8,8 @@ import pytest
 # noinspection PyProtectedMember
 from pilot_proxy.testbench.plot_results import (
     _centered_moving_average,
-    _fstat_level_db_to_snr_shelf_db,
-    _snr_shelf_db_to_fstat_level_db,
+    _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db,
+    _estimated_data_shelf_snr_db_to_normalized_coarse_power_ratio_db,
 )
 
 RAW_VALUES = [1.0, 4.0, 7.0, 10.0]
@@ -34,7 +34,7 @@ def test_centered_moving_average_ignores_nan_values() -> None:
 def test_snr_shelf_fstat_axis_transform_round_trips() -> None:
     snr_values = [-60.0, -42.0, -26.0, 0.0]
 
-    fstat_values = _snr_shelf_db_to_fstat_level_db(snr_values)
-    recovered = _fstat_level_db_to_snr_shelf_db(fstat_values)
+    fstat_values = _estimated_data_shelf_snr_db_to_normalized_coarse_power_ratio_db(snr_values)
+    recovered = _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db(fstat_values)
 
     assert list(recovered) == pytest.approx(snr_values)

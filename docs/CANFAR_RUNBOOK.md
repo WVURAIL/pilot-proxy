@@ -337,7 +337,7 @@ fs = str(np.asarray(z["fine_status"]).reshape(()).item())
 assert sv == "pilotproxy_per_pilot_product_v1", sv
 assert "pilot-proxy/" in dv and "kernel=2." in dv, dv
 assert fs == "enabled", fs
-assert z["fstat_fine"].shape[1] == int(z["fine_num_bins"]), z["fstat_fine"].shape
+assert z["fine_power_ratio"].shape[1] == int(z["fine_num_bins"]), z["fine_power_ratio"].shape
 r = np.asarray(z["fine_null_bulk_exceedance_fraction"]).reshape(-1)
 print("schema", sv)
 print("fine bins", int(z["fine_num_bins"]),
@@ -371,7 +371,7 @@ frequency that lies inside the selected CHIME coarse channel but whose physical
 channel has no station listed in the 500-mile census. This is a census-based
 control selection rather than a propagation prediction. Do not choose an arbitrary
 coarse channel with no nominal ATSC pilot in band: the analyzer marks that case
-invalid and does not form an F-statistic.
+invalid and does not form an local-reference power ratio.
 
 Two constraints bound that selection for this archive. First, match the
 census epoch to the data epoch: the shipped census reflects its 2026
@@ -388,11 +388,11 @@ rather than from a census assumption.
 Run the bounded scan for the census-control channel and for one quiet channel
 with a known pilot. Then:
 
-1. Read `mu0` from `chime_detector_outputs.npz` or from the authoritative
+1. Read `null_power_ratio` from `chime_detector_outputs.npz` or from the authoritative
    `_per_pilot/<freq_id>.npz` product. The `chime-run` batch path also records
-   `mu0_by_pilot` in `stats.json`, but the combined `chime-scan` statistics do
+   `null_power_ratio_by_channel` in `stats.json`, but the combined `chime-scan` statistics do
    not currently duplicate that array.
-2. Over frames with `valid = 1`, compare the mean `fstat_raw` with `mu0`. Also
+2. Over frames with `valid = 1`, compare the mean `coarse_power_ratio` with `null_power_ratio`. Also
    inspect the valid-frame mask fraction. Under the tested white-noise model,
    the corrected threshold gives a fraction near one half; on real data this is
    a diagnostic expectation rather than a pass condition by itself.

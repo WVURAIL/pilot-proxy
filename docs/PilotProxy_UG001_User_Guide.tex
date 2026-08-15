@@ -93,7 +93,7 @@
 \newcommand{\field}[1]{\texttt{\detokenize{#1}}}
 \newcommand{\dB}{\,\mathrm{dB}}
 
-% Single-sourced numeric specifications (versions, geometry, mu0 range,
+% Single-sourced numeric specifications (versions, geometry, null_power_ratio range,
 % digests). Regenerate with: python tools/generate_doc_specs.py
 \input{generated/specs.tex}
 
@@ -294,12 +294,12 @@ bash examples/quickstart.sh   # GPU architecture auto-detected
 \end{lstlisting}
 The output includes a waveform audit, detector-input generation, an SNR evaluation, and detection JSON. The current summary headings are shown below. Numeric rows are intentionally omitted here; rerun the script on the target commit and treat that recorded output as the result.
 \begin{lstlisting}[style=shell]
-frequency_offset_hz, requested_snr_shelf_db,
-measured_truth_snr_shelf_db, cpu_float_snr_shelf_db,
-gpu_snr_shelf_db, gpu_snr_error_db
+frequency_offset_hz, requested_data_shelf_snr_db,
+measured_truth_data_shelf_snr_db, cpu_float_estimated_data_shelf_snr_db,
+gpu_estimated_data_shelf_snr_db, gpu_snr_error_db
 ...
-blocks, positive_excess_set, fstat_raw_mean,
-estimated_snr_shelf_db_mean
+blocks, positive_excess_set, coarse_power_ratio_mean,
+estimated_data_shelf_snr_db_mean
 ...
 \end{lstlisting}
 
@@ -381,8 +381,8 @@ pilot-proxy evaluate-snr \
   --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
   --physical-channel 14 \
   --frame-size-samples 16384 \
-  --requested-snr-shelf-db -26 \
-  --threshold-snr-shelf-db -26 \
+  --requested-data-shelf-snr-db -26 \
+  --threshold-data-shelf-snr-db -26 \
   --noise-trials 10 \
   --noise-source gnuradio \
   --gnuradio-python /usr/bin/python3
@@ -394,7 +394,7 @@ Outputs are written under \code{generated/dtv_snr_eval/}:
   \item \code{dtv_snr_eval.json}: full strict-JSON validation report.
 \end{itemize}
 
-If neither explicit \code{--requested-snr-shelf-db} values nor an
+If neither explicit \code{--requested-data-shelf-snr-db} values nor an
 \code{--snr-start-db}/\code{--snr-stop-db}/\code{--snr-step-db} range is
 provided, the evaluator sweeps from \(-60\dB\) to \(0\dB\) in 3 dB steps.
 Each \code{--noise-trials} entry adds one independently generated noise frame
@@ -409,7 +409,7 @@ pilot-proxy evaluate-snr \
   --physical-channel 14 \
   --frame-size-samples 16384 \
   --num-input-streams 1 \
-  --threshold-snr-shelf-db -26 \
+  --threshold-data-shelf-snr-db -26 \
   --noise-trials 10 \
   --noise-source python
 \end{lstlisting}
@@ -428,7 +428,7 @@ pilot-proxy evaluate-snr \
   --physical-channel 14 \
   --frame-size-samples 16384 \
   --num-input-streams 1 \
-  --threshold-snr-shelf-db -26 \
+  --threshold-data-shelf-snr-db -26 \
   --noise-trials 300 \
   --noise-source python \
   --detector-backend cpu-reference
@@ -454,13 +454,13 @@ The CSV, JSON, and PNG use the same grouped summary values. The current plot hel
 
 Important report fields include:
 \begin{itemize}
-  \item \field{requested_snr_shelf_db}
-  \item \field{measured_truth_snr_shelf_db}
+  \item \field{requested_data_shelf_snr_db}
+  \item \field{measured_truth_data_shelf_snr_db}
   \item \field{measured_truth_composite_atsc_snr_db}
   \item \field{p_target_u64}, \field{p_ref_lower_u64}, \field{p_ref_upper_u64}
-  \item \field{fstat_raw}, \field{fstat_level_db}, \field{pilot_excess_linear}, \field{pnr_bin_db}
-  \item \field{estimated_snr_shelf_db}, \field{snr_error_db}
-  \item \field{mask}, when \code{--threshold-snr-shelf-db} is supplied.
+  \item \field{coarse_power_ratio}, \field{normalized_coarse_power_ratio_db}, \field{raw_pilot_excess}, \field{pilot_excess_db}
+  \item \field{estimated_data_shelf_snr_db}, \field{snr_error_db}
+  \item \field{mask}, when \code{--threshold-data-shelf-snr-db} is supplied.
 \end{itemize}
 
 
@@ -494,8 +494,8 @@ The detector JSON includes:
   \item \field{selected_weight_layout}
   \item \field{result_schema} with \code{schema_version=pilot_proxy_result_v2}
   \item \field{layout} with \field{frame_size_samples}, \field{num_input_streams}, \field{windows_per_stream}, and \field{detector_rows_per_frame}
-  \item \field{mask_rule}, \field{target_norm_sq}, \field{ref_norm_sum_sq}, and \field{mu0}
-  \item per-block \field{mask} and \field{positive_excess_mask}, exact powers, \field{fstat_raw}, raw \field{pilot_excess_linear}, norm-corrected \field{pilot_excess_corrected}, and estimated shelf SNR.
+  \item \field{mask_rule}, \field{target_norm_sq}, \field{reference_norm_sum_sq}, and \field{null_power_ratio}
+  \item per-block \field{mask} and \field{normalized_positive_excess_mask}, exact powers, \field{coarse_power_ratio}, raw \field{raw_pilot_excess}, norm-corrected \field{normalized_pilot_excess}, and estimated shelf SNR.
 \end{itemize}
 The current \code{detect} command does not apply a user-supplied shelf-SNR threshold. Its threshold fields inside \field{result_schema} are \code{null}, and it masks a valid block at the norm-corrected condition \(F>\mu_0\). The earlier/basic raw convention \(F>1\) remains useful for defining \(\rho=F-1\), but it is not the current CHIME mask rule.
 
@@ -551,7 +551,7 @@ the standalone ATSC testbench.
 \section{Thresholds}
 \label{sec:thresholds}
 
-For the synthetic threshold path, the user provides \code{threshold_snr_shelf_db}. Host code converts it to a rational half-threshold, after which the kernel compares integer powers and integer threshold terms.
+For the synthetic threshold path, the user provides \code{threshold_data_shelf_snr_db}. Host code converts it to a rational half-threshold, after which the kernel compares integer powers and integer threshold terms.
 
 
 \begin{figure}[H]
@@ -575,10 +575,10 @@ For the synthetic threshold path, the user provides \code{threshold_snr_shelf_db
 
 For a \(-26\dB\) shelf-SNR threshold and the included reference geometry, the checked-in conversion code gives
 \begin{lstlisting}[style=shell]
-threshold_snr_shelf_db       = -26.000
-threshold_pnr_bin_db         =  -4.364
-threshold_pilot_excess_linear=   0.3661
-threshold_fstat_raw          =   1.3661
+threshold_data_shelf_snr_db       = -26.000
+threshold_pilot_excess_db         =  -4.364
+threshold_raw_pilot_excess=   0.3661
+threshold_coarse_power_ratio          =   1.3661
 threshold_half_float         =   0.68305
 \end{lstlisting}
 
@@ -597,7 +597,7 @@ severity threshold.
 
 The rule is a recording convention rather than a tuned operating point: the
 rational pair that implements it is per-channel bundle data, and
-\field{fstat_raw} is persisted per frame, so a deployment (or a later
+\field{coarse_power_ratio} is persisted per frame, so a deployment (or a later
 re-analysis) may move the threshold without any kernel change. The adopted
 Kotekan deployment instead moves the decision itself to the fine
 designated-set CFAR computed in the kernel; the Data Sheet's threshold
@@ -645,7 +645,7 @@ and \code{docs/PRODUCT_SCHEMA.md} give the definitions and stored fields;
 In CHIME archive products (\code{pilot-proxy chime-scan}), fine products are
 controlled by \code{--set fine_products=auto|on|off}. \code{auto} enables
 them when the loaded library exposes the row-sum entry and otherwise records
-\field{fine_status=kernel_library_lacks_row_sums}; \code{on} hard-fails on a
+\field{fine_status=kernel_library_lacks_matched_filter_row_projections}; \code{on} hard-fails on a
 stale library, which is the intended production setting.
 
 \begin{figure}[H]
@@ -712,9 +712,9 @@ A zero denominator cannot define \(F\). The kernel sets the mask to zero for thi
 A capability probe guards the row-sum entry:
 \begin{lstlisting}[style=cstyle,language=C]
 if (FStat_Supports_RowSums()) {
-    /* d_row_sums_out: device int32, batch * N * rows * 2 elements
+    /* d_matched_filter_row_projections_out: device int32, batch * N * rows * 2 elements
        (term-major, stream-major rows, interleaved re/im). */
-    FStat_Compute_RowSums_I32(h, host_weights, d_row_sums_out);
+    FStat_Compute_RowSums_I32(h, host_weights, d_matched_filter_row_projections_out);
 }
 \end{lstlisting}
 The values are exact integers, and the int64 sum of \(|z|^2\) over rows

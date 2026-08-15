@@ -14,11 +14,11 @@ import numpy as np
 from pilot_proxy.dtv_units import (
     DB_LINEAR_BASE,
     DB_POWER_FACTOR,
-    NO_PILOT_EXCESS_FSTAT,
-    fstat_raw_to_fstat_level_db,
-    pnr_bin_db_to_snr_shelf_db,
-    pnr_bin_db_to_fstat_raw_threshold,
-    snr_shelf_db_to_pnr_bin_db,
+    UNIT_NORMALIZED_POWER_RATIO,
+    coarse_power_ratio_to_db,
+    pilot_excess_db_to_data_shelf_snr_db,
+    pilot_excess_db_to_normalized_power_ratio_threshold,
+    data_shelf_snr_db_to_pilot_excess_db,
 )
 from pilot_proxy.plot_style import setup_matplotlib
 
@@ -34,10 +34,10 @@ HZ_PER_KHZ = 1_000.0
 DEFAULT_SMOOTH_WINDOW = 1
 MIN_SMOOTH_WINDOW = 1
 
-REQUESTED_SNR_COLUMN = "requested_snr_shelf_db"
+REQUESTED_SNR_COLUMN = "requested_data_shelf_snr_db"
 FREQUENCY_OFFSET_COLUMN = "frequency_offset_hz"
-CPU_FLOAT_SNR_COLUMN = "cpu_float_estimated_snr_shelf_db_mean"
-GPU_SNR_COLUMN = "estimated_snr_shelf_db_mean"
+CPU_FLOAT_SNR_COLUMN = "cpu_float_estimated_data_shelf_snr_db_mean"
+GPU_SNR_COLUMN = "estimated_data_shelf_snr_db_mean"
 FSTAT_LEVEL_TICKS_DB = np.asarray([0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 20.0])
 
 
@@ -140,21 +140,21 @@ def _curve_label(prefix: str, frequency_offset_hz: float, smooth_window: int) ->
     return label
 
 
-def _snr_shelf_db_to_fstat_level_db(values) -> np.ndarray:
+def _estimated_data_shelf_snr_db_to_normalized_coarse_power_ratio_db(values) -> np.ndarray:
     """Map shelf-SNR display coordinates to F-statistic level coordinates."""
     snr = np.asarray(values, dtype=np.float64)
-    pnr = snr_shelf_db_to_pnr_bin_db(snr)
-    raw = pnr_bin_db_to_fstat_raw_threshold(pnr)
-    return np.asarray(fstat_raw_to_fstat_level_db(raw), dtype=np.float64)
+    pnr = data_shelf_snr_db_to_pilot_excess_db(snr)
+    raw = pilot_excess_db_to_normalized_power_ratio_threshold(pnr)
+    return np.asarray(coarse_power_ratio_to_db(raw), dtype=np.float64)
 
 
-def _fstat_level_db_to_snr_shelf_db(values) -> np.ndarray:
+def _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db(values) -> np.ndarray:
     """Map F-statistic level display coordinates back to shelf-SNR coordinates."""
     fstat_level = np.asarray(values, dtype=np.float64)
     raw = DB_LINEAR_BASE ** (fstat_level / DB_POWER_FACTOR)
-    excess = np.maximum(raw - NO_PILOT_EXCESS_FSTAT, np.finfo(np.float64).tiny)
+    excess = np.maximum(raw - UNIT_NORMALIZED_POWER_RATIO, np.finfo(np.float64).tiny)
     pnr = DB_POWER_FACTOR * np.log10(excess)
-    return np.asarray(pnr_bin_db_to_snr_shelf_db(pnr), dtype=np.float64)
+    return np.asarray(pilot_excess_db_to_data_shelf_snr_db(pnr), dtype=np.float64)
 
 
 def _format_fstat_tick(value: float) -> str:
@@ -169,8 +169,8 @@ def _add_fstat_level_axis(axis, *, orientation: str):
         secondary = axis.secondary_xaxis(
             "top",
             functions=(
-                _snr_shelf_db_to_fstat_level_db,
-                _fstat_level_db_to_snr_shelf_db,
+                _estimated_data_shelf_snr_db_to_normalized_coarse_power_ratio_db,
+                _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db,
             ),
         )
         xmin, xmax = axis.get_xlim()
@@ -181,8 +181,8 @@ def _add_fstat_level_axis(axis, *, orientation: str):
         secondary = axis.secondary_yaxis(
             "right",
             functions=(
-                _snr_shelf_db_to_fstat_level_db,
-                _fstat_level_db_to_snr_shelf_db,
+                _estimated_data_shelf_snr_db_to_normalized_coarse_power_ratio_db,
+                _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db,
             ),
         )
         ymin, ymax = axis.get_ylim()
@@ -193,7 +193,7 @@ def _add_fstat_level_axis(axis, *, orientation: str):
     else:
         raise ValueError(f"unknown secondary-axis orientation: {orientation!r}")
 
-    tick_positions = _fstat_level_db_to_snr_shelf_db(FSTAT_LEVEL_TICKS_DB)
+    tick_positions = _normalized_coarse_power_ratio_db_to_estimated_data_shelf_snr_db(FSTAT_LEVEL_TICKS_DB)
     keep = (
         np.isfinite(tick_positions)
         & (tick_positions >= xmin)

@@ -68,7 +68,7 @@ def series(rule):
         else:
             lo, hi = wilson(pd, trials_of(r))
         data.setdefault(off, []).append(
-            (float(r["requested_snr_shelf_db"]), pd, lo, hi))
+            (float(r["requested_data_shelf_snr_db"]), pd, lo, hi))
     for off in data:
         data[off].sort()
     return data
@@ -112,7 +112,7 @@ def acceptance(name, data):
 
 
 thr = series("threshold")
-pex = series("positive_excess")
+pex = series("normalized_positive_excess_decision")
 if thr is None:
     raise SystemExit("no threshold_detection_rate column found")
 v_thr = acceptance("threshold", thr)
@@ -122,24 +122,24 @@ if pex is None:
 
 
 def means():
-    """{offset: sorted [(snr_db, mean_excess)]} from fstat_raw_mean."""
-    if "fstat_raw_mean" not in cols:
+    """{offset: sorted [(snr_db, mean_excess)]} from coarse_power_ratio_mean."""
+    if "coarse_power_ratio_mean" not in cols:
         return None
     MU0_CH14 = 1.0020553
     data = {}
     for r in rows:
-        if not r.get("fstat_raw_mean"):
+        if not r.get("coarse_power_ratio_mean"):
             continue
         off = float(r["frequency_offset_hz"])
-        exc = float(r["fstat_raw_mean"]) / MU0_CH14 - 1.0
+        exc = float(r["coarse_power_ratio_mean"]) / MU0_CH14 - 1.0
         data.setdefault(off, []).append(
-            (float(r["requested_snr_shelf_db"]), exc))
+            (float(r["requested_data_shelf_snr_db"]), exc))
     for off in data:
         data[off].sort()
     return data
 
 
-# Deterministic benchmark: F ~ mu0 * ncF(2R, 4R, lambda), lambda = 2 R C s_eff
+# Deterministic benchmark: F ~ null_power_ratio * ncF(2R, 4R, lambda), lambda = 2 R C s_eff
 R_TRIAL, C_ALLOC = 512, 145.7475
 def bench_mean_excess(s_lin, off_hz):
     s_eff = s_lin * np.sinc(off_hz / BIN_HZ) ** 2
@@ -153,7 +153,7 @@ def bench_pd(s_lin, off_hz):
     s_eff = s_lin * np.sinc(off_hz / BIN_HZ) ** 2
     d1, d2 = 2 * R_TRIAL, 4 * R_TRIAL
     lam = d1 * C_ALLOC * s_eff
-    # P(F_raw > mu0) with F_raw = mu0 * ncF: P(ncF(d1,d2,lam) > 1)
+    # P(F_raw > null_power_ratio) with F_raw = null_power_ratio * ncF: P(ncF(d1,d2,lam) > 1)
     from scipy.stats import ncf
     return float(ncf.sf(1.0, d1, d2, lam))
 

@@ -150,7 +150,7 @@ def test_detect_wrapper_forwards_public_calibration_controls(monkeypatch, tmp_pa
     assert cmd[cmd.index("--pilot-frequency-tolerance-hz") + 1] == (
         NORMALIZED_PILOT_FREQUENCY_TOLERANCE_HZ_TEXT
     )
-    assert "--threshold-snr-shelf-db" not in cmd
+    assert "--threshold-data-shelf-snr-db" not in cmd
     assert "--max-denominator" not in cmd
 
 
@@ -241,7 +241,7 @@ def test_evaluate_snr_cli_accepts_detector_backend(monkeypatch, tmp_path) -> Non
             "--num-input-streams", "4",
             "--snr-start-db", "-38", "--snr-stop-db", "-24", "--snr-step-db", "1",
             "--standard-frequency-offset-sweep",
-            "--threshold-snr-shelf-db", "-32",
+            "--threshold-data-shelf-snr-db", "-32",
             "--noise-trials", "300",
             "--output-dir", str(tmp_path / "pd_curves"),
             "--detector-backend", "cpu-reference",

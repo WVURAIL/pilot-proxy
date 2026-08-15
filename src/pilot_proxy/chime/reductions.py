@@ -42,9 +42,9 @@ def aggregate_frame_products(
     frame_size_samples: int,
     sample_rate_hz: float = SAMPLE_RATE_HZ,
     chunk_seconds: float,
-    fstat_raw: np.ndarray,
-    fstat_level_db: np.ndarray,
-    snr_shelf_db: np.ndarray,
+    coarse_power_ratio: np.ndarray,
+    normalized_coarse_power_ratio_db: np.ndarray,
+    estimated_data_shelf_snr_db: np.ndarray,
     baseband_power_linear: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
@@ -57,9 +57,9 @@ def aggregate_frame_products(
         raise ValueError("chunk_seconds must be positive")
 
     arrays = [
-        np.asarray(fstat_raw),
-        np.asarray(fstat_level_db),
-        np.asarray(snr_shelf_db),
+        np.asarray(coarse_power_ratio),
+        np.asarray(normalized_coarse_power_ratio_db),
+        np.asarray(estimated_data_shelf_snr_db),
         np.asarray(baseband_power_linear),
         np.asarray(mask),
         np.asarray(valid),
@@ -98,18 +98,18 @@ def aggregate_frame_products(
     unmasked_count_valid = np.zeros((num_chunks, num_pilots), dtype=np.int64)
     mask_fraction_valid = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
     mask_fraction_total = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    fstat_level_db_median = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    fstat_level_db_p95 = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    fstat_level_db_max = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    snr_shelf_db_median = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    snr_shelf_db_p95 = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
-    snr_shelf_db_max = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    normalized_coarse_power_ratio_db_median = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    normalized_coarse_power_ratio_db_p95 = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    normalized_coarse_power_ratio_db_max = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    estimated_data_shelf_snr_db_median = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    estimated_data_shelf_snr_db_p95 = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
+    estimated_data_shelf_snr_db_max = np.full((num_chunks, num_pilots), np.nan, dtype=np.float64)
 
     baseband = np.asarray(baseband_power_linear, dtype=np.float64)
     mask_arr = np.asarray(mask, dtype=np.uint8)
     valid_arr = np.asarray(valid, dtype=np.uint8) != 0
-    fstat_level = np.asarray(fstat_level_db, dtype=np.float64)
-    shelf = np.asarray(snr_shelf_db, dtype=np.float64)
+    fstat_level = np.asarray(normalized_coarse_power_ratio_db, dtype=np.float64)
+    shelf = np.asarray(estimated_data_shelf_snr_db, dtype=np.float64)
 
     for out_index, chunk_id in enumerate(unique_chunks):
         rows = np.nonzero(chunk_ids == chunk_id)[0]
@@ -136,12 +136,12 @@ def aggregate_frame_products(
 
         fstat_chunk = np.where(valid_chunk, fstat_level[rows, :], np.nan)
         shelf_chunk = np.where(valid_chunk, shelf[rows, :], np.nan)
-        fstat_level_db_median[out_index, :] = _finite_stat(fstat_chunk, "median")
-        fstat_level_db_p95[out_index, :] = _finite_stat(fstat_chunk, "p95")
-        fstat_level_db_max[out_index, :] = _finite_stat(fstat_chunk, "max")
-        snr_shelf_db_median[out_index, :] = _finite_stat(shelf_chunk, "median")
-        snr_shelf_db_p95[out_index, :] = _finite_stat(shelf_chunk, "p95")
-        snr_shelf_db_max[out_index, :] = _finite_stat(shelf_chunk, "max")
+        normalized_coarse_power_ratio_db_median[out_index, :] = _finite_stat(fstat_chunk, "median")
+        normalized_coarse_power_ratio_db_p95[out_index, :] = _finite_stat(fstat_chunk, "p95")
+        normalized_coarse_power_ratio_db_max[out_index, :] = _finite_stat(fstat_chunk, "max")
+        estimated_data_shelf_snr_db_median[out_index, :] = _finite_stat(shelf_chunk, "median")
+        estimated_data_shelf_snr_db_p95[out_index, :] = _finite_stat(shelf_chunk, "p95")
+        estimated_data_shelf_snr_db_max[out_index, :] = _finite_stat(shelf_chunk, "max")
 
     return {
         "chunk_index": chunk_index,
@@ -158,12 +158,12 @@ def aggregate_frame_products(
         "unmasked_count_valid": unmasked_count_valid,
         "mask_fraction_valid": mask_fraction_valid,
         "mask_fraction_total": mask_fraction_total,
-        "fstat_level_db_median": fstat_level_db_median,
-        "fstat_level_db_p95": fstat_level_db_p95,
-        "fstat_level_db_max": fstat_level_db_max,
-        "snr_shelf_db_median": snr_shelf_db_median,
-        "snr_shelf_db_p95": snr_shelf_db_p95,
-        "snr_shelf_db_max": snr_shelf_db_max,
+        "normalized_coarse_power_ratio_db_median": normalized_coarse_power_ratio_db_median,
+        "normalized_coarse_power_ratio_db_p95": normalized_coarse_power_ratio_db_p95,
+        "normalized_coarse_power_ratio_db_max": normalized_coarse_power_ratio_db_max,
+        "estimated_data_shelf_snr_db_median": estimated_data_shelf_snr_db_median,
+        "estimated_data_shelf_snr_db_p95": estimated_data_shelf_snr_db_p95,
+        "estimated_data_shelf_snr_db_max": estimated_data_shelf_snr_db_max,
     }
 
 
@@ -174,9 +174,9 @@ def write_reductions_npz(
     frame_size_samples: int,
     sample_rate_hz: float = SAMPLE_RATE_HZ,
     chunk_seconds: float = 10.0,
-    fstat_raw: np.ndarray,
-    fstat_level_db: np.ndarray,
-    snr_shelf_db: np.ndarray,
+    coarse_power_ratio: np.ndarray,
+    normalized_coarse_power_ratio_db: np.ndarray,
+    estimated_data_shelf_snr_db: np.ndarray,
     baseband_power_linear: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
@@ -187,9 +187,9 @@ def write_reductions_npz(
         frame_size_samples=int(frame_size_samples),
         sample_rate_hz=float(sample_rate_hz),
         chunk_seconds=float(chunk_seconds),
-        fstat_raw=fstat_raw,
-        fstat_level_db=fstat_level_db,
-        snr_shelf_db=snr_shelf_db,
+        coarse_power_ratio=coarse_power_ratio,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         baseband_power_linear=baseband_power_linear,
         mask=mask,
         valid=valid,

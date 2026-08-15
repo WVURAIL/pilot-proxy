@@ -118,7 +118,7 @@ def test_agrees_with_exact_dft_within_rounding_budget(n):
 
 
 @pytest.mark.parametrize("n", FAMILY)
-def test_input_bound_tightens_and_admits_deployed_row_sums(n):
+def test_input_bound_tightens_and_admits_deployed_matched_filter_row_projections(n):
     """The eight-stage contract is not reusable at nine stages."""
     limit = input_abs_max(n)
     assert limit & (limit - 1) == 0

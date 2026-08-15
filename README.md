@@ -6,7 +6,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
 </p>
 
-`pilot-proxy` evaluates an F-statistic detector for Advanced Television Systems
+`pilot-proxy` evaluates an local-reference power ratio detector for Advanced Television Systems
 Committee (ATSC) 1.0 digital television (DTV) signals. We use the narrow ATSC
 pilot tone as a measurable proxy for the broadband data shelf. This provides a
 narrow-band observable when the shelf is below the instantaneous noise level.
@@ -439,7 +439,7 @@ For the target CHIME profile and one selected coarse channel, the row count is:
 
 Thus, one frame in this profile is packed as `(262144, 128)`, and a batch is
 packed as `(frames_in_chunk, 262144, 128)`. The kernel sums the target and
-reference powers over every detector row before it forms one F-statistic for the
+reference powers over every detector row before it forms one local-reference power ratio for the
 frame or block. This geometry is conditional on the profile's 16384-sample
 frame. Use `check-layout` to print and validate the geometry derived from the
 profile:
@@ -501,7 +501,7 @@ CADC/CANFAR sequences, order constraint, and post-processing commands:
 ## Standalone synthetic/testbench workflow
 
 <p align="center">
-  <img src="docs/figures/validation_flow.svg" alt="Standalone validation flow: ATSC generation, waveform audit, AWGN injection, reference PFB, packed int4 matrix, CUDA F-statistic kernel, report" width="560">
+  <img src="docs/figures/validation_flow.svg" alt="Standalone validation flow: ATSC generation, waveform audit, AWGN injection, reference PFB, packed int4 matrix, CUDA local-reference power ratio kernel, report" width="560">
 </p>
 
 This is the same diagram the Data Sheet and User Guide carry; all three
@@ -512,7 +512,7 @@ When GNU Radio is installed only in the system Python, the standalone workflow
 uses two interpreters:
 
 - GNU Radio Python for ATSC generation and GNU Radio AWGN;
-- CUDA Python for CuPy and the CUDA F-statistic library.
+- CUDA Python for CuPy and the CUDA local-reference power ratio library.
 
 Generate an ATSC waveform without injected noise:
 
@@ -543,7 +543,7 @@ PYTHONPATH=src python   -m pilot_proxy.testbench.quantize   --input-iq generated
 Run a small SNR evaluation:
 
 ```bash
-PYTHONPATH=src python   -m pilot_proxy.testbench.evaluate_snr   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --physical-channel 14   --frame-size-samples 16384   --num-input-streams 1   --requested-snr-shelf-db -26   --noise-trials 10
+PYTHONPATH=src python   -m pilot_proxy.testbench.evaluate_snr   --input-iq generated/atsc/atsc_8vsb_complex64.cfile   --physical-channel 14   --frame-size-samples 16384   --num-input-streams 1   --requested-data-shelf-snr-db -26   --noise-trials 10
 ```
 
 This command writes `generated/dtv_snr_eval/dtv_snr_summary.csv`. The

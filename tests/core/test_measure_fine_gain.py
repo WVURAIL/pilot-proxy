@@ -33,7 +33,7 @@ def test_mc_smoke_thresholds_and_detection(tmp_path):
                   b0=mfg.ANCHOR, streams=32, batch=8)
     c0, f0, _ = mfg.collect(out, "h0_s*.npz")
     assert c0.size == 64 and f0.size == 64
-    # H0 statistics center near 1 (mu0 = 1 by construction)
+    # H0 statistics center near 1 (null_power_ratio = 1 by construction)
     assert 0.9 < np.median(c0) < 1.1
     assert 0.9 < np.median(f0) < 1.3
     c1, f1, _ = mfg.collect(out, "h1_*dB_s*.npz")

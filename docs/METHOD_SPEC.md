@@ -80,42 +80,42 @@ exactly equal. Therefore,
 
 ```text
 E[P_term] = sigma^2 * ||w_term||^2
-E[F]      = mu0 = 2 * target_norm_sq / ref_norm_sum_sq
+E[F]      = null_power_ratio = 2 * target_norm_sq / reference_norm_sum_sq
 ```
 
 Here `target_norm_sq = ||w_target||^2` and
-`ref_norm_sum_sq = ||w_ref_lower||^2 + ||w_ref_upper||^2`. These are exact
+`reference_norm_sum_sq = ||w_ref_lower||^2 + ||w_ref_upper||^2`. These are exact
 integer norms computed from the packed weights. Independent recomputation
-from the shipped ATSC 14--36 manifest gives a `mu0` range of 0.9853298815 to
+from the shipped ATSC 14--36 manifest gives a `null_power_ratio` range of 0.9853298815 to
 1.0111111111. A common threshold at `F = 1` would therefore place different
 channels on different sides of their own `H0` zero points.
 
-We compare with `mu0` using integer powers:
+We compare with `null_power_ratio` using integer powers:
 
 ```text
 valid = p_ref_sum != 0
-mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
+mask  = valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
 This is the exact integer form of
 
 ```text
-F > mu0
+F > null_power_ratio
 ```
 
-When `target_norm_sq : ref_norm_sum_sq = 1 : 2`, the comparison reduces to
+When `target_norm_sq : reference_norm_sum_sq = 1 : 2`, the comparison reduces to
 the earlier `F > 1` rule, `p_target > (p_ref_sum >> 1)`. Products written
 under that earlier rule identify it in `mask_rule`.
 
 The corrected pilot excess is
 
 ```text
-rho_corrected = F / mu0 - 1
+rho_corrected = F / null_power_ratio - 1
 ```
 
-and is stored per frame as `pilot_excess_corrected`. The CUDA ABI can express
+and is stored per frame as `normalized_pilot_excess`. The CUDA ABI can express
 the same comparison through the rational half-threshold
-`half_num : half_den = target_norm_sq : ref_norm_sum_sq`. The current
+`half_num : half_den = target_norm_sq : reference_norm_sum_sq`. The current
 `chime-scan` path reads the uint64 powers and applies the decision on the
 host.
 
@@ -170,7 +170,7 @@ The repository currently contains two decision implementations with different
 operational status:
 
 - Current CHIME archive products store `reject_mask` from the exact,
-  norm-corrected coarse positive-excess comparison `F > mu0`.
+  norm-corrected coarse positive-excess comparison `F > null_power_ratio`.
 - The floating-point fine reduction stores a fine-bin statistic, a robust
   per-frame null-bulk threshold, and threshold exceedances for analysis. Those
   fields do not replace `reject_mask`.
@@ -201,9 +201,9 @@ the shipped packed weights and a pure-tone response:
   channel and the sign of the offset and is independent of additional pilot
   power.
 
-Both ceilings remain well above `mu0`. Therefore, they do not change the
+Both ceilings remain well above `null_power_ratio`. Therefore, they do not change the
 positive-excess decision for a strong pilot. They do mean that
-`pnr_bin_db` and `snr_shelf_db` should be read as lower bounds for sufficiently
+`pilot_excess_db` and `estimated_data_shelf_snr_db` should be read as lower bounds for sufficiently
 strong, offset transmitters.
 
 For a rectangular `K`-sample window, the target-term capture factor is

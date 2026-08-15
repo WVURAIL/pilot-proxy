@@ -1,5 +1,5 @@
 # coding=utf-8
-"""v2 time-coherent fine reduction over exact kernel row sums.
+"""Time-coherent fine reduction over exact kernel row sums.
 
 Stage 1 (CUDA or reference) emits exact int32 complex row sums
 ``z[n, m]`` for every weight term ``n`` and detector row ``m``
@@ -15,10 +15,10 @@ stage 2:
 
 Invariants (enforced, not assumed):
 
-* **Exact v1 marginal identity.** The int64 sum over rows of ``|z[n, m]|^2``
+* **Exact coarse marginal identity.** The int64 sum over rows of ``|z[n, m]|^2``
   reproduces the deployed ``FStat_Compute_Powers_U64`` output bit-for-bit;
   ``fine_reduce`` computes it in the integer domain and
-  ``check_v1_marginal_identity`` asserts it against kernel powers at
+  ``check_coarse_power_marginal_identity`` asserts it against kernel powers at
   runtime. The float Parseval identity
   ``sum_b S[n, b] == pad * windows * P[n]`` is the ULP-level gate on the
   FFT path itself.
@@ -40,7 +40,7 @@ The module is backend-agnostic: pass ``xp=numpy`` (default) or
 ``xp=cupy``. Integer marginals are computed with integer dtypes on either
 backend; FFTs use complex128 under numpy (prototype/parity reference) and
 complex64 under cupy (production), with the GPU-vs-prototype comparison
-gated at ULP tolerance in ``tests/kernel/test_row_sums_gpu.py``.
+gated at ULP tolerance in ``tests/kernel/test_matched_filter_row_projections_gpu.py``.
 """
 from __future__ import annotations
 
@@ -147,12 +147,12 @@ class CfarCalibration:
 
 @dataclass
 class FineReductionResult:
-    """Per-frame v2 products."""
+    """Per-frame fine-reduction products."""
 
     fine_power: np.ndarray  # [num_weight_terms, num_bins] float
-    fstat_fine: np.ndarray  # [num_bins] float
-    marginal_powers: np.ndarray  # [num_weight_terms] int64 (exact)
-    v1_fstat: float
+    fine_power_ratio: np.ndarray  # [num_bins] float
+    coarse_power_by_term: np.ndarray  # [num_weight_terms] int64 (exact)
+    coarse_power_ratio_from_marginal: float
     num_streams: int
     windows_per_stream: int
     pad_factor: int
@@ -163,12 +163,12 @@ class FineReductionResult:
 
     @property
     def num_bins(self) -> int:
-        return int(self.fstat_fine.shape[-1])
+        return int(self.fine_power_ratio.shape[-1])
 
 
-def _as_complex_rows(row_sums: Any, num_weight_terms: int, xp: Any) -> Any:
+def _as_complex_rows(matched_filter_row_projections: Any, num_weight_terms: int, xp: Any) -> Any:
     """Normalize kernel/reference output to complex [terms, rows]."""
-    arr = xp.asarray(row_sums)
+    arr = xp.asarray(matched_filter_row_projections)
     if arr.dtype.kind == "c":
         if arr.ndim != 2 or arr.shape[0] != int(num_weight_terms):
             raise ValueError(
@@ -186,22 +186,22 @@ def _as_complex_rows(row_sums: Any, num_weight_terms: int, xp: Any) -> Any:
     return arr
 
 
-def exact_marginal_powers(
-    row_sums: Any,
+def exact_coarse_power_by_term(
+    matched_filter_row_projections: Any,
     *,
     num_weight_terms: int = 3,
     xp: Any = np,
 ) -> np.ndarray:
-    """Exact int64 v1 power terms from integer row sums.
+    """Exact int64 coarse power terms from integer row sums.
 
     Computed entirely in the integer domain so the result is bit-identical
     to ``FStat_Compute_Powers_U64`` regardless of backend or ordering.
     Complex inputs are rejected: exactness requires the integer form.
     """
-    arr = xp.asarray(row_sums)
+    arr = xp.asarray(matched_filter_row_projections)
     if arr.dtype.kind == "c":
         raise TypeError(
-            "exact_marginal_powers requires integer row sums; complex "
+            "exact_coarse_power_by_term requires integer row sums; complex "
             "floats cannot guarantee the bit-exact v1 identity."
         )
     arr = _as_complex_rows(arr, num_weight_terms, xp)  # [terms, rows, 2] ints
@@ -213,7 +213,7 @@ def exact_marginal_powers(
     return np.asarray(out, dtype=np.int64)
 
 
-def v1_fstat_from_powers(powers: Sequence[int]) -> float:
+def coarse_power_ratio_from_powers(powers: Sequence[int]) -> float:
     """F = 2 P_t / (P_l + P_u), zero when the denominator vanishes."""
     p = np.asarray(powers, dtype=np.float64)
     den = float(p[WEIGHT_TERM_REF_LOWER] + p[WEIGHT_TERM_REF_UPPER])
@@ -222,23 +222,23 @@ def v1_fstat_from_powers(powers: Sequence[int]) -> float:
     return float(2.0 * p[WEIGHT_TERM_TARGET] / den)
 
 
-def check_v1_marginal_identity(
-    marginal_powers: Sequence[int],
+def check_coarse_power_marginal_identity(
+    coarse_power_by_term: Sequence[int],
     kernel_powers: Sequence[int],
 ) -> None:
     """Assert the exact all-bin marginal identity against kernel powers."""
-    a = np.asarray(marginal_powers, dtype=np.uint64)
+    a = np.asarray(coarse_power_by_term, dtype=np.uint64)
     b = np.asarray(kernel_powers, dtype=np.uint64)
     if a.shape != b.shape or not bool(np.all(a == b)):
         raise AssertionError(
-            "v1 marginal identity violated: row-sum marginal "
+            "coarse marginal identity violated: row-sum marginal "
             f"{a.tolist()} != kernel powers {b.tolist()}. Stage-1 output "
             "is corrupt or mismatched; do not trust downstream products."
         )
 
 
 def fine_reduce(
-    row_sums: Any,
+    matched_filter_row_projections: Any,
     *,
     num_streams: int,
     windows_per_stream: int,
@@ -248,10 +248,10 @@ def fine_reduce(
 ) -> FineReductionResult:
     """Reduce exact row sums to fine-bin spectra and the fine statistic.
 
-    ``row_sums`` accepts the kernel's flat int32 buffer, an
+    ``matched_filter_row_projections`` accepts the kernel's flat int32 buffer, an
     ``[terms, rows, 2]`` integer array, or a complex ``[terms, rows]``
     array (integer forms preserve the exact marginal; complex input skips
-    it and records ``marginal_powers`` from the float spectra Parseval
+    it and records ``coarse_power_by_term`` from the float spectra Parseval
     sum, rounded — prefer integers).
     """
     terms = int(num_weight_terms)
@@ -260,7 +260,7 @@ def fine_reduce(
     rows = streams * windows
     p2 = fine_bin_count(windows, pad_factor)
 
-    arr = xp.asarray(row_sums)
+    arr = xp.asarray(matched_filter_row_projections)
     integer_input = arr.dtype.kind != "c"
     norm = _as_complex_rows(arr, terms, xp)
     if integer_input:
@@ -268,7 +268,7 @@ def fine_reduce(
             raise ValueError(
                 f"row count {norm.shape[1]} != num_streams * windows_per_stream = {rows}."
             )
-        marginal = exact_marginal_powers(arr, num_weight_terms=terms, xp=xp)
+        marginal = exact_coarse_power_by_term(arr, num_weight_terms=terms, xp=xp)
         complex_dtype = xp.complex128 if xp is np else xp.complex64
         z = norm[..., 0].astype(complex_dtype) + 1j * norm[..., 1].astype(
             complex_dtype
@@ -297,16 +297,16 @@ def fine_reduce(
     s_l = power[WEIGHT_TERM_REF_LOWER]
     s_u = power[WEIGHT_TERM_REF_UPPER]
     den = s_l + s_u
-    fstat = xp.where(den > 0, 2.0 * s_t / xp.where(den > 0, den, 1.0), 0.0)
+    power_ratio = xp.where(den > 0, 2.0 * s_t / xp.where(den > 0, den, 1.0), 0.0)
 
     power_host = power.get() if hasattr(power, "get") else power
-    fstat_host = fstat.get() if hasattr(fstat, "get") else fstat
+    fstat_host = power_ratio.get() if hasattr(power_ratio, "get") else power_ratio
 
     return FineReductionResult(
         fine_power=np.asarray(power_host, dtype=np.float32),
-        fstat_fine=np.asarray(fstat_host, dtype=np.float32),
-        marginal_powers=np.asarray(marginal, dtype=np.int64),
-        v1_fstat=v1_fstat_from_powers(marginal),
+        fine_power_ratio=np.asarray(fstat_host, dtype=np.float32),
+        coarse_power_by_term=np.asarray(marginal, dtype=np.int64),
+        coarse_power_ratio_from_marginal=coarse_power_ratio_from_powers(marginal),
         num_streams=streams,
         windows_per_stream=windows,
         pad_factor=int(pad_factor),
@@ -314,7 +314,7 @@ def fine_reduce(
 
 
 def calibrate_cfar(
-    fstat_fine: np.ndarray,
+    fine_power_ratio: np.ndarray,
     *,
     designated_bins: Sequence[int] = (),
     census_excluded_bins: Sequence[int] = (),
@@ -330,7 +330,7 @@ def calibrate_cfar(
     A contaminated null bulk (flag fraction above
     ``fallback_flag_fraction``) triggers the lower-quantile fallback.
     """
-    f = np.asarray(fstat_fine, dtype=np.float64)
+    f = np.asarray(fine_power_ratio, dtype=np.float64)
     mask = independent_bin_mask(
         f.shape[-1],
         pad_factor=pad_factor,
@@ -377,16 +377,16 @@ def calibrate_cfar(
 
 
 def detect_any_bin(
-    fstat_fine: np.ndarray,
+    fine_power_ratio: np.ndarray,
     calibration: CfarCalibration,
 ) -> np.ndarray:
     """Any-bin detection rule: indices of all bins above threshold."""
-    f = np.asarray(fstat_fine, dtype=np.float64)
+    f = np.asarray(fine_power_ratio, dtype=np.float64)
     return np.flatnonzero(f > float(calibration.threshold)).astype(np.int64)
 
 
 def reduce_and_detect(
-    row_sums: Any,
+    matched_filter_row_projections: Any,
     *,
     num_streams: int,
     windows_per_stream: int,
@@ -401,7 +401,7 @@ def reduce_and_detect(
 ) -> FineReductionResult:
     """One-call v2 reduction: fine spectra, identity check, CFAR, detection."""
     result = fine_reduce(
-        row_sums,
+        matched_filter_row_projections,
         num_streams=num_streams,
         windows_per_stream=windows_per_stream,
         num_weight_terms=num_weight_terms,
@@ -409,9 +409,9 @@ def reduce_and_detect(
         xp=xp,
     )
     if kernel_powers is not None:
-        check_v1_marginal_identity(result.marginal_powers, kernel_powers)
+        check_coarse_power_marginal_identity(result.coarse_power_by_term, kernel_powers)
     calibration = calibrate_cfar(
-        result.fstat_fine,
+        result.fine_power_ratio,
         designated_bins=designated_bins,
         census_excluded_bins=census_excluded_bins,
         guard_fine_bins=guard_fine_bins,
@@ -419,5 +419,5 @@ def reduce_and_detect(
         p_fa=p_fa,
     )
     result.cfar = calibration
-    result.detected_bins = detect_any_bin(result.fstat_fine, calibration)
+    result.detected_bins = detect_any_bin(result.fine_power_ratio, calibration)
     return result

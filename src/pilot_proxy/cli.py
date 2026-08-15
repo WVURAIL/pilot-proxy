@@ -855,7 +855,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=str(GENERATED_DIR / "detections" / "detect.json"),
     )
     detect.add_argument(
-        "--threshold-snr-shelf-db",
+        "--threshold-data-shelf-snr-db",
         type=float,
         default=None,
         help=argparse.SUPPRESS,

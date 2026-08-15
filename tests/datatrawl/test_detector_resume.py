@@ -34,12 +34,12 @@ from datatrawl.instruments import load_instrument
 from datatrawl.interfaces import RunContext
 
 from pilot_proxy.detector_contract import (
-    norm_corrected_positive_excess,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_reference import (
     INT4_COMPONENT_BITS,
-    fstat_cpu_reference,
+    coarse_power_ratio_cpu_reference,
     unpack_packed_complex,
 )
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
@@ -58,7 +58,7 @@ FREQ_ID = 844
 _EXACT = ("p_target_u64", "p_ref_sum_u64", "reject_mask", "valid", "frame_index",
           "unit_keys", "unit_order", "frame_unit_index", "frame_in_unit",
           "unit_time0_fpga", "unit_event_id", "archive_version")
-_CLOSE = ("fstat_raw", "fstat_level_db", "pnr_bin_db", "snr_shelf_db",
+_CLOSE = ("coarse_power_ratio", "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
           "baseband_power_linear", "integrated_spectrum_before_mask",
           "integrated_spectrum_after_mask", "unit_time0_ctime", "unit_delta_time")
 
@@ -74,13 +74,13 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
     results = []
     for b in range(int(pk.shape[0])):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
-        _fstat, sums = fstat_cpu_reference(samples, w)
+        _fstat, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
         den = int(round(float(sums[1] + sums[2])))
         results.append({
             "block_index": b,
-            "mask": norm_corrected_positive_excess(
-                num, den, target_norm_sq=_nt, ref_norm_sum_sq=_nrs
+            "mask": normalized_positive_excess(
+                num, den, target_norm_sq=_nt, reference_norm_sum_sq=_nrs
             ),
             "p_target_u64": num,
             "p_ref_sum_u64": den,
@@ -387,7 +387,7 @@ def test_zero_frame_checkpoint_resume_keeps_fine_width(tmp_path):
     ckpt = tmp_path / "zero.npz"
     a1.save(str(ckpt))
     z0 = np.load(str(ckpt))
-    assert z0["fstat_fine"].shape[0] == 0
+    assert z0["fine_power_ratio"].shape[0] == 0
 
     # resume adopts the current width and continues cleanly
     a2 = PilotProxyDetectorAnalyzer()
@@ -396,7 +396,7 @@ def test_zero_frame_checkpoint_resume_keeps_fine_width(tmp_path):
     a2.consume_file(reader.iter_arrays(str(path), ctx), meta)
     a2.save(str(ckpt))
     z1 = np.load(str(ckpt))
-    assert z1["fstat_fine"].shape == (N_FRAMES, int(z1["fine_num_bins"]))
+    assert z1["fine_power_ratio"].shape == (N_FRAMES, int(z1["fine_num_bins"]))
     assert int(z1["fine_num_bins"]) > 0
 
 
@@ -457,15 +457,15 @@ def test_resume_refuses_fine_definition_change_end_to_end(tmp_path, monkeypatch)
 
 # -- fine detection ragged list: frame labels must be global frame indices ----
 
-def _tone_row_sums_detector_fn(*, packed, weights, kernel, emit_row_sums=False):
+def _tone_matched_filter_row_projections_detector_fn(*, packed, weights, kernel, emit_row_projections=False):
     """Injected detector emitting v2 row sums with a guaranteed fine tone.
 
     The target term carries a pure envelope tone (detected bin every frame);
     the references are small broadband integers. Kernel powers are computed
-    from the same integer row sums, so the exact v1 marginal identity holds
+    from the same integer row sums, so the exact coarse marginal identity holds
     by construction.
     """
-    from pilot_proxy.fine_reduction import exact_marginal_powers
+    from pilot_proxy.fine_reduction import exact_coarse_power_by_term
 
     pk = np.asarray(packed)
     if pk.ndim == 2:
@@ -483,7 +483,7 @@ def _tone_row_sums_detector_fn(*, packed, weights, kernel, emit_row_sums=False):
                    + 1j * rng.integers(-3, 4, (streams, windows)))
     zi = np.stack([np.round(z.real), np.round(z.imag)], axis=-1)
     zi = zi.astype(np.int32).reshape(3, rows, 2)
-    powers = exact_marginal_powers(zi, num_weight_terms=3)
+    powers = exact_coarse_power_by_term(zi, num_weight_terms=3)
     result = {
         "block_index": 0,
         "mask": True,
@@ -494,26 +494,26 @@ def _tone_row_sums_detector_fn(*, packed, weights, kernel, emit_row_sums=False):
     }
     out = {"batch": 1, "detector_rows_per_block": rows,
            "rational_overflow_count": 0, "results": [result]}
-    if emit_row_sums:
-        out["row_sums"] = [zi]
+    if emit_row_projections:
+        out["matched_filter_row_projections"] = [zi]
     return out
 
 
-def test_fine_detected_frame_indices_are_global(tmp_path):
+def test_fine_threshold_exceedance_frame_indices_are_global(tmp_path):
     """Ragged (frame, bin) detection rows must carry global frame indices.
 
     _n_frames advances once per consume_file, so stamping detections with
     _n_frames alone labels every detection in a unit with the unit's FIRST
-    frame index. The authoritative partition is fine_detected_count; the
+    frame index. The authoritative partition is fine_threshold_exceedance_count; the
     frame column must agree with it: repeat(arange(n_frames), counts).
     """
     rng = np.random.default_rng(17)
     weights = rng.integers(-120, 121, size=(3, K)).astype(np.int8)
     files = _make_files(tmp_path / "data", n_events=2)
     kernel = _stub_kernel(K)
-    kernel.supports_row_sums = lambda: True
+    kernel.supports_row_projections = lambda: True
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _tone_row_sums_detector_fn, "kernel": kernel,
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn, "kernel": kernel,
         "weights": weights,
     })
     reader = ChimeBasebandPackedReader()
@@ -530,7 +530,7 @@ def test_fine_detected_frame_indices_are_global(tmp_path):
 
     z = np.load(str(out))
     assert str(np.asarray(z["fine_status"]).reshape(()).item()) == "enabled"
-    counts = np.asarray(z["fine_detected_count"]).reshape(-1)
+    counts = np.asarray(z["fine_threshold_exceedance_count"]).reshape(-1)
     assert counts.size == 2 * N_FRAMES and (counts > 0).all()
     expected = np.repeat(np.arange(counts.size), counts)
-    assert np.array_equal(np.asarray(z["fine_detected_frame"]).reshape(-1), expected)
+    assert np.array_equal(np.asarray(z["fine_threshold_exceedance_frame"]).reshape(-1), expected)

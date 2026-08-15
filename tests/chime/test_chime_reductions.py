@@ -30,9 +30,9 @@ def test_aggregate_frame_products_writes_one_chunk_for_10s_local_shape() -> None
         frame_size_samples=16_384,
         sample_rate_hz=390_625.0,
         chunk_seconds=10.0,
-        fstat_raw=np.ones((4, 2)),
-        fstat_level_db=fstat_level,
-        snr_shelf_db=np.asarray(fstat_level - 30.0, dtype=np.float64),
+        coarse_power_ratio=np.ones((4, 2)),
+        normalized_coarse_power_ratio_db=fstat_level,
+        estimated_data_shelf_snr_db=np.asarray(fstat_level - 30.0, dtype=np.float64),
         baseband_power_linear=baseband,
         mask=mask,
         valid=np.ones((4, 2), dtype=np.uint8),
@@ -48,7 +48,7 @@ def test_aggregate_frame_products_writes_one_chunk_for_10s_local_shape() -> None
     np.testing.assert_allclose(products["mask_fraction"], [[0.25, 0.25]])
     assert products["unmasked_count"].tolist() == [[3, 3]]
     assert products["total_count"].tolist() == [[4, 4]]
-    np.testing.assert_allclose(products["fstat_level_db_p95"], [[2.85, 3.85]])
+    np.testing.assert_allclose(products["normalized_coarse_power_ratio_db_p95"], [[2.85, 3.85]])
 
 
 def test_aggregate_frame_products_excludes_invalid_frames_from_power_denominators() -> (
@@ -64,9 +64,9 @@ def test_aggregate_frame_products_excludes_invalid_frames_from_power_denominator
         frame_size_samples=16_384,
         sample_rate_hz=390_625.0,
         chunk_seconds=10.0,
-        fstat_raw=np.ones((4, 1)),
-        fstat_level_db=np.asarray([[0.0], [10.0], [20.0], [30.0]]),
-        snr_shelf_db=np.asarray([[-30.0], [-20.0], [-10.0], [0.0]]),
+        coarse_power_ratio=np.ones((4, 1)),
+        normalized_coarse_power_ratio_db=np.asarray([[0.0], [10.0], [20.0], [30.0]]),
+        estimated_data_shelf_snr_db=np.asarray([[-30.0], [-20.0], [-10.0], [0.0]]),
         baseband_power_linear=baseband,
         mask=mask,
         valid=valid,
@@ -80,4 +80,4 @@ def test_aggregate_frame_products_excludes_invalid_frames_from_power_denominator
     assert products["unmasked_count_valid"].tolist() == [[2]]
     np.testing.assert_allclose(products["mask_fraction_valid"], [[0.0]])
     np.testing.assert_allclose(products["mask_fraction_total"], [[0.25]])
-    np.testing.assert_allclose(products["fstat_level_db_median"], [[10.0]])
+    np.testing.assert_allclose(products["normalized_coarse_power_ratio_db_median"], [[10.0]])

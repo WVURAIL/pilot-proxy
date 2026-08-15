@@ -11,13 +11,13 @@ tool can run after any scan without touching baseband.
 
 The same-statistic rule (the spec's "one rule that matters most"):
 
-    F_frame = max over the designated tolerance window of fstat_fine[b]
+    F_frame = max over the designated tolerance window of fine_power_ratio[b]
 
 where the window is the per-channel deployed designated set: the measured
 pilot line anchor +/- ``--window-halfwidth`` fine bins when a persistent
 line is detected, else the nominal bin 0 +/- the same halfwidth. The
-per-bin statistic ``fstat_fine[b] = 2 S_t[b] / (S_l[b] + S_u[b])`` is
-null-centered near 1 by construction (the mu0-corrected fine ratio), and
+per-bin statistic ``fine_power_ratio[b] = 2 S_t[b] / (S_l[b] + S_u[b])`` is
+null-centered near 1 by construction (the null_power_ratio-corrected fine ratio), and
 the identical max-over-window statistic is histogrammed in every file.
 
 File 3 substitution (recorded in provenance): the spec's 10 s receiver
@@ -91,15 +91,15 @@ class Channel:
         self.freq_id = int(r("freq_id")[0])
         self.atsc = int(r("physical_channel")[0])
         self.valid = r("valid").astype(bool)
-        self.fine = np.asarray(z["fstat_fine"], dtype=np.float64)
+        self.fine = np.asarray(z["fine_power_ratio"], dtype=np.float64)
         self.n_frames = self.valid.size
         self.unit_index = r("frame_unit_index").astype(int)
         t0 = r("unit_time0_ctime").astype(float)
         self.t = t0[self.unit_index]
         self.power = r("baseband_power_linear").astype(float)
         self.detector_version = str(np.asarray(z["detector_version"]))
-        det_frame = r("fine_detected_frame").astype(int)
-        det_bin = r("fine_detected_bin").astype(int)
+        det_frame = r("fine_threshold_exceedance_frame").astype(int)
+        det_bin = r("fine_threshold_exceedance_bin").astype(int)
         self.det_frac = (
             np.bincount(det_bin, minlength=FINE_BINS).astype(float)
             / max(self.n_frames, 1)
@@ -265,7 +265,7 @@ def main() -> int:
         # per-event maxima (File 3 substitute; events == units in this
         # archive, one baseband capture each) and the integrated-event
         # statistic (policy-C exploration: the window max of the
-        # event-averaged spectrum -- mean of fstat_fine over the event's
+        # event-averaged spectrum -- mean of fine_power_ratio over the event's
         # valid frames, a mean-of-ratios approximation to true
         # power-integrated detection; see provenance)
         n_units_valid = 0
@@ -428,7 +428,7 @@ def main() -> int:
         json.dump({
             "statistic": (
                 f"max over the {2 * args.window_halfwidth + 1} designated "
-                "fine bins of fstat_fine[b] = 2*S_t[b]/(S_l[b]+S_u[b])"
+                "fine bins of fine_power_ratio[b] = 2*S_t[b]/(S_l[b]+S_u[b])"
             ),
             "N_bins_in_window": 2 * args.window_halfwidth + 1,
             "per_bin_null": {
@@ -438,9 +438,9 @@ def main() -> int:
                                    "(real-spectrum correlations)"},
             },
             "bins_independent": False,
-            "mu0_definition": (
-                "the fine ratio is norm-self-corrected; no external mu0 "
-                "scaling is applied to fstat_fine"
+            "null_power_ratio_definition": (
+                "the fine ratio is norm-self-corrected; no external null_power_ratio "
+                "scaling is applied to fine_power_ratio"
             ),
             "per_channel": False,
         }, f, indent=2)
@@ -450,7 +450,7 @@ def main() -> int:
         "spec": "PilotProxy -> baonoise export specification (CANFAR pass)",
         "statistic_convention": (
             "F_frame = max over the per-channel designated window of "
-            "fstat_fine[b]; window = measured-line anchor +/- "
+            "fine_power_ratio[b]; window = measured-line anchor +/- "
             f"{args.window_halfwidth} fine bins where a persistent line is "
             f"detected (detection fraction >= {args.anchor_fraction}), else "
             "nominal bin 0 +/- the same halfwidth. Identical statistic in "
@@ -495,7 +495,7 @@ def main() -> int:
         "integrated_event_product": (
             "window_event_integrated_hist.csv / "
             "null_event_integrated_hist.csv: window max of the "
-            "event-AVERAGED spectrum (mean of fstat_fine over the event's "
+            "event-AVERAGED spectrum (mean of fine_power_ratio over the event's "
             "valid frames) -- an exploratory third policy (detect on "
             "integrated spectra rather than flag from per-frame "
             "decisions). Mean-of-ratios approximation: exact "

@@ -275,7 +275,7 @@ def main() -> int:
     if packed_weights is None or not valid:
         raise SystemExit(f"weight bank has no valid profile for ch {channel}")
     layout = bank.layout_for_physical_channel(channel)
-    mu0 = float(layout["mu0"])
+    null_power_ratio = float(layout["null_power_ratio"])
 
     rows = np.ascontiguousarray(
         x.T.reshape(feeds, n // K, K).reshape(-1, K)
@@ -285,10 +285,10 @@ def main() -> int:
     f_forward = 2.0 * p_forward[0] / max(p_forward[1] + p_forward[2], 1)
     f_reversed = 2.0 * p_reversed[0] / max(p_reversed[1] + p_reversed[2], 1)
     print(
-        f"detector F (mu0 zero-point {mu0:.4f}): "
+        f"detector F (null_power_ratio zero-point {null_power_ratio:.4f}): "
         f"no-reversal {f_forward:.3f}, with-reversal {f_reversed:.3f}"
     )
-    pairing_ok = f_reversed > 2.0 * mu0 and f_reversed > 5.0 * f_forward
+    pairing_ok = f_reversed > 2.0 * null_power_ratio and f_reversed > 5.0 * f_forward
     if pairing_ok:
         print(
             "CHECK 2 CONFIRMED: the real pilot detects WITH per-window time "

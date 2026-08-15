@@ -23,11 +23,11 @@ norm-corrected positive-excess mask from the exact integer powers:
 
 ```text
 valid = p_ref_sum != 0
-mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
+mask  = valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This comparison is the integer form of `F > mu0`, where
-`mu0 = 2*target_norm_sq/ref_norm_sum_sq`. The value `mu0` is the flat-floor
+This comparison is the integer form of `F > null_power_ratio`, where
+`null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq`. The value `null_power_ratio` is the flat-floor
 reference implied by the quantized weight norms; it is not assumed to be one.
 See `docs/METHOD_SPEC.md` for the statistic and its calibration.
 
@@ -45,7 +45,7 @@ CHIME HDF5 segments
   -> normalized block (num_input_streams, 1, samples)
   -> packed detector input (frames, detector_rows_per_frame, 128)
   -> CUDA numerator/denominator detector
-  -> one F-statistic per frame per selected DTV pilot channel
+  -> one local-reference power ratio per frame per selected DTV pilot channel
 ```
 
 ## Data Contract
@@ -216,13 +216,13 @@ with `mask = 0`; rejected frames are not replaced with zeros.
 After `--plot`, the staged-data run contains:
 
 ```text
-tables/fstat_summary_by_pilot.csv
-tables/snr_shelf_histogram_summary.csv
+tables/normalized_coarse_power_ratio_summary_by_channel.csv
+tables/data_shelf_snr_histogram_summary.csv
 tables/mask_summary_by_pilot.csv
 tables/spectrum_before_after.csv
-figures/snr_shelf_histogram_by_pilot.png
-figures/fstat_survival_by_pilot.png
-figures/fstat_level_spectrogram.png
+figures/data_shelf_snr_histogram_by_channel.png
+figures/coarse_power_ratio_survival_by_channel.png
+figures/normalized_coarse_power_ratio_db_spectrogram.png
 figures/baseband_spectrogram.png
 figures/baseband_spectrum_before_after_mask.png
 figures/mask_spectrogram.png
@@ -293,9 +293,9 @@ mask_fraction
 ```
 
 `num_positive_excess_frames` is currently the number of finite
-`snr_shelf_db` values. Because `10*log10(F - 1)` is finite only for `F > 1`,
+`estimated_data_shelf_snr_db` values. Because `10*log10(F - 1)` is finite only for `F > 1`,
 this count and `positive_excess_fraction` describe `F > 1`, not the
-norm-corrected mask when `mu0 != 1`. The stored mask follows `F > mu0`.
+norm-corrected mask when `null_power_ratio != 1`. The stored mask follows `F > null_power_ratio`.
 `mask_fraction` is the table's direct mean of the stored binary mask over all
 frames. Use `mask_summary_by_pilot.csv` when the valid-frame denominator must be
 explicit.
@@ -320,7 +320,7 @@ datasets, attributes, and filenames. Therefore the output can be read by
 `chime-scan --source local`.
 
 `analyze-cleaning-tradeoff` evaluates
-`tau = mu0 * 10^(x/10)` from the stored integer powers and weight norms. The
+`tau = null_power_ratio * 10^(x/10)` from the stored integer powers and weight norms. The
 `x = 0` point must reproduce the stored mask before the remaining thresholds are
 interpreted. The command then reports the masked-fraction and residual-power
 operating curve.
@@ -337,7 +337,7 @@ enter the histogram and must be counted separately.
 
 The spectrograms place relative data time and frame index on the horizontal
 axes, with CHIME coarse-channel frequency and DTV physical channel on the
-vertical axes. The F-statistic survival and level-spectrogram figures include a
+vertical axes. The local-reference power ratio survival and level-spectrogram figures include a
 second panel without DTV 30. The 10 s local plots include a 10 s tick, and the
 mask colorbar is discrete at `M = 0` and `M = 1`. These are reporting choices;
 the NPZ products remain the numerical record.

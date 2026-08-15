@@ -56,7 +56,7 @@ For items 1 and 3, use the A100, `setup_env.sh`, and CADC-certificate setup in
 ## 1. On-sky validation of the norm-corrected mask
 
 This test asks whether the real-data `H0` distribution follows each channel's
-`mu0` rather than 1. It also measures whether the corrected comparison gives
+`null_power_ratio` rather than 1. It also measures whether the corrected comparison gives
 an `H0` mask fraction consistent with approximately 0.5 for the tested
 channels. This is the on-sky counterpart of
 `tests/core/test_mask_zero_point.py` and the runbook's "H0 zero-point check"
@@ -75,7 +75,7 @@ section.
    ```
 
    Accept the bundle only when the validator reports `valid` and every row in
-   `pilot_profiles.json` contains `target_norm_sq`, `ref_norm_sum_sq`, `mu0`,
+   `pilot_profiles.json` contains `target_norm_sq`, `reference_norm_sum_sq`, `null_power_ratio`,
    and `positive_excess_half_threshold_num/den`.
 
 2. **Choose three `freq_id` values** from the transmitter census in the calibration
@@ -95,7 +95,7 @@ section.
      `pilot-proxy chime-inspect --input-dir <staged>` before running the
      detector. This is a pilot-free control for the tested sample, not a
      proof that the channel is always free of RFI.
-   - **Extreme-`mu0` quiet channels:** DTV 18 (largest shipped `mu0`, 1.0111)
+   - **Extreme-`null_power_ratio` quiet channels:** DTV 18 (largest shipped `null_power_ratio`, 1.0111)
      and DTV 20 (smallest, 0.9853). These are where the legacy rule pinned
      most strongly, so they provide the clearest comparison. The values are
      rounded from an independent recomputation over the shipped manifest;
@@ -116,9 +116,9 @@ section.
 4. **Apply the acceptance criteria** to each channel using `stats.json` and
    `chime_detector_outputs.npz`. The numerical bounds below are planned
    acceptance criteria, not existing measurements:
-   - `mu0_by_pilot` matches the weight-manifest value exactly.
+   - `null_power_ratio_by_channel` matches the weight-manifest value exactly.
    - For the control and quiet channels, require
-     `|mean(fstat_raw[valid]) - mu0| < |mu0 - 1| / 3`. Record the frame count
+     `|mean(coarse_power_ratio[valid]) - null_power_ratio| < |null_power_ratio - 1| / 3`. Record the frame count
      and measured standard error. The approximation
      `sqrt(1.5/rows_per_frame)/sqrt(nframes)` is a planning estimate, not a
      substitute for the measured uncertainty.
@@ -128,7 +128,7 @@ section.
    - `validate-products` passes (it checks the *declared* corrected
      rule with exact integer math).
    - For a DTV-loud interval, report the mask fraction and distribution of
-     `pilot_excess_corrected`. Do not replace these measured values with
+     `normalized_pilot_excess`. Do not replace these measured values with
      qualitative terms such as "well above" or "strongly positive" in the
      paper.
 
@@ -137,7 +137,7 @@ section.
    product with an uninterrupted rerun using the same inputs.
 
 The paper artifact is a two-panel figure. The first panel compares measured
-`mean F` with `mu0` and includes `F = 1` for reference. The second reports the
+`mean F` with `null_power_ratio` and includes `F = 1` for reference. The second reports the
 `H0` mask fraction before and after the correction for matched data where
 available.
 
@@ -148,7 +148,7 @@ available.
 This test measures `P_d` as a function of shelf SNR for each frequency offset.
 We evaluate both the -32 dB science threshold and the positive-excess rule,
 and we report Wilson 95% intervals. The summary already emits
-`positive_excess_detection_rate`, `threshold_detection_rate`, and their
+`normalized_positive_excess_detection_rate`, `threshold_detection_rate`, and their
 `*_wilson95_lo/hi` fields. The publication run increases the trial count.
 
 1. On the GPU node, use the audited golden ATSC capture, or regenerate and
@@ -162,12 +162,12 @@ and we report Wilson 95% intervals. The summary already emits
      --physical-channel 14 --frame-size-samples 16384 --num-input-streams 4 \
      --snr-start-db -38 --snr-stop-db -24 --snr-step-db 1 \
      --standard-frequency-offset-sweep \
-     --threshold-snr-shelf-db -32 \
+     --threshold-data-shelf-snr-db -32 \
      --noise-trials 300 --output-dir results/pd_curves
    ```
 
    The standard sweep is `-1000`, `0`, and `+1000` Hz. The
-   `--requested-snr-shelf-db` and `--frequency-offset-hz` options are
+   `--requested-data-shelf-snr-db` and `--frequency-offset-hz` options are
    repeatable when an explicit grid is preferable. Each trial is one detector
    batch.
 
@@ -205,7 +205,7 @@ and require identical detection counts.
    `--detector-backend cpu-reference`; do not use that label as backend
    provenance.
 
-   Plot `positive_excess_detection_rate` and the -32 dB threshold rate against
+   Plot `normalized_positive_excess_detection_rate` and the -32 dB threshold rate against
    requested shelf SNR. Show the Wilson bounds and one curve per offset.
 
 4. Accept the result when the rates are statistically consistent with a
@@ -357,7 +357,7 @@ the stored exact-integer mask on every valid frame.
 1. **Run the threshold sweep** (`pilot-proxy analyze-cleaning-tradeoff --run-dir
    <combined> --control-run-dir <control> --survey-hours <H>`) over the
    combined survey products:
-   - Use `tau = mu0 * 10^(x/10)` for `x` from 0 through 12 dB. The `x = 0`
+   - Use `tau = null_power_ratio * 10^(x/10)` for `x` from 0 through 12 dB. The `x = 0`
      point is the stored operating point.
    - The implemented sweep forms `F` from the stored powers in float and
      applies `F > tau`. At `x = 0`, it asserts equality with the stored mask,
@@ -368,7 +368,7 @@ the stored exact-integer mask on every valid frame.
 
 2. **Build the operating curve.** Plot residual relative to the tested
    control against masked fraction, with one curve per DTV channel and
-   `tau = mu0` marked. The current command emits a descriptive curve and
+   `tau = null_power_ratio` marked. The current command emits a descriptive curve and
    frame counts, but no residual uncertainty intervals. Add a retained
    per-event block bootstrap before making an inferential claim about a knee
    or floor agreement. Otherwise, describe the curve as descriptive and do
@@ -403,7 +403,7 @@ survey hours used to compute it.
 `docs/PAPER_PLAN.md` assigns the final figure and table numbers. The five core
 checks produce:
 
-1. Measured `mean F` vs `mu0` per channel + H0 mask-fraction before/after
+1. Measured `mean F` vs `null_power_ratio` per channel + H0 mask-fraction before/after
    (item 1).
 2. `P_d`(shelf SNR) with Wilson bars, per offset, synthetic (item 2).
 3. Recovered vs injected pilot excess on real baseband, with capture-loss

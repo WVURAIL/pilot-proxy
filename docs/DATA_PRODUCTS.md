@@ -12,7 +12,7 @@ Unless stated otherwise, `mask = 1` means that the frame is rejected and
 
 The current per-pilot schema and its explicit active/diagnostic/candidate
 decision contract are defined in `PRODUCT_SCHEMA.md`. Its fine-reduction
-products (`fstat_fine`, the robust null-bulk calibration columns,
+products (`fine_power_ratio`, the robust null-bulk calibration columns,
 and the ragged detection list) live only in the authoritative per-pilot
 `<freq_id>.npz` files. The combined
 outputs below carry no fine arrays; analyses of fine detections read the
@@ -52,9 +52,9 @@ include:
 - `reference_placement_summary` when available.
 
 `chime-run` also records `detector_rows_per_frame`, `kernel_specs`,
-`weight_coordinate`, and `mu0_by_pilot`. A `chime-scan` combine records
+`weight_coordinate`, and `null_power_ratio_by_channel`. A `chime-scan` combine records
 `combine_alignment`, `rational_overflow_count_by_pilot`, and any cross-build
-provenance notes. The combined scan keeps `mu0` in
+provenance notes. The combined scan keeps `null_power_ratio` in
 `chime_detector_outputs.npz` rather than copying it into `stats.json`.
 
 The `detector_contract` states the coordinate convention through:
@@ -92,24 +92,24 @@ This is the canonical frame-by-pilot detector product.
 | `frame_index` | `(num_frames,)` | `int64` | frame | Contiguous positional frame index |
 | `p_target_u64` | `(num_frames, num_pilots)` | `uint64` | power | Target-bin power |
 | `p_ref_sum_u64` | `(num_frames, num_pilots)` | `uint64` | power | Lower plus upper reference power |
-| `fstat_raw` | `(num_frames, num_pilots)` | `float64` | unitless | `2*p_target/p_ref_sum` |
-| `fstat_level_db` | `(num_frames, num_pilots)` | `float64` | dB | `10*log10(F)` |
-| `pnr_bin_db` | `(num_frames, num_pilots)` | `float64` | dB | One-bin pilot-excess PNR |
-| `snr_shelf_db` | `(num_frames, num_pilots)` | `float64` | dB | Estimated ATSC data-shelf SNR; finite only where its transform is defined |
+| `coarse_power_ratio` | `(num_frames, num_pilots)` | `float64` | unitless | `2*p_target/p_ref_sum` |
+| `normalized_coarse_power_ratio_db` | `(num_frames, num_pilots)` | `float64` | dB | `10*log10(F)` |
+| `pilot_excess_db` | `(num_frames, num_pilots)` | `float64` | dB | One-bin pilot-excess PNR |
+| `estimated_data_shelf_snr_db` | `(num_frames, num_pilots)` | `float64` | dB | Estimated ATSC data-shelf SNR; finite only where its transform is defined |
 | `valid` | `(num_frames, num_pilots)` | `uint8` | 0/1 | `p_ref_sum != 0` |
 | `mask` | `(num_frames, num_pilots)` | `uint8` | 0/1 | `1 = reject` under the recorded mask rule |
 | `target_norm_sq` | `(num_pilots,)` | `int64` | unitless | Exact `||w_target||^2` of the int4 weights |
-| `ref_norm_sum_sq` | `(num_pilots,)` | `int64` | unitless | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
-| `mu0` | `(num_pilots,)` | `float64` | unitless | `2*target_norm_sq/ref_norm_sum_sq`, the weight-norm H0 reference |
-| `pilot_excess_corrected` | `(num_frames, num_pilots)` | `float64` | unitless | `F/mu0 - 1`, or NaN for invalid frames |
+| `reference_norm_sum_sq` | `(num_pilots,)` | `int64` | unitless | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
+| `null_power_ratio` | `(num_pilots,)` | `float64` | unitless | `2*target_norm_sq/reference_norm_sum_sq`, the weight-norm H0 reference |
+| `normalized_pilot_excess` | `(num_frames, num_pilots)` | `float64` | unitless | `F/null_power_ratio - 1`, or NaN for invalid frames |
 
 The current mask is the norm-corrected positive-excess comparison:
 
 ```text
-valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
+valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the integer form of `F > mu0`. Products written before the correction
+This is the integer form of `F > null_power_ratio`. Products written before the correction
 declare the legacy `F > 1` rule in `mask_rule` and may omit the four norm-related
 arrays. Therefore readers should check the recorded contract before assuming
 that those arrays exist.
@@ -193,8 +193,8 @@ vary by pilot have shape `(num_chunks, num_pilots)`.
 - `mask_fraction`, `mask_fraction_valid`, `mask_fraction_total`;
 - `unmasked_count`, `total_count`, `valid_count`, `invalid_count`;
 - `masked_count_valid`, `unmasked_count_valid`;
-- `fstat_level_db_median`, `fstat_level_db_p95`, `fstat_level_db_max`;
-- `snr_shelf_db_median`, `snr_shelf_db_p95`, `snr_shelf_db_max`.
+- `normalized_coarse_power_ratio_db_median`, `normalized_coarse_power_ratio_db_p95`, `normalized_coarse_power_ratio_db_max`;
+- `estimated_data_shelf_snr_db_median`, `estimated_data_shelf_snr_db_p95`, `estimated_data_shelf_snr_db_max`.
 
 `cleaned_power_mean` is the mean over valid frames with `mask = 0`; it is NaN
 when a chunk contains no such frame. The term “cleaned” is a product-field name,
@@ -222,24 +222,20 @@ Tables are written under `tables/`:
 - `mask_summary_by_pilot.csv` is written by the detector/combine path;
 - `spectrum_before_after.csv` is written by `chime-run` and regenerated by the
   baseband spectrum plot;
-- `fstat_summary_by_pilot.csv` and
-  `snr_shelf_histogram_summary.csv` are written by `chime-plot` or
+- `normalized_coarse_power_ratio_summary_by_channel.csv` and
+  `data_shelf_snr_histogram_summary.csv` are written by `chime-plot` or
   `chime-run --plot`.
 
-The SNR-shelf summary retains legacy field names. Its
-`num_positive_excess_frames` and `positive_excess_fraction` count finite
-`snr_shelf_db` values, which corresponds to `F > 1`. When `mu0 != 1`, use the
-recorded mask or `mask_summary_by_pilot.csv` for the norm-corrected `F > mu0`
-decision.
+The data-shelf SNR summary is derived from the norm-corrected pilot excess and therefore uses the same null coordinate as `reject_mask`.
 
 ## Figures
 
 `pilot-proxy chime-plot` or `chime-run --plot` writes these figures under
 `figures/`:
 
-- `snr_shelf_histogram_by_pilot.png`;
-- `fstat_survival_by_pilot.png`;
-- `fstat_level_spectrogram.png`;
+- `data_shelf_snr_histogram_by_channel.png`;
+- `coarse_power_ratio_survival_by_channel.png`;
+- `normalized_coarse_power_ratio_db_spectrogram.png`;
 - `baseband_spectrogram.png`;
 - `baseband_spectrum_before_after_mask.png`;
 - `mask_spectrogram.png`.

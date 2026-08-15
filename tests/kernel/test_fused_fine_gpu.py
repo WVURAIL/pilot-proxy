@@ -31,7 +31,7 @@ import time
 import numpy as np
 import pytest
 
-from pilot_proxy.fine_reduction import exact_marginal_powers
+from pilot_proxy.fine_reduction import exact_coarse_power_by_term
 from pilot_proxy.fxfft import fine_power_fx
 from pilot_proxy.gpu import cuda_available
 from pilot_proxy.kernel import FStatKernel
@@ -76,14 +76,14 @@ def _random_frames(rng, batch: int, rows: int):
     return packed, weights
 
 
-def _reference_chain(row_sums: np.ndarray, streams: int):
+def _reference_chain(matched_filter_row_projections: np.ndarray, streams: int):
     """fine powers + marginals from an int32 [terms, rows, 2] buffer."""
     fine = fine_power_fx(
-        row_sums.astype(np.int64),
+        matched_filter_row_projections.astype(np.int64),
         num_streams=streams,
         windows_per_stream=WINDOWS,
     )
-    marg = exact_marginal_powers(row_sums, num_weight_terms=TERMS).astype(
+    marg = exact_coarse_power_by_term(matched_filter_row_projections, num_weight_terms=TERMS).astype(
         np.uint64
     )
     return fine, marg
@@ -101,7 +101,7 @@ def test_fused_matches_composed_path_bit_exact():
     d_in = cp.asarray(packed[0])
     d_diag = cp.zeros(1, dtype=cp.float32)
     handle = kernel.create_raw(rows, d_in.data.ptr, d_diag.data.ptr)
-    d_row_sums = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
+    d_matched_filter_row_projections = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
     d_fine_composed = cp.zeros((TERMS, FINE_BINS), dtype=cp.uint64)
     d_pow_composed = cp.zeros(TERMS, dtype=cp.uint64)
     d_fine_fused = cp.zeros((TERMS, FINE_BINS), dtype=cp.uint64)
@@ -109,11 +109,11 @@ def test_fused_matches_composed_path_bit_exact():
     d_tap = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
     try:
         # Composed path: the validated 2.0.0/2.1.0 chain.
-        kernel.compute_row_sums_i32(
-            handle, weights.ctypes.data, d_row_sums.data.ptr
+        kernel.compute_row_projections_i32(
+            handle, weights.ctypes.data, d_matched_filter_row_projections.data.ptr
         )
         kernel.compute_fine_powers_u64(
-            int(d_row_sums.data.ptr), streams, WINDOWS, 1,
+            int(d_matched_filter_row_projections.data.ptr), streams, WINDOWS, 1,
             int(d_fine_composed.data.ptr),
         )
         kernel.compute_powers_u64(
@@ -129,7 +129,7 @@ def test_fused_matches_composed_path_bit_exact():
         )
         cp.cuda.Device().synchronize()
         assert kernel.last_error() == ""
-        composed_rows = cp.asnumpy(d_row_sums).reshape(TERMS, rows, 2)
+        composed_rows = cp.asnumpy(d_matched_filter_row_projections).reshape(TERMS, rows, 2)
         fine_c = cp.asnumpy(d_fine_composed)
         pow_c = cp.asnumpy(d_pow_composed)
         fine_f = cp.asnumpy(d_fine_fused)
@@ -245,7 +245,7 @@ def test_fused_rate_margin_report():
     d_in = cp.asarray(packed[0])
     d_diag = cp.zeros(1, dtype=cp.float32)
     handle = kernel.create_raw(rows, d_in.data.ptr, d_diag.data.ptr)
-    d_row_sums = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
+    d_matched_filter_row_projections = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
     d_fine = cp.zeros((TERMS, FINE_BINS), dtype=cp.uint64)
     d_pow = cp.zeros(TERMS, dtype=cp.uint64)
 
@@ -259,15 +259,15 @@ def test_fused_rate_margin_report():
         kernel.compute_fused_fine_u64(
             handle, weights.ctypes.data,
             int(d_fine.data.ptr), int(d_pow.data.ptr),
-            int(d_row_sums.data.ptr),
+            int(d_matched_filter_row_projections.data.ptr),
         )
 
     def composed():
-        kernel.compute_row_sums_i32(
-            handle, weights.ctypes.data, d_row_sums.data.ptr
+        kernel.compute_row_projections_i32(
+            handle, weights.ctypes.data, d_matched_filter_row_projections.data.ptr
         )
         kernel.compute_fine_powers_u64(
-            int(d_row_sums.data.ptr), streams, WINDOWS, 1,
+            int(d_matched_filter_row_projections.data.ptr), streams, WINDOWS, 1,
             int(d_fine.data.ptr),
         )
         kernel.compute_powers_u64(

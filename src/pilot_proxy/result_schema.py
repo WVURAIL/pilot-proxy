@@ -10,7 +10,6 @@ COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO = "all_rows_summed_before_ratio"
 MASK_CONVENTION_VERSION = "fstat_mask_convention_v1"
 MASK_VALUE_EXCLUDED = 1
 MASK_VALUE_INCLUDED = 0
-PERCENT = 100.0
 LOCKED_DETECTOR_WINDOW_SAMPLES = 128
 LOCKED_NUM_WEIGHT_TERMS = 3
 LOCKED_SKIPPED_GUARD_BINS = 1
@@ -19,17 +18,24 @@ LOCKED_PACKED_COMPLEX_BITS = 8
 LOCKED_SAMPLE_BITS_PER_COMPONENT = 4
 POWER_SUM_ACCUMULATOR_BITS = 64
 
-FSTAT_DEFINITION = "F = 2 * P_target / (P_ref_lower + P_ref_upper)"
-ALL_ROWS_FSTAT_DEFINITION = (
-    "F = 2 * sum_r(P_target,r) / "
+COARSE_POWER_RATIO_DEFINITION = (
+    "R_coarse = 2 * P_target / (P_ref_lower + P_ref_upper)"
+)
+ALL_ROWS_COARSE_POWER_RATIO_DEFINITION = (
+    "R_coarse = 2 * sum_r(P_target,r) / "
     "(sum_r(P_ref_lower,r) + sum_r(P_ref_upper,r))"
 )
-PILOT_EXCESS_DEFINITION = "rho = F - 1"
-CORRECTED_PILOT_EXCESS_DEFINITION = (
-    "rho_corrected = F/mu0 - 1; mu0 = 2*target_norm_sq/ref_norm_sum_sq "
-    "(exact integer squared norms of the packed weight terms)"
+NULL_POWER_RATIO_DEFINITION = (
+    "R_null = 2*target_norm_sq/reference_norm_sum_sq"
 )
-SNR_SHELF_DEFINITION = "DTV data-shelf PSD relative to non-DTV noise floor"
+NORMALIZED_COARSE_POWER_RATIO_DEFINITION = "Q_coarse = R_coarse/R_null"
+NORMALIZED_COARSE_POWER_RATIO_DB_DEFINITION = "10*log10(Q_coarse)"
+RAW_PILOT_EXCESS_DEFINITION = "rho_raw = R_coarse - 1 (diagnostic only)"
+NORMALIZED_PILOT_EXCESS_DEFINITION = "rho = Q_coarse - 1"
+PILOT_EXCESS_DB_DEFINITION = "10*log10(rho) for rho > 0"
+DATA_SHELF_SNR_DEFINITION = (
+    "DTV data-shelf PSD relative to the non-DTV noise floor"
+)
 MASKED_AVERAGE_DEFINITION = (
     "masked samples are excluded from averages; they are not zero-filled "
     "before averaging"
@@ -48,14 +54,26 @@ REFERENCE_OFFSET_LOCK_REASON = (
 
 
 def statistic_contract() -> dict[str, str]:
-    """Return stable definitions for public detector outputs."""
+    """Return exact definitions for current detector measurements."""
     return {
-        "fstat_definition": FSTAT_DEFINITION,
-        "all_rows_fstat_definition": ALL_ROWS_FSTAT_DEFINITION,
-        "power_sum_rule": "sum powers first, then form F; do not average F-statistics",
-        "pilot_excess_definition": PILOT_EXCESS_DEFINITION,
-        "corrected_pilot_excess_definition": CORRECTED_PILOT_EXCESS_DEFINITION,
-        "snr_shelf_definition": SNR_SHELF_DEFINITION,
+        "coarse_power_ratio_definition": COARSE_POWER_RATIO_DEFINITION,
+        "all_rows_coarse_power_ratio_definition": (
+            ALL_ROWS_COARSE_POWER_RATIO_DEFINITION
+        ),
+        "power_sum_rule": (
+            "sum powers first, then form R_coarse; do not average frame ratios"
+        ),
+        "null_power_ratio_definition": NULL_POWER_RATIO_DEFINITION,
+        "normalized_coarse_power_ratio_definition": (
+            NORMALIZED_COARSE_POWER_RATIO_DEFINITION
+        ),
+        "normalized_coarse_power_ratio_db_definition": (
+            NORMALIZED_COARSE_POWER_RATIO_DB_DEFINITION
+        ),
+        "raw_pilot_excess_definition": RAW_PILOT_EXCESS_DEFINITION,
+        "normalized_pilot_excess_definition": NORMALIZED_PILOT_EXCESS_DEFINITION,
+        "pilot_excess_db_definition": PILOT_EXCESS_DB_DEFINITION,
+        "estimated_data_shelf_snr_definition": DATA_SHELF_SNR_DEFINITION,
     }
 
 
@@ -77,7 +95,7 @@ def fixed_point_contract(
         "input_format": "complex_int4_packed_int8",
         "power_accumulator": "uint64",
         "power_accumulator_bits": int(POWER_SUM_ACCUMULATOR_BITS),
-        "host_masking_policy": "positive_excess_from_uint64_powers",
+        "host_masking_policy": "normalized_positive_excess_from_uint64_powers",
         "per_frequency_threshold": False,
         "k128_lock_reason": K128_LOCK_REASON,
         "reference_offset_lock_reason": REFERENCE_OFFSET_LOCK_REASON,
@@ -91,7 +109,7 @@ def result_layout(
     detector_window_samples: int = LOCKED_DETECTOR_WINDOW_SAMPLES,
     num_selected_channels: int = 1,
 ) -> dict[str, Any]:
-    """Return stable public layout metadata for one combined detector frame."""
+    """Return current layout metadata for one combined detector frame."""
     frame = int(frame_size_samples)
     streams = int(num_input_streams)
     window = int(detector_window_samples)
@@ -109,7 +127,6 @@ def result_layout(
         "detector_window_samples": window,
         "windows_per_stream": int(windows_per_stream),
         "detector_rows_per_frame": int(rows),
-        "detector_rows_per_block": int(rows),
         "combine_mode": COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
         "row_index_rule": (
             "row = ((input_stream_index * num_selected_channels + "
@@ -125,32 +142,34 @@ def calibration_contract(
     pilot_below_data_db: float,
     pilot_capture_efficiency: float,
 ) -> dict[str, float]:
-    """Return SNR/PNR conversion constants used by a run."""
+    """Return data-shelf conversion constants used by a run."""
     return {
         "dtv_bandwidth_hz": float(dtv_bandwidth_hz),
         "bin_enbw_hz": float(bin_enbw_hz),
-        "pilot_below_data_db": float(pilot_below_data_db),
+        "pilot_below_data_db": float(
+            pilot_below_data_db
+        ),
         "pilot_capture_efficiency": float(pilot_capture_efficiency),
     }
 
 
 def threshold_contract(threshold: dict[str, Any] | None) -> dict[str, Any]:
-    """Return stable threshold fields, using null values when unset."""
+    """Return current threshold fields, using null values when unset."""
+    names = (
+        "threshold_data_shelf_snr_db",
+        "threshold_pilot_excess_db",
+        "threshold_normalized_pilot_excess",
+        "threshold_normalized_power_ratio",
+        "threshold_coarse_power_ratio",
+        "threshold_half_num",
+        "threshold_half_den",
+        "target_norm_sq",
+        "reference_norm_sum_sq",
+        "null_power_ratio",
+    )
     if threshold is None:
-        return {
-            "threshold_snr_shelf_db": None,
-            "threshold_pnr_bin_db": None,
-            "threshold_fstat_raw": None,
-            "threshold_half_num": None,
-            "threshold_half_den": None,
-        }
-    return {
-        "threshold_snr_shelf_db": threshold.get("threshold_snr_shelf_db"),
-        "threshold_pnr_bin_db": threshold.get("threshold_pnr_bin_db"),
-        "threshold_fstat_raw": threshold.get("threshold_fstat_raw"),
-        "threshold_half_num": threshold.get("threshold_half_num"),
-        "threshold_half_den": threshold.get("threshold_half_den"),
-    }
+        return {name: None for name in names}
+    return {name: threshold.get(name) for name in names}
 
 
 def mask_convention() -> dict[str, Any]:
@@ -177,7 +196,7 @@ def result_schema_object(
     reference_offset_bins: int = LOCKED_REFERENCE_OFFSET_BINS,
     num_selected_channels: int = 1,
 ) -> dict[str, Any]:
-    """Build the stable public result-schema object for a run."""
+    """Build the current public result-schema object for a run."""
     return {
         "schema_version": RESULT_SCHEMA_VERSION,
         "statistic": statistic_contract(),
@@ -190,7 +209,9 @@ def result_schema_object(
         "calibration": calibration_contract(
             dtv_bandwidth_hz=float(dtv_bandwidth_hz),
             bin_enbw_hz=float(bin_enbw_hz),
-            pilot_below_data_db=float(pilot_below_data_db),
+            pilot_below_data_db=float(
+                pilot_below_data_db
+            ),
             pilot_capture_efficiency=float(pilot_capture_efficiency),
         ),
         "threshold": threshold_contract(threshold),

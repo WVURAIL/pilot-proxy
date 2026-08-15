@@ -31,7 +31,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "src"))
 from pilot_proxy import fine_reduction  # noqa: E402
 from pilot_proxy.fxfft import (  # noqa: E402
     fine_power_fx,
-    fstat_fine_fx,
+    fine_power_ratio_fx,
     fxfft256,
 )
 
@@ -91,8 +91,8 @@ def f2_delta() -> None:
     ref = fine_reduction.fine_reduce(
         terms, num_streams=streams, windows_per_stream=windows
     )
-    f2_float = ref.fstat_fine.astype(np.float64)
-    f2_fx = fstat_fine_fx(
+    f2_float = ref.fine_power_ratio.astype(np.float64)
+    f2_fx = fine_power_ratio_fx(
         fine_power_fx(terms, num_streams=streams, windows_per_stream=windows)
     )
     d = np.abs(f2_fx - f2_float)

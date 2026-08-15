@@ -14,7 +14,7 @@ from pilot_proxy.datatrawl_plugins.detector import (  # noqa: E402
 
 
 def test_detector_capability_is_discovered_before_invocation() -> None:
-    def supported(*, packed, weights, kernel, emit_row_sums=False):
+    def supported(*, packed, weights, kernel, emit_row_projections=False):
         raise TypeError("an internal detector error must not become a fallback")
 
     def unsupported(*, packed, weights, kernel):
@@ -23,9 +23,9 @@ def test_detector_capability_is_discovered_before_invocation() -> None:
     def extensible(**kwargs):
         return kwargs
 
-    assert _callable_accepts_keyword(supported, "emit_row_sums")
-    assert not _callable_accepts_keyword(unsupported, "emit_row_sums")
-    assert _callable_accepts_keyword(extensible, "emit_row_sums")
+    assert _callable_accepts_keyword(supported, "emit_row_projections")
+    assert not _callable_accepts_keyword(unsupported, "emit_row_projections")
+    assert _callable_accepts_keyword(extensible, "emit_row_projections")
 
 
 def test_consume_file_does_not_catch_detector_type_errors() -> None:

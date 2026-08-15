@@ -27,7 +27,7 @@ LOCKED_INPUT_FORMAT = "complex_int4_packed_int8"
 LOCKED_POWER_ACCUMULATOR = "uint64"
 LOCKED_STATISTIC = "F = 2 * P_target / (P_ref_lower + P_ref_upper)"
 LOCKED_PILOT_EXCESS = "rho = F - 1"
-LOCKED_HOST_MASKING_POLICY = "positive_excess_from_uint64_powers"
+LOCKED_HOST_MASKING_POLICY = "normalized_positive_excess_from_uint64_powers"
 DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET = 16
 MAG_SQUARED_ACCUMULATOR_BITS_TARGET = 32
 POWER_SUM_ACCUMULATOR_BITS = 64

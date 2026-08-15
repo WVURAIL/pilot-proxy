@@ -208,15 +208,15 @@ fig, axes = plt.subplots(len(EPISODIC), 1, figsize=(7.2, 8.6), sharex=True)
 qx_rows = []
 for ax, ch in zip(axes, EPISODIC):
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
     valid = z[f"ch{ch}_valid"].astype(bool)
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
     ok = valid & np.isfinite(f)
-    hi = ok & (f > mu_hat + 12e-3 * mu0)
+    hi = ok & (f > mu_hat + 12e-3 * null_power_ratio)
     fui = z[f"ch{ch}_frame_unit_index"]
     t0 = z[f"ch{ch}_unit_time0_ctime"]
     uq = np.array([quarter(t) for t in t0])
@@ -291,15 +291,15 @@ for ch in sorted(unit_class):
     s = study[ch]
     if s.get("zero_point_trusted") != "1":
         continue
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
     valid = z[f"ch{ch}_valid"].astype(bool)
     with np.errstate(divide="ignore", invalid="ignore"):
         f = 2.0 * pt / pr
     ok = valid & np.isfinite(f)
-    hi = ok & (f > mu_hat + 12e-3 * mu0)
+    hi = ok & (f > mu_hat + 12e-3 * null_power_ratio)
     fui = z[f"ch{ch}_frame_unit_index"]
     t0 = z[f"ch{ch}_unit_time0_ctime"]
     uq = np.array([quarter(t) for t in t0])

@@ -26,7 +26,7 @@ from pilot_proxy.fxfft import (
     INPUT_ABS_MAX,
     TWIDDLE_Q15,
     fine_power_fx,
-    fstat_fine_fx,
+    fine_power_ratio_fx,
     fxfft256,
     fxfft256_scalar,
     twiddle_table_sha256,
@@ -182,10 +182,10 @@ def test_fine_statistic_parity_with_float_pipeline():
     ref = fine_reduction.fine_reduce(
         terms, num_streams=streams, windows_per_stream=windows
     )
-    f2_float = ref.fstat_fine.astype(np.float64)
+    f2_float = ref.fine_power_ratio.astype(np.float64)
     power = fine_power_fx(terms, num_streams=streams, windows_per_stream=windows)
     assert power.dtype == np.uint64
-    f2_fx = fstat_fine_fx(power)
+    f2_fx = fine_power_ratio_fx(power)
     rel = np.abs(f2_fx - f2_float) / np.maximum(f2_float, 1e-30)
     assert rel.max() <= 5.0e-3
     # the detection peak lands in the same bin with the same magnitude class

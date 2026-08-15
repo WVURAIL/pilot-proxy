@@ -26,6 +26,7 @@ integration-check:
 	$(PYTHON) scripts/check_test_environment.py --integration
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
 	$(PYTHON) scripts/check_current_profile_contract.py
+	$(PYTHON) scripts/check_current_measurement_vocabulary.py
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests/datatrawl -q -rs
 
 docs-specs:
@@ -46,6 +47,7 @@ release-check:
 	$(PYTHON) scripts/check_current_product_vocabulary.py
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
 	$(PYTHON) scripts/check_current_profile_contract.py
+	$(PYTHON) scripts/check_current_measurement_vocabulary.py
 	$(PYTHON_TEST_ENV) $(PYTHON) tools/emit_fxfft_tables.py --check
 	$(PYTHON_TEST_ENV) $(PYTHON) -m compileall -q src tests
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
@@ -102,7 +104,7 @@ evaluate:
 	    --input-iq generated/atsc/atsc_8vsb_complex64.cfile \
 	    --physical-channel 14 \
 	    --frame-size-samples 16384 \
-	    --requested-snr-shelf-db -26 \
+	    --requested-data-shelf-snr-db -26 \
 	    --noise-trials 10 \
 	    --gnuradio-python $(GNURADIO_PYTHON)
 

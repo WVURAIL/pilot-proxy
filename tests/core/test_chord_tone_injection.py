@@ -43,7 +43,7 @@ import pytest
 
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
 from pilot_proxy.detector_reference import (
-    fstat_cpu_reference_packed,
+    coarse_power_ratio_cpu_reference_packed,
     quantize_complex_numpy,
     unpack_packed_complex,
 )
@@ -308,7 +308,7 @@ def test_integer_powers_match_cpu_reference(chord_bundle, channel) -> None:
         packed_for_kernel = np.ascontiguousarray(packed[:, ::-1])
     else:
         packed_for_kernel = packed
-    _, sums = fstat_cpu_reference_packed(
+    _, sums = coarse_power_ratio_cpu_reference_packed(
         packed_for_kernel,
         np.frombuffer(weight_bytes, dtype=np.int8).reshape(3, K),
         BITS,

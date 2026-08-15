@@ -27,8 +27,8 @@ z = np.load(PROD)
 assert int(z["physical_channel"][0]) == 27 and int(z["freq_id"][0]) == 644
 s = {int(r["atsc_channel"]): r for r in
      csv.DictReader(open(_paths.OUT / "empirical_zero_points.csv"))}[27]
-mu0 = float(s["mu0_analytic"])
-mh = float(s["mu0_empirical"])
+null_power_ratio = float(s["null_power_ratio_analytic"])
+mh = float(s["null_power_ratio_empirical"])
 
 pt = z["p_target_u64"].reshape(-1).astype(np.float64)
 pr = z["p_ref_sum_u64"].reshape(-1).astype(np.float64)
@@ -36,7 +36,7 @@ ok = z["valid"].reshape(-1).astype(bool)
 with np.errstate(divide="ignore", invalid="ignore"):
     f = 2.0 * pt / pr
 ok &= np.isfinite(f)
-F = f / mu0
+F = f / null_power_ratio
 fui = z["frame_unit_index"].reshape(-1)
 t0 = z["unit_time0_ctime"]
 
@@ -47,8 +47,8 @@ def quarter(ts):
 
 
 fq = np.array([quarter(t) for t in t0])[fui]
-hi = ok & (F > (mh / mu0 + 12e-3))
-lo = ok & (F < (mh / mu0 - 12e-3))
+hi = ok & (F > (mh / null_power_ratio + 12e-3))
+lo = ok & (F < (mh / null_power_ratio - 12e-3))
 rows = []
 for q in sorted(set(fq)):
     m = ok & (fq == q)

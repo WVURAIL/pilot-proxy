@@ -26,9 +26,9 @@ BIN_ENBW_HZ = 3_051.7578125
 PILOT_BELOW_DATA_DB = 11.3
 PILOT_CAPTURE_EFFICIENCY = 1.0
 THRESHOLD = {
-    "threshold_snr_shelf_db": -26.0,
-    "threshold_pnr_bin_db": -4.364,
-    "threshold_fstat_raw": 1.366,
+    "threshold_data_shelf_snr_db": -26.0,
+    "threshold_pilot_excess_db": -4.364,
+    "threshold_coarse_power_ratio": 1.366,
     "threshold_half_num": 123,
     "threshold_half_den": 180,
 }

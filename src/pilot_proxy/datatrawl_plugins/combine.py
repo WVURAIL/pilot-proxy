@@ -33,7 +33,7 @@ from pilot_proxy.chime.reductions import write_reductions_npz
 from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_VERSION,
     CHIME_STATS_SCHEMA_VERSION,
-    positive_excess_mask_policy,
+    normalized_positive_excess_policy,
 )
 from pilot_proxy.provenance import (
     detector_version_build_id,
@@ -64,8 +64,8 @@ def _label(z: Mapping[str, Any]) -> str:
 # Event-keyed alignment gathers exactly these; everything else in a product is
 # per-pilot (scalars), per-unit (time/provenance axes), or per-bin (spectra).
 _PER_FRAME_KEYS = (
-    "frame_index", "p_target_u64", "p_ref_sum_u64", "fstat_raw",
-    "fstat_level_db", "pnr_bin_db", "snr_shelf_db", "pilot_excess_corrected",
+    "frame_index", "p_target_u64", "p_ref_sum_u64", "coarse_power_ratio",
+    "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db", "normalized_pilot_excess",
     "reject_mask", "valid", "baseband_power_linear",
     "frame_unit_index", "frame_in_unit",
 )
@@ -517,10 +517,10 @@ def combine_detector_products(
 
     p_target_u64 = _stack_cols(products, "p_target_u64", np.uint64)
     p_ref_sum_u64 = _stack_cols(products, "p_ref_sum_u64", np.uint64)
-    fstat_raw = _stack_cols(products, "fstat_raw", np.float64)
-    fstat_level_db = _stack_cols(products, "fstat_level_db", np.float64)
-    pnr_bin_db = _stack_cols(products, "pnr_bin_db", np.float64)
-    snr_shelf_db = _stack_cols(products, "snr_shelf_db", np.float64)
+    coarse_power_ratio = _stack_cols(products, "coarse_power_ratio", np.float64)
+    normalized_coarse_power_ratio_db = _stack_cols(products, "normalized_coarse_power_ratio_db", np.float64)
+    pilot_excess_db = _stack_cols(products, "pilot_excess_db", np.float64)
+    estimated_data_shelf_snr_db = _stack_cols(products, "estimated_data_shelf_snr_db", np.float64)
     # per-channel products renamed `mask` -> `reject_mask` at schema v2 (1 = discard,
     # positive excess); the canonical combined outputs keep the `mask` field name, so
     # only this read changes; write_* below stays byte-identical.
@@ -529,10 +529,10 @@ def combine_detector_products(
     baseband_power_linear = _stack_cols(products, "baseband_power_linear", np.float64)
     # The current schema always carries the exact quantized-weight null point.
     target_norm_sq = _scalars(products, "target_norm_sq", np.int64)
-    ref_norm_sum_sq = _scalars(products, "ref_norm_sum_sq", np.int64)
-    mu0 = _scalars(products, "mu0", np.float64)
-    pilot_excess_corrected = _stack_cols(
-        products, "pilot_excess_corrected", np.float64
+    reference_norm_sum_sq = _scalars(products, "reference_norm_sum_sq", np.int64)
+    null_power_ratio = _scalars(products, "null_power_ratio", np.float64)
+    normalized_pilot_excess = _stack_cols(
+        products, "normalized_pilot_excess", np.float64
     )
 
     # integrated spectra are per-channel 1-D [nfft] (not per-frame): stack along the
@@ -560,16 +560,16 @@ def combine_detector_products(
         frame_index=frame_index,
         p_target_u64=p_target_u64,
         p_ref_sum_u64=p_ref_sum_u64,
-        fstat_raw=fstat_raw,
-        fstat_level_db=fstat_level_db,
-        pnr_bin_db=pnr_bin_db,
-        snr_shelf_db=snr_shelf_db,
+        coarse_power_ratio=coarse_power_ratio,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+        pilot_excess_db=pilot_excess_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         mask=mask,
         valid=valid,
         target_norm_sq=target_norm_sq,
-        ref_norm_sum_sq=ref_norm_sum_sq,
-        mu0=mu0,
-        pilot_excess_corrected=pilot_excess_corrected,
+        reference_norm_sum_sq=reference_norm_sum_sq,
+        null_power_ratio=null_power_ratio,
+        normalized_pilot_excess=normalized_pilot_excess,
     )
     outputs["spectrogram_cache"] = write_spectrogram_cache(
         run_dir,
@@ -599,9 +599,9 @@ def combine_detector_products(
         frame_index=frame_index,
         frame_size_samples=nfft,
         chunk_seconds=float(chunk_seconds),
-        fstat_raw=fstat_raw,
-        fstat_level_db=fstat_level_db,
-        snr_shelf_db=snr_shelf_db,
+        coarse_power_ratio=coarse_power_ratio,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         baseband_power_linear=baseband_power_linear,
         mask=mask,
         valid=valid,
@@ -624,7 +624,7 @@ def combine_detector_products(
     if reference_placement is not None:
         contract = dict(contract)
         contract["reference_placement_summary"] = reference_placement
-    mask_policy = positive_excess_mask_policy()
+    mask_policy = normalized_positive_excess_policy()
     k = int(contract["detector_window_samples"])
     provenance_by_pilot = []
     for z in products:

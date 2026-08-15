@@ -31,8 +31,8 @@ for snr in $SNR_LIST; do
       pilot-proxy evaluate-snr --input-iq "$IQ" \
         --physical-channel 14 --frame-size-samples 16384 \
         --num-input-streams 4 \
-        --requested-snr-shelf-db "$snr" --frequency-offset-hz "$off" \
-        --threshold-snr-shelf-db -32 \
+        --requested-data-shelf-snr-db "$snr" --frequency-offset-hz "$off" \
+        --threshold-data-shelf-snr-db -32 \
         --detector-backend cpu-reference --noise-source python \
         --noise-trials "$TRIALS" --output-dir "$d" \
         > "$d/shard.log" 2>&1 \

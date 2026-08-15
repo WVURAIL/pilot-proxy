@@ -43,8 +43,8 @@ ym = {}                                      # ch -> {(yr,m): [hi, n]}
 years_seen = {}                              # yr -> [hi, n] episodic only
 for i, ch in enumerate(chans):
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     pt = z[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = z[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
     valid = z[f"ch{ch}_valid"].astype(bool)
@@ -54,8 +54,8 @@ for i, ch in enumerate(chans):
         f = 2.0 * pt / pr
     fin_u = np.isfinite(t0) & (t0 > 1e9)
     ok = valid & np.isfinite(f) & fin_u[fui]
-    hi = ok & (f > mu_hat + 12e-3 * mu0)
-    lo = ok & (f < mu_hat - 12e-3 * mu0)
+    hi = ok & (f > mu_hat + 12e-3 * null_power_ratio)
+    lo = ok & (f < mu_hat - 12e-3 * null_power_ratio)
     mo_u = np.full(t0.size, -1, dtype=int)
     yr_u = np.full(t0.size, -1, dtype=int)
     for j in np.nonzero(fin_u)[0]:
@@ -106,9 +106,9 @@ for i, ch in enumerate(chans):
             e[1] += int(sel.sum())
     # Excursion spectrum of the detection statistic itself (baseline-free:
     # propagation events outlast a capture unit, so per-unit power baselines
-    # cannot see them; F/mu0 can, frame by frame).
+    # cannot see them; F/null_power_ratio can, frame by frame).
     if ch in SHOW:
-        dev = 1e3 * (f - mu_hat) / mu0
+        dev = 1e3 * (f - mu_hat) / null_power_ratio
         depth[ch] = dict(hi=dev[hi], lo=-dev[lo])
 
 epi_idx = [i for i, ch in enumerate(chans) if episodic[ch]]

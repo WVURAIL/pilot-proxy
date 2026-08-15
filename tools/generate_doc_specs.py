@@ -3,7 +3,7 @@
 
 Single-sources the volatile numbers shared by the Data Sheet and User Guide
 so the documents cannot drift from the implementation: versions, detector
-geometry, fine-reduction constants, the mu0 range and adaptive-placement
+geometry, fine-reduction constants, the null_power_ratio range and adaptive-placement
 facts recomputed from the shipped weight manifest, weight-bank digests, and
 derived dB quantities. Stdlib only; no GPU, no third-party imports.
 
@@ -75,15 +75,15 @@ def manifest_facts() -> dict:
     mus, adaptive = [], []
     for entry in layout:
         t = int(entry["target_norm_sq"])
-        r = int(entry["ref_norm_sum_sq"])
+        r = int(entry["reference_norm_sum_sq"])
         mus.append(2.0 * t / r)
         if entry.get("adaptive_reference_placement"):
             adaptive.append(int(entry["physical_channel"]))
     if not mus:
         _die("empty target_reference_layout")
     return {
-        "mu0_min": min(mus),
-        "mu0_max": max(mus),
+        "null_power_ratio_min": min(mus),
+        "null_power_ratio_max": max(mus),
         "n_channels": len(layout),
         "adaptive_channels": adaptive,
     }
@@ -123,8 +123,8 @@ def main() -> int:
         "\\newcommand{\\ppChimeRowsPerFrame}{"
         f"{CHIME_STREAMS * (FRAME_SAMPLES // K):,}".replace(",", "{,}") + "}",
         f"\\newcommand{{\\ppBandwidthSpreadDb}}{{{bandwidth_spread_db:.3f}}}",
-        f"\\newcommand{{\\ppMuZeroMin}}{{{facts['mu0_min']:.10f}}}",
-        f"\\newcommand{{\\ppMuZeroMax}}{{{facts['mu0_max']:.10f}}}",
+        f"\\newcommand{{\\ppMuZeroMin}}{{{facts['null_power_ratio_min']:.10f}}}",
+        f"\\newcommand{{\\ppMuZeroMax}}{{{facts['null_power_ratio_max']:.10f}}}",
         f"\\newcommand{{\\ppWeightChannelCount}}{{{facts['n_channels']}}}",
         f"\\newcommand{{\\ppCaptureLossThreeHundredDb}}{{{capture_loss_db(300.0):.4f}}}",
         f"\\newcommand{{\\ppCaptureLossFiveHundredDb}}{{{capture_loss_db(500.0):.4f}}}",

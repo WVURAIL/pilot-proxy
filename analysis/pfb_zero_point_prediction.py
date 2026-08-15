@@ -6,8 +6,8 @@ White noise -> 4-tap/2048 sinc-Hamming PFB (the repo's reference prototype)
 S(nu) = sum_k |H(nu+k)|^2 -> detector fine bins (K=128 rectangular window)
 integrate S through the Dirichlet kernel -> per-fine-bin noise gain g(d).
 Predicted zero-point ratio per channel from the manifest geometry:
-E[F]/mu0 = g(d_t)*(l_ns+u_ns) / (l_ns*g(d_l) + u_ns*g(d_u)).
-Compare against the measured mu_hat/mu0 - 1.
+E[F]/null_power_ratio = g(d_t)*(l_ns+u_ns) / (l_ns*g(d_l) + u_ns*g(d_u)).
+Compare against the measured mu_hat/null_power_ratio - 1.
 """
 import csv
 import sys

@@ -5,7 +5,7 @@ import numpy as np
 import pytest
 
 from pilot_proxy.detector_reference import (
-    fstat_cpu_reference_packed,
+    coarse_power_ratio_cpu_reference_packed,
     quantize_complex_numpy,
 )
 from pilot_proxy.detector_weights import DetectorWeightBank
@@ -91,7 +91,7 @@ def test_kernel_cpu_gpu_smoke_matches_prebuilt_dtv_weights() -> None:
     )
     packed = quantize_complex_numpy(samples, kernel.specs.bits, scale)
 
-    cpu_value, _ = fstat_cpu_reference_packed(packed, weights, kernel.specs.bits)
+    cpu_value, _ = coarse_power_ratio_cpu_reference_packed(packed, weights, kernel.specs.bits)
     gpu_value = _run_kernel(cp, kernel, packed, weights)
 
     assert abs(gpu_value - cpu_value) <= GPU_MATCH_ABSOLUTE_TOLERANCE

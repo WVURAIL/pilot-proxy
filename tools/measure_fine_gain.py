@@ -11,9 +11,9 @@ deployed geometry (2048 streams x 128 windows), with integer row sums and
 the deployed statistics:
 
   coarse:  F = 2 sum|z_t|^2 / (sum|z_r1|^2 + sum|z_r2|^2), exact int64
-           sums (mu0 = 1: simulated weight norms are equal by
+           sums (null_power_ratio = 1: simulated weight norms are equal by
            construction, stated in the output).
-  fine:    fstat_fine[b] = 2 S_t[b] / (S_l[b] + S_u[b]) from the x2
+  fine:    fine_power_ratio[b] = 2 S_t[b] / (S_l[b] + S_u[b]) from the x2
            zero-padded window-axis FFT, then the deployed designated-set
            statistic max over the anchor +/- 2 window.
 
@@ -75,7 +75,7 @@ def reduce_batch(zi):
 
     Returns (coarse F, fine window-max) per trial. Identical math to the
     packaged pipeline: exact int64 marginals; complex128 x2-padded FFT,
-    incoherent stream sum, fstat_fine ratio, designated-window max.
+    incoherent stream sum, fine_power_ratio ratio, designated-window max.
     """
     wide = zi.astype(np.int64)
     powers = (wide[..., 0] ** 2 + wide[..., 1] ** 2).sum(axis=(2, 3))
@@ -111,9 +111,9 @@ def verify(seed=0, trials=3, streams=64):
         rows = zi[t].reshape(3, streams * WINDOWS, 2)
         res = fine_reduction.fine_reduce(
             rows, num_streams=streams, windows_per_stream=WINDOWS)
-        assert np.array_equal(res.marginal_powers.astype(np.int64), powers[t]), \
+        assert np.array_equal(res.coarse_power_by_term.astype(np.int64), powers[t]), \
             "integer marginals diverge"
-        ref32 = np.asarray(res.fstat_fine, dtype=np.float32)
+        ref32 = np.asarray(res.fine_power_ratio, dtype=np.float32)
         got32 = f2[t].astype(np.float32)
         assert np.array_equal(ref32, got32), (
             "fine spectrum diverges at product precision: max|d|="

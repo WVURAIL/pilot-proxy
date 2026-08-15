@@ -26,8 +26,8 @@ import numpy as np
 from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
 
 SCHEMA = PER_PILOT_PRODUCT_SCHEMA_TOKEN
-PER_FRAME = ("frame_index", "p_target_u64", "p_ref_sum_u64", "fstat_raw",
-             "fstat_level_db", "pnr_bin_db", "snr_shelf_db", "valid",
+PER_FRAME = ("frame_index", "p_target_u64", "p_ref_sum_u64", "coarse_power_ratio",
+             "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db", "valid",
              "reject_mask", "baseband_power_linear", "frame_unit_index",
              "frame_in_unit")
 PER_UNIT = ("unit_order", "unit_time0_ctime", "unit_time0_fpga", "unit_event_id",

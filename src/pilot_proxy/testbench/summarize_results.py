@@ -28,10 +28,10 @@ HISTOGRAM_MODE_ALWAYS = "always"
 HISTOGRAM_MODE_NEVER = "never"
 HISTOGRAM_MODES = (HISTOGRAM_MODE_AUTO, HISTOGRAM_MODE_ALWAYS, HISTOGRAM_MODE_NEVER)
 
-FSTAT_COLUMN = "fstat_raw"
-PNR_BIN_COLUMN = "pnr_bin_db"
-SNR_SHELF_COLUMN = "estimated_snr_shelf_db"
-REQUESTED_SNR_COLUMN = "requested_snr_shelf_db"
+FSTAT_COLUMN = "coarse_power_ratio"
+PNR_BIN_COLUMN = "pilot_excess_db"
+SNR_SHELF_COLUMN = "estimated_data_shelf_snr_db"
+REQUESTED_SNR_COLUMN = "requested_data_shelf_snr_db"
 SUMMARY_CSV_NAME = "summary.csv"
 SUMMARY_JSON_NAME = "summary.json"
 FSTAT_HISTOGRAM_NAME = "fstat_histogram.png"
@@ -155,7 +155,7 @@ def _sweep_histogram_skip_reason(rows: list[dict[str, Any]]) -> str | None:
     requested_snr_values = _unique_finite_values(rows, REQUESTED_SNR_COLUMN)
     if len(requested_snr_values) > 1:
         return (
-            "input contains multiple requested_snr_shelf_db values; "
+            "input contains multiple requested_data_shelf_snr_db values; "
             "histograms over a sweep mix distinct SNR populations."
         )
     return None

@@ -54,17 +54,18 @@ from pilot_proxy.dtv_units import (
     EFFECTIVE_BIN_BW_HZ,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
-    fstat_num_den_to_fstat_level_db,
-    fstat_num_den_to_pnr_bin_db,
-    fstat_num_den_to_raw,
-    pnr_bin_db_to_snr_shelf_db,
+    power_terms_to_normalized_coarse_power_ratio_db,
+    normalized_pilot_excess_to_db,
+    power_terms_to_normalized_pilot_excess,
+    power_terms_to_coarse_power_ratio,
+    pilot_excess_db_to_data_shelf_snr_db,
 )
 from pilot_proxy.detector_contract import (
-    POSITIVE_EXCESS_MASK_RULE,
+    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     WEIGHT_COORDINATE_RAW_INPUT,
     build_chime_detector_contract,
-    norm_corrected_mu0,
+    null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
     weight_term_norms_sq,
 )
@@ -217,7 +218,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._coarse_center_hz = float("nan")
         # injected detector pieces (defaults resolved lazily in begin)
         self._detector_fn = None
-        self._detector_fn_accepts_row_sums = False
+        self._detector_fn_accepts_matched_filter_row_projections = False
         self._kernel = None
         self._weights: np.ndarray | None = None
         # dB-calibration constants (overridable)
@@ -236,13 +237,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._detector_version = ""
         # exact integer weight-norm zero-point (set with the weights in begin())
         self._target_norm_sq = 0
-        self._ref_norm_sum_sq = 0
-        self._mu0 = float("nan")
+        self._reference_norm_sum_sq = 0
+        self._null_power_ratio = float("nan")
         self._resumed_provenance: dict[str, Any] | None = None
         # accumulators
         self._p_target: list[int] = []
         self._p_ref_sum: list[int] = []
-        self._fstat_raw: list[float] = []
+        self._coarse_power_ratio: list[float] = []
         # ---- v2 fine-reduction products (schema v3) ----
         self._fine_mode_opt: str = "auto"
         self._fine_supported: bool | None = None
@@ -252,19 +253,19 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_guard: int = int(CFAR_DEFAULT_GUARD_FINE_BINS)
         self._fine_designated: list[int] = [0]
         self._fine_census: list[int] = []
-        self._fine_fstat: list[np.ndarray] = []
+        self._fine_power_ratio: list[np.ndarray] = []
         self._fine_loc: list[float] = []
         self._fine_scale: list[float] = []
         self._fine_thr: list[float] = []
         self._fine_null_bulk_exceedance_fraction: list[float] = []
         self._fine_mode_code: list[int] = []
-        self._fine_ndet: list[int] = []
-        self._fine_det_frames: list[int] = []
-        self._fine_det_bins: list[int] = []
-        self._fstat_level_db: list[float] = []
-        self._pnr_bin_db: list[float] = []
-        self._snr_shelf_db: list[float] = []
-        self._pilot_excess_corrected: list[float] = []  # F/mu0 - 1 (NaN if invalid)
+        self._fine_threshold_exceedance_count: list[int] = []
+        self._fine_threshold_exceedance_frames: list[int] = []
+        self._fine_threshold_exceedance_bins: list[int] = []
+        self._normalized_coarse_power_ratio_db: list[float] = []
+        self._pilot_excess_db: list[float] = []
+        self._estimated_data_shelf_snr_db: list[float] = []
+        self._normalized_pilot_excess: list[float] = []  # F/null_power_ratio - 1 (NaN if invalid)
         self._reject_mask: list[int] = []  # 1 = discard frame (positive excess)
         self._valid: list[int] = []
         self._baseband_power: list[float] = []
@@ -449,8 +450,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "mask_rule": _text("mask_rule"),
             "target_norm_sq": int(np.asarray(data["target_norm_sq"]).reshape(-1)[0])
             if "target_norm_sq" in data else None,
-            "ref_norm_sum_sq": int(np.asarray(data["ref_norm_sum_sq"]).reshape(-1)[0])
-            if "ref_norm_sum_sq" in data else None,
+            "reference_norm_sum_sq": int(np.asarray(data["reference_norm_sum_sq"]).reshape(-1)[0])
+            if "reference_norm_sum_sq" in data else None,
             "detector_contract": saved_contract,
             "weight_bank_sha256": _text("weight_bank_sha256"),
             "weight_manifest_sha256": _text("weight_manifest_sha256"),
@@ -462,21 +463,21 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             return np.asarray(data[name]).reshape(-1)
         self._p_target = [int(x) for x in _col("p_target_u64")]
         self._p_ref_sum = [int(x) for x in _col("p_ref_sum_u64")]
-        self._fstat_raw = [float(x) for x in _col("fstat_raw")]
-        self._fstat_level_db = [float(x) for x in _col("fstat_level_db")]
-        self._pnr_bin_db = [float(x) for x in _col("pnr_bin_db")]
-        self._snr_shelf_db = [float(x) for x in _col("snr_shelf_db")]
-        self._pilot_excess_corrected = (
-            [float(x) for x in _col("pilot_excess_corrected")]
-            if "pilot_excess_corrected" in data
-            else [float("nan")] * len(self._snr_shelf_db)
+        self._coarse_power_ratio = [float(x) for x in _col("coarse_power_ratio")]
+        self._normalized_coarse_power_ratio_db = [float(x) for x in _col("normalized_coarse_power_ratio_db")]
+        self._pilot_excess_db = [float(x) for x in _col("pilot_excess_db")]
+        self._estimated_data_shelf_snr_db = [float(x) for x in _col("estimated_data_shelf_snr_db")]
+        self._normalized_pilot_excess = (
+            [float(x) for x in _col("normalized_pilot_excess")]
+            if "normalized_pilot_excess" in data
+            else [float("nan")] * len(self._estimated_data_shelf_snr_db)
         )
         self._reject_mask = [int(x) for x in _col("reject_mask")]
         # ---- v2 fine-reduction restore (schema v3 products) ----
-        if "fstat_fine" in data:
-            fine_arr = np.asarray(data["fstat_fine"], dtype=np.float32)
+        if "fine_power_ratio" in data:
+            fine_arr = np.asarray(data["fine_power_ratio"], dtype=np.float32)
             self._fine_bins = int(fine_arr.shape[1]) if fine_arr.ndim == 2 else 0
-            self._fine_fstat = [fine_arr[i] for i in range(fine_arr.shape[0])]
+            self._fine_power_ratio = [fine_arr[i] for i in range(fine_arr.shape[0])]
             self._fine_loc = [float(x) for x in _col("fine_cfar_location")]
             self._fine_scale = [float(x) for x in _col("fine_cfar_scale")]
             self._fine_thr = [float(x) for x in _col("fine_cfar_threshold")]
@@ -484,11 +485,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 float(x) for x in _col("fine_null_bulk_exceedance_fraction")
             ]
             self._fine_mode_code = [int(x) for x in _col("fine_cfar_mode")]
-            self._fine_ndet = [int(x) for x in _col("fine_detected_count")]
-            self._fine_det_frames = [
-                int(x) for x in _col("fine_detected_frame")
+            self._fine_threshold_exceedance_count = [int(x) for x in _col("fine_threshold_exceedance_count")]
+            self._fine_threshold_exceedance_frames = [
+                int(x) for x in _col("fine_threshold_exceedance_frame")
             ]
-            self._fine_det_bins = [int(x) for x in _col("fine_detected_bin")]
+            self._fine_threshold_exceedance_bins = [int(x) for x in _col("fine_threshold_exceedance_bin")]
             self._fine_p_fa = float(np.asarray(data["fine_p_fa"]))
             self._fine_guard = int(np.asarray(data["fine_guard_fine_bins"]))
             self._fine_designated = [
@@ -662,8 +663,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         if self._detector_fn is None:
             from pilot_proxy.chime.runner import detect_packed_for_positive_excess
             self._detector_fn = detect_packed_for_positive_excess
-        self._detector_fn_accepts_row_sums = _callable_accepts_keyword(
-            self._detector_fn, "emit_row_sums"
+        self._detector_fn_accepts_matched_filter_row_projections = _callable_accepts_keyword(
+            self._detector_fn, "emit_row_projections"
         )
 
         self._kernel = opts.get("kernel")
@@ -702,16 +703,16 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     f"{self._physical_channel}"
                 )
         self._weights = np.ascontiguousarray(weights)
-        # Exact integer squared norms of the three weight terms. mu0 =
+        # Exact integer squared norms of the three weight terms. null_power_ratio =
         # 2*nt/(nl+nu) is the flat-floor H0 zero-point of F that int4 weight
         # quantization shifts away from 1; the mask rule and the corrected
         # pilot excess divide it out (see detector_contract).
         _nt, _nl, _nu = weight_term_norms_sq(self._weights)
         self._target_norm_sq = int(_nt)
-        self._ref_norm_sum_sq = int(_nl + _nu)
-        self._mu0 = (
-            norm_corrected_mu0(self._target_norm_sq, self._ref_norm_sum_sq)
-            if self._ref_norm_sum_sq > 0
+        self._reference_norm_sum_sq = int(_nl + _nu)
+        self._null_power_ratio = (
+            null_power_ratio_from_weight_norms(self._target_norm_sq, self._reference_norm_sum_sq)
+            if self._reference_norm_sum_sq > 0
             else float("nan")
         )
 
@@ -912,9 +913,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         current = {
             "weights_hash": self._weights_hash,
             "detector_version": self._detector_version,
-            "mask_rule": POSITIVE_EXCESS_MASK_RULE,
+            "mask_rule": NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
             "target_norm_sq": int(self._target_norm_sq),
-            "ref_norm_sum_sq": int(self._ref_norm_sum_sq),
+            "reference_norm_sum_sq": int(self._reference_norm_sum_sq),
             # Compare the enriched contract (including the fine_reduction
             # block) exactly as save() persists it: _refresh_provenance() has
             # just rebuilt _detector_contract_json for the current
@@ -1038,18 +1039,18 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 # valid=0 keeps the frame out of both integrated spectra.
                 self._p_target.append(0)
                 self._p_ref_sum.append(0)
-                self._fstat_raw.append(float("nan"))
-                self._fstat_level_db.append(float("nan"))
-                self._pnr_bin_db.append(float("nan"))
-                self._snr_shelf_db.append(float("nan"))
-                self._pilot_excess_corrected.append(float("nan"))
+                self._coarse_power_ratio.append(float("nan"))
+                self._normalized_coarse_power_ratio_db.append(float("nan"))
+                self._pilot_excess_db.append(float("nan"))
+                self._estimated_data_shelf_snr_db.append(float("nan"))
+                self._normalized_pilot_excess.append(float("nan"))
                 self._reject_mask.append(0)
                 self._valid.append(0)
                 self._baseband_power.append(float("nan"))
                 self._ensure_fine_width(
                     fine_bin_count(int(self._nfft) // int(self._K))
                 )
-                self._fine_fstat.append(
+                self._fine_power_ratio.append(
                     np.full(int(self._fine_bins), np.nan, dtype=np.float32)
                 )
                 self._fine_loc.append(float("nan"))
@@ -1057,7 +1058,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_thr.append(float("nan"))
                 self._fine_null_bulk_exceedance_fraction.append(float("nan"))
                 self._fine_mode_code.append(0)
-                self._fine_ndet.append(0)
+                self._fine_threshold_exceedance_count.append(0)
                 self._frame_unit_index.append(unit_idx)
                 self._frame_in_unit.append(chunk_in_unit)
                 n += 1
@@ -1080,10 +1081,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             )
             want_fine = self._fine_mode_opt != "off"
             if want_fine and self._fine_supported is None:
-                probe = getattr(self._kernel, "supports_row_sums", None)
-                kernel_supports_row_sums = bool(probe()) if callable(probe) else False
+                probe = getattr(self._kernel, "supports_row_projections", None)
+                kernel_supports_row_projections = bool(probe()) if callable(probe) else False
                 self._fine_supported = bool(
-                    kernel_supports_row_sums and self._detector_fn_accepts_row_sums
+                    kernel_supports_row_projections and self._detector_fn_accepts_matched_filter_row_projections
                 )
                 if not self._fine_supported:
                     if self._fine_mode_opt == "on":
@@ -1093,9 +1094,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                             "row-sum emission."
                         )
                     self._fine_status = (
-                        "detector_fn_lacks_row_sums"
-                        if kernel_supports_row_sums
-                        else "kernel_library_lacks_row_sums"
+                        "detector_fn_lacks_matched_filter_row_projections"
+                        if kernel_supports_row_projections
+                        else "kernel_library_lacks_matched_filter_row_projections"
                     )
                 else:
                     self._fine_status = "enabled"
@@ -1105,7 +1106,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     packed=packed.packed,
                     weights=self._weights,
                     kernel=self._kernel,
-                    emit_row_sums=True,
+                    emit_row_projections=True,
                 )
             else:
                 detection = self._detector_fn(
@@ -1127,15 +1128,15 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     f"detector result per nfft chunk, got {len(results)}. The "
                     "chime-baseband-packed reader yields one frame per chunk."
                 )
-            row_sums = detection.get("row_sums") if emit_fine else None
-            if row_sums is not None:
+            matched_filter_row_projections = detection.get("matched_filter_row_projections") if emit_fine else None
+            if matched_filter_row_projections is not None:
                 first = results[0]
                 fine_powers = (
                     int(first.get("p_target_u64", 0)),
                     int(first.get("p_ref_lower_u64", 0)),
                     int(first.get("p_ref_upper_u64", 0)),
                 )
-                rs0 = row_sums[0]
+                rs0 = matched_filter_row_projections[0]
                 xp_mod = np
                 if "cupy" in type(rs0).__module__:
                     import cupy as xp_mod  # noqa: F811
@@ -1150,8 +1151,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     kernel_powers=fine_powers,
                     xp=xp_mod,
                 )
-                self._fine_fstat.append(
-                    np.asarray(fine.fstat_fine, dtype=np.float32)
+                self._fine_power_ratio.append(
+                    np.asarray(fine.fine_power_ratio, dtype=np.float32)
                 )
                 assert fine.cfar is not None
                 self._fine_loc.append(float(fine.cfar.location))
@@ -1169,12 +1170,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 # +n, every detection in a unit is stamped with the unit's
                 # first frame index.
                 frame_number = int(self._n_frames) + n
-                self._fine_ndet.append(int(fine.detected_bins.size))
+                self._fine_threshold_exceedance_count.append(int(fine.detected_bins.size))
                 for det_bin in fine.detected_bins.tolist():
-                    self._fine_det_frames.append(frame_number)
-                    self._fine_det_bins.append(int(det_bin))
+                    self._fine_threshold_exceedance_frames.append(frame_number)
+                    self._fine_threshold_exceedance_bins.append(int(det_bin))
             elif self._fine_bins:
-                self._fine_fstat.append(
+                self._fine_power_ratio.append(
                     np.full(int(self._fine_bins), np.nan, dtype=np.float32)
                 )
                 self._fine_loc.append(float("nan"))
@@ -1182,32 +1183,47 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_thr.append(float("nan"))
                 self._fine_null_bulk_exceedance_fraction.append(float("nan"))
                 self._fine_mode_code.append(0)
-                self._fine_ndet.append(0)
+                self._fine_threshold_exceedance_count.append(0)
             for local_index, row in enumerate(results):
                 num = int(row.get("p_target_u64", 0))
                 den = int(row.get("p_ref_sum_u64", 0))
                 self._p_target.append(num)
                 self._p_ref_sum.append(den)
-                self._fstat_raw.append(float(fstat_num_den_to_raw(num, den)))
-                self._fstat_level_db.append(
-                    float(fstat_num_den_to_fstat_level_db(num, den))
+                self._coarse_power_ratio.append(
+                    float(power_terms_to_coarse_power_ratio(num, den))
                 )
-                pnr = float(fstat_num_den_to_pnr_bin_db(num, den))
-                self._pnr_bin_db.append(pnr)
-                self._snr_shelf_db.append(
-                    float(pnr_bin_db_to_snr_shelf_db(
-                        pnr,
+                self._normalized_coarse_power_ratio_db.append(
+                    float(
+                        power_terms_to_normalized_coarse_power_ratio_db(
+                            num,
+                            den,
+                            target_norm_sq=self._target_norm_sq,
+                            reference_norm_sum_sq=self._reference_norm_sum_sq,
+                        )
+                    )
+                )
+                normalized_excess = float(
+                    power_terms_to_normalized_pilot_excess(
+                        num,
+                        den,
+                        target_norm_sq=self._target_norm_sq,
+                        reference_norm_sum_sq=self._reference_norm_sum_sq,
+                    )
+                )
+                pilot_excess = float(
+                    normalized_pilot_excess_to_db(normalized_excess)
+                )
+                self._pilot_excess_db.append(pilot_excess)
+                self._estimated_data_shelf_snr_db.append(
+                    float(pilot_excess_db_to_data_shelf_snr_db(
+                        pilot_excess,
                         pilot_below_data_db=self._pilot_below_data_db,
                         bin_enbw_hz=self._bin_enbw_hz,
                         dtv_bandwidth_hz=self._dtv_bandwidth_hz,
                         pilot_capture_efficiency=self._pilot_capture_efficiency,
                     ))
                 )
-                self._pilot_excess_corrected.append(
-                    self._fstat_raw[-1] / self._mu0 - 1.0
-                    if den > 0
-                    else float("nan")
-                )
+                self._normalized_pilot_excess.append(normalized_excess)
                 self._reject_mask.append(int(row.get("mask", 0)))
                 self._valid.append(1 if den > 0 else 0)
                 bp = (
@@ -1271,11 +1287,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             frame_index=frame_index,
             p_target_u64=col_u(self._p_target, np.uint64),
             p_ref_sum_u64=col_u(self._p_ref_sum, np.uint64),
-            fstat_raw=col_f(self._fstat_raw),
+            coarse_power_ratio=col_f(self._coarse_power_ratio),
             # --- v2 fine-reduction per-frame products (schema v3) ---
-            fstat_fine=(
-                np.stack(self._fine_fstat).astype(np.float32)
-                if self._fine_fstat
+            fine_power_ratio=(
+                np.stack(self._fine_power_ratio).astype(np.float32)
+                if self._fine_power_ratio
                 else np.zeros((n, 0), dtype=np.float32)
             ),
             fine_cfar_location=col_f(self._fine_loc)
@@ -1296,11 +1312,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_mode_code if self._fine_mode_code else [0] * n,
                 np.uint8,
             ),
-            fine_detected_count=col_u(
-                self._fine_ndet if self._fine_ndet else [0] * n, np.int32
+            fine_threshold_exceedance_count=col_u(
+                self._fine_threshold_exceedance_count if self._fine_threshold_exceedance_count else [0] * n, np.int32
             ),
-            fine_detected_frame=np.asarray(self._fine_det_frames, dtype=np.int64),
-            fine_detected_bin=np.asarray(self._fine_det_bins, dtype=np.int64),
+            fine_threshold_exceedance_frame=np.asarray(self._fine_threshold_exceedance_frames, dtype=np.int64),
+            fine_threshold_exceedance_bin=np.asarray(self._fine_threshold_exceedance_bins, dtype=np.int64),
             fine_pad_factor=np.asarray(int(FINE_PAD_FACTOR), dtype=np.int64),
             fine_num_bins=np.asarray(int(self._fine_bins), dtype=np.int64),
             fine_p_fa=np.asarray(float(self._fine_p_fa), dtype=np.float64),
@@ -1310,10 +1326,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_census, dtype=np.int64
             ),
             fine_status=np.asarray(str(self._fine_status)),
-            fstat_level_db=col_f(self._fstat_level_db),
-            pnr_bin_db=col_f(self._pnr_bin_db),
-            snr_shelf_db=col_f(self._snr_shelf_db),
-            pilot_excess_corrected=col_f(self._pilot_excess_corrected),
+            normalized_coarse_power_ratio_db=col_f(self._normalized_coarse_power_ratio_db),
+            pilot_excess_db=col_f(self._pilot_excess_db),
+            estimated_data_shelf_snr_db=col_f(self._estimated_data_shelf_snr_db),
+            normalized_pilot_excess=col_f(self._normalized_pilot_excess),
             reject_mask=col_u(self._reject_mask, np.uint8),
             valid=col_u(self._valid, np.uint8),
             # --- per-frame power + integrated spectra (rectangular window) ---
@@ -1371,13 +1387,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             ),
             # --- run provenance: which weights + build + mask rule produced this --
             target_norm_sq=np.asarray([self._target_norm_sq], dtype=np.int64),
-            ref_norm_sum_sq=np.asarray([self._ref_norm_sum_sq], dtype=np.int64),
-            mu0=np.asarray([self._mu0], dtype=np.float64),
+            reference_norm_sum_sq=np.asarray([self._reference_norm_sum_sq], dtype=np.int64),
+            null_power_ratio=np.asarray([self._null_power_ratio], dtype=np.float64),
             weights_hash=np.asarray(self._weights_hash),
             weight_bank_sha256=np.asarray(self._weight_bank_sha256),
             weight_manifest_sha256=np.asarray(self._weight_manifest_sha256),
             detector_version=np.asarray(self._detector_version),
-            mask_rule=np.asarray(POSITIVE_EXCESS_MASK_RULE),
+            mask_rule=np.asarray(NORMALIZED_POSITIVE_EXCESS_MASK_RULE),
         )
         Path(tmp).replace(path)
 

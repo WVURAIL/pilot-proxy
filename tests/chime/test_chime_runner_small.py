@@ -200,7 +200,7 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
         "pilotproxy_chime_detector_contract_v1"
     )
     assert stats["detector_contract"]["per_frequency_threshold"] is False
-    assert stats["detector_contract"]["mask_source"] == "positive_excess"
+    assert stats["detector_contract"]["mask_source"] == "normalized_positive_excess_decision"
     assert stats["detector_contract"]["weight_coordinate_system"] == (
         WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
     )

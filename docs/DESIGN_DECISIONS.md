@@ -10,21 +10,21 @@ The CHIME real-data path uses the following comparison:
 
 ```text
 valid = p_ref_sum != 0
-mask  = valid && (p_target * ref_norm_sum_sq > target_norm_sq * p_ref_sum)
+mask  = valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the exact integer form of `F > mu0`, where
+This is the exact integer form of `F > null_power_ratio`, where
 
 ```text
-mu0 = 2 * target_norm_sq / ref_norm_sum_sq
+null_power_ratio = 2 * target_norm_sq / reference_norm_sum_sq
 ```
 
 is the flat-floor `H0` zero point implied by the packed weights. Int4
 quantization leaves the target and reference norms unequal. Independent
-recomputation from the shipped ATSC 14--36 manifest gives a `mu0` range of
+recomputation from the shipped ATSC 14--36 manifest gives a `null_power_ratio` range of
 0.9853298815 to 1.0111111111 rather than exactly 1.
 
-We compare each channel with its own `mu0` so that the rule is defined by the
+We compare each channel with its own `null_power_ratio` so that the rule is defined by the
 shipped weights and can be reproduced from integer powers. This avoids
 fitting a separate operational threshold before the bounded CANFAR test.
 Products written under the earlier `F > 1` rule retain that rule in
@@ -119,12 +119,12 @@ Deployment decision (2026-07): the real-time Kotekan decision is the fine
 designated-set CFAR, computed on the device. Coarse-only deployment was
 evaluated first on measured ROCs and rejected: the coarse null bulk and
 the weak-signal bulk overlap almost completely, so every coarse operating
-point is one of two failures. The mu0 point holds Pd ~ 1.0 everywhere but
+point is one of two failures. The null_power_ratio point holds Pd ~ 1.0 everywhere but
 spends 48.5% of verified-quiet time by construction, and null-calibrated
 fixed-Pfa points collapse on weak channels (null = ch35 off-state,
 n = 66; signal = 2024+ on-epochs of the first three scanned channels):
 
-| Pfa (null quantile) | theta (F/mu0) | ch36 Pd | ch35 Pd | ch34 Pd |
+| Pfa (null quantile) | theta (F/null_power_ratio) | ch36 Pd | ch35 Pd | ch34 Pd |
 |---|---|---|---|---|
 | 0.10 (P90) | 1.114 | 0.904 | 0.996 | 0.099 |
 | 0.05 (P95) | 1.124 | 0.872 | 0.996 | 0.089 |
@@ -134,7 +134,7 @@ The same frames carry a fine designated-set Pd ~ 0.99 on all three
 channels at a measured Pfa of 0.091, with the crude +/-2-bin set and an
 uncalibrated CFAR multiplier. The fine axis is the only one that holds
 both ends at once --- more complete than any calibrated coarse point,
-cheaper than mu0 --- which was the design intent of the v2 front end all
+cheaper than null_power_ratio --- which was the design intent of the v2 front end all
 along. The mask decision therefore moves into the kernel: after the exact
 int32 row sums, the device computes the padded window-axis FFT, the
 incoherent feed sum, the per-frame null-bulk CFAR estimate, and the
@@ -210,7 +210,7 @@ needs no contamination fallback mode (order statistics reject the
 measured 0.29% bulk tail by construction), and is calibrated by the
 same null-quantile program --- the campaign picks (rank, multiplier)
 from measured off-epoch nulls to hit the target false-alarm rate, and
-the survey products' per-bin `fstat_fine` suffice to compute those
+the survey products' per-bin `fine_power_ratio` suffice to compute those
 quantiles. The operating point (anchor, width, bulk mask, rank,
 multiplier) is runtime-bundle data with provenance
 (`fine_calibration` block, exported `pending_campaign` and validated
@@ -280,7 +280,7 @@ pool if universal) remains the path to deep, shared multipliers. The
 bundle records anchors, sets, multipliers, and their calibration
 provenance: epoch lists, quantiles, and source product hashes.
 
-The survey recording is unchanged: the mu0 positive-excess flag remains
+The survey recording is unchanged: the null_power_ratio positive-excess flag remains
 the recorded convention mid-survey (exact, calibration-free, archive-
 comparable), and the deployed-contract change lands at a survey epoch
 boundary. Rate margin must be re-measured with the fine stages on
@@ -292,7 +292,7 @@ the 41.9 ms frame cadence --- the lead holds.
 
 ## The recorded threshold is data, not architecture
 
-The survey keeps the norm-corrected positive excess (F > mu0) as the
+The survey keeps the norm-corrected positive excess (F > null_power_ratio) as the
 recorded flag: it is exact in integer arithmetic, requires no calibration
 input, and keeps the multi-year archive comparable. It is a recording
 convention, not a tuned operating point --- scored against the ch35
@@ -303,7 +303,7 @@ clean time.
 Nothing in the architecture pins that choice. The operating point is
 carried as per-channel rational data in the runtime bundle
 (`positive_excess_half_threshold_num`/`_den` in `pilot_profiles.json`);
-the CUDA comparison is threshold-agnostic, and `fstat_raw` plus the fine
+the CUDA comparison is threshold-agnostic, and `coarse_power_ratio` plus the fine
 spectrum are persisted per frame, so every recorded epoch can be re-scored
 offline under a different rule. Retuning a deployment is a bundle
 regeneration and revalidation, not a kernel or schema change. Future
@@ -355,8 +355,8 @@ candidate checkout.
 
 ## Fine detection rows carry per-frame global indices
 
-The ragged detection list (`fine_detected_frame`, `fine_detected_bin`) is
-partitioned authoritatively by `fine_detected_count`; the frame column must
+The ragged detection list (`fine_threshold_exceedance_frame`, `fine_threshold_exceedance_bin`) is
+partitioned authoritatively by `fine_threshold_exceedance_count`; the frame column must
 equal `repeat(arange(n_frames), counts)`, and the test suite enforces that
 invariant end to end. Products that violate the public contract are unsupported
 development outputs and must be regenerated from authoritative inputs.

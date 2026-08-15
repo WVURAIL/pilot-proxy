@@ -32,7 +32,7 @@ from datatrawl.plugins.readers import _baseband_format as fmt  # noqa: E402
 from datatrawl.instruments import load_instrument  # noqa: E402
 from datatrawl.interfaces import RunContext  # noqa: E402
 
-from pilot_proxy.detector_contract import POSITIVE_EXCESS_MASK_RULE  # noqa: E402
+from pilot_proxy.detector_contract import NORMALIZED_POSITIVE_EXCESS_MASK_RULE  # noqa: E402
 from pilot_proxy.product_contract import (  # noqa: E402
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
     current_decision_contract,
@@ -325,7 +325,7 @@ def test_current_product_provenance_and_reject_mask(tmp_path):
 
     # provenance
     import hashlib
-    assert str(got["mask_rule"]) == POSITIVE_EXCESS_MASK_RULE
+    assert str(got["mask_rule"]) == NORMALIZED_POSITIVE_EXCESS_MASK_RULE
     assert str(np.asarray(got["weights_hash"])) == hashlib.sha256(
         np.ascontiguousarray(w).tobytes()
     ).hexdigest()

@@ -23,9 +23,9 @@ from pilot_proxy.chime.products import (
     CHIME_DETECTOR_OUTPUTS_FILENAME,
     CHIME_SPECTROGRAM_CACHE_FILENAME,
 )
-from pilot_proxy.detector_contract import norm_corrected_positive_excess
+from pilot_proxy.detector_contract import normalized_positive_excess
 
-# Two channels with deliberately unequal norms (mu0 = 10/9 and 10/11), six
+# Two channels with deliberately unequal norms (null_power_ratio = 10/9 and 10/11), six
 # frames each, p_ref fixed at 90 so the exact rule is p_target*nrs > nt*90.
 TARGET_NORM_SQ = np.asarray([5, 5], dtype=np.int64)
 REF_NORM_SUM_SQ = np.asarray([9, 11], dtype=np.int64)
@@ -49,10 +49,10 @@ def _write_run(run_dir, *, corrupt_stored_mask=False, omit_norms=False) -> None:
     mask = np.zeros((n_frames, n_pilots), dtype=np.uint8)
     for f in range(n_frames):
         for c in range(n_pilots):
-            mask[f, c] = norm_corrected_positive_excess(
+            mask[f, c] = normalized_positive_excess(
                 int(P_TARGET[f, c]), P_REF,
                 target_norm_sq=int(TARGET_NORM_SQ[c]),
-                ref_norm_sum_sq=int(REF_NORM_SUM_SQ[c]),
+                reference_norm_sum_sq=int(REF_NORM_SUM_SQ[c]),
             )
     if corrupt_stored_mask:
         mask[0, 0] ^= 1
@@ -63,11 +63,11 @@ def _write_run(run_dir, *, corrupt_stored_mask=False, omit_norms=False) -> None:
         "valid": valid,
         "mask": mask,
         "target_norm_sq": TARGET_NORM_SQ,
-        "ref_norm_sum_sq": REF_NORM_SUM_SQ,
-        "mu0": 2.0 * TARGET_NORM_SQ / REF_NORM_SUM_SQ,
+        "reference_norm_sum_sq": REF_NORM_SUM_SQ,
+        "null_power_ratio": 2.0 * TARGET_NORM_SQ / REF_NORM_SUM_SQ,
     }
     if omit_norms:
-        for key in ("target_norm_sq", "ref_norm_sum_sq", "mu0"):
+        for key in ("target_norm_sq", "reference_norm_sum_sq", "null_power_ratio"):
             detector.pop(key)
     np.savez_compressed(run_dir / CHIME_DETECTOR_OUTPUTS_FILENAME, **detector)
     np.savez_compressed(
@@ -86,8 +86,8 @@ def _write_control(run_dir, mean_power: float) -> None:
         "valid": valid,
         "mask": np.zeros((4, 1), dtype=np.uint8),
         "target_norm_sq": np.asarray([5], dtype=np.int64),
-        "ref_norm_sum_sq": np.asarray([9], dtype=np.int64),
-        "mu0": np.asarray([10.0 / 9.0]),
+        "reference_norm_sum_sq": np.asarray([9], dtype=np.int64),
+        "null_power_ratio": np.asarray([10.0 / 9.0]),
     }
     np.savez_compressed(run_dir / CHIME_DETECTOR_OUTPUTS_FILENAME, **detector)
     np.savez_compressed(

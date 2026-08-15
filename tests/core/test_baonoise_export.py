@@ -41,13 +41,13 @@ def _write_product(path: pathlib.Path, rng: np.random.Generator) -> None:
         freq_id=np.array([521]),
         physical_channel=np.array([35], dtype=np.int32),
         valid=np.ones((N_FRAMES, 1), dtype=np.uint8),
-        fstat_fine=fine.astype(np.float32),
+        fine_power_ratio=fine.astype(np.float32),
         frame_unit_index=unit_index.astype(np.int32),
         unit_time0_ctime=unit_t0.astype(np.float64),
         baseband_power_linear=np.full((N_FRAMES, 1), 2.5),
         detector_version=np.asarray("pilot-proxy/test kernel=test K=128"),
-        fine_detected_frame=det_frames.astype(np.int64),
-        fine_detected_bin=np.full(det_frames.size, LINE_BIN, dtype=np.int64),
+        fine_threshold_exceedance_frame=det_frames.astype(np.int64),
+        fine_threshold_exceedance_bin=np.full(det_frames.size, LINE_BIN, dtype=np.int64),
         unit_order=np.asarray([f"u{i}" for i in range(n_units)]),
     )
 

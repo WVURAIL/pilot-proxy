@@ -67,7 +67,7 @@ def _mem_product(channel, freq_id, events_frames):
         "source_event_keys": np.asarray(ev),
         "frame_unit_index": np.asarray(unit_idx, dtype=np.int32),
         "frame_in_unit": np.asarray(in_unit, dtype=np.int32),
-        "fstat_raw": np.asarray(values, dtype=np.float64).reshape(n_frames, 1),
+        "coarse_power_ratio": np.asarray(values, dtype=np.float64).reshape(n_frames, 1),
     }
 
 
@@ -78,7 +78,7 @@ def test_align_fully_aligned_is_passthrough():
     assert info["mode"] == "event_keyed"
     assert np.array_equal(frame_index, np.arange(4))
     for orig, out in zip((a, b), aligned):
-        assert np.array_equal(out["fstat_raw"], orig["fstat_raw"])
+        assert np.array_equal(out["coarse_power_ratio"], orig["coarse_power_ratio"])
     assert all(p["n_frames_dropped"] == 0 for p in info["by_pilot"])
 
 
@@ -89,10 +89,10 @@ def test_align_ragged_intersects_in_reference_order():
     assert info["n_frames_common"] == 2 and info["n_events_common"] == 2
     assert info["frame_event_key"] == ["200", "300"]  # reference (a) order
     # b's frames gathered by identity rather than position
-    assert np.array_equal(aligned[1]["fstat_raw"].reshape(-1),
-                          b["fstat_raw"].reshape(-1)[[0, 1]])
-    assert np.array_equal(aligned[0]["fstat_raw"].reshape(-1),
-                          a["fstat_raw"].reshape(-1)[[1, 2]])
+    assert np.array_equal(aligned[1]["coarse_power_ratio"].reshape(-1),
+                          b["coarse_power_ratio"].reshape(-1)[[0, 1]])
+    assert np.array_equal(aligned[0]["coarse_power_ratio"].reshape(-1),
+                          a["coarse_power_ratio"].reshape(-1)[[1, 2]])
     drops = {p["freq_id"]: p for p in info["by_pilot"]}
     assert drops[844]["n_frames_dropped"] == 1 and drops[844]["n_events_dropped"] == 1
     assert drops[829]["n_frames_dropped"] == 1 and drops[829]["n_events_dropped"] == 1
@@ -151,7 +151,7 @@ def _stub_kernel(k):
 
 
 def _cpu_detector_options():
-    # three identical weight rows => ref_norm_sum_sq == 2 * target_norm_sq, so
+    # three identical weight rows => reference_norm_sum_sq == 2 * target_norm_sq, so
     # with the stub's p_target=10 / p_ref_sum=20 the positive-excess rule sits
     # exactly at equality and mask=0 is rule-consistent (validate-products
     # recomputes the mask from p's and norms and must agree).
@@ -213,7 +213,7 @@ def test_scan_ragged_inventory_combines_intersection(tmp_path, monkeypatch):
     with np.load(combined) as z:
         # one common event, NFFT*2 samples -> 2 frames, stacked over 3 pilots
         assert z["frame_index"].size == 2
-        assert z["fstat_raw"].shape == (2, 3)
+        assert z["coarse_power_ratio"].shape == (2, 3)
     stats = json.loads((out / "stats.json").read_text())
     align = stats["combine_alignment"]
     assert align["mode"] == "event_keyed"
@@ -231,7 +231,7 @@ def test_scan_ragged_inventory_combines_intersection(tmp_path, monkeypatch):
     combine_detector_products(work, out2, drop_freq_ids=[752])
     with np.load(out2 / "chime_detector_outputs.npz") as z:
         assert z["frame_index"].size == 4  # both events, two pilots
-        assert z["fstat_raw"].shape == (4, 2)
+        assert z["coarse_power_ratio"].shape == (4, 2)
 
     # spectrogram figures must render with event-boundary ticks driven by
     # the frame-identity sidecar (out2 stitches two events -> one boundary)

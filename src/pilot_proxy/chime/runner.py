@@ -20,9 +20,9 @@ from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_chime_detector_contract,
     input_coordinate_system_for_weight_coordinate,
-    norm_corrected_mu0,
+    null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
-    positive_excess_mask_policy,
+    normalized_positive_excess_policy,
     weight_term_norms_sq,
 )
 from pilot_proxy.dtv_units import (
@@ -31,10 +31,11 @@ from pilot_proxy.dtv_units import (
     EFFECTIVE_BIN_BW_HZ,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
-    fstat_num_den_to_fstat_level_db,
-    fstat_num_den_to_pnr_bin_db,
-    fstat_num_den_to_raw,
-    pnr_bin_db_to_snr_shelf_db,
+    power_terms_to_normalized_coarse_power_ratio_db,
+    normalized_pilot_excess_to_db,
+    power_terms_to_normalized_pilot_excess,
+    power_terms_to_coarse_power_ratio,
+    pilot_excess_db_to_data_shelf_snr_db,
 )
 from pilot_proxy.integration import (
     DEFAULT_CHIME_DTV_RECEIVER_PROFILE,
@@ -85,14 +86,14 @@ def detect_packed_for_positive_excess(
     packed: np.ndarray,
     weights: np.ndarray,
     kernel: Any,
-    emit_row_sums: bool = False,
+    emit_row_projections: bool = False,
 ) -> dict[str, Any]:
     """Run detector powers for CHIME positive-excess masking."""
     return detect_packed_detector_input(
         packed=packed,
         weights=weights,
         kernel=kernel,
-        emit_row_sums=emit_row_sums,
+        emit_row_projections=emit_row_projections,
     )
 
 
@@ -102,8 +103,8 @@ class WeightBankLike(Protocol):
 
 
 
-def _positive_excess_mask_policy() -> dict[str, Any]:
-    return positive_excess_mask_policy()
+def _normalized_positive_excess_policy() -> dict[str, Any]:
+    return normalized_positive_excess_policy()
 
 
 def _coerce_int_metadata(value: object, *, field: str) -> int:
@@ -595,12 +596,15 @@ def _append_detection_rows(
     pilot_index: int,
     p_target_u64: np.ndarray,
     p_ref_sum_u64: np.ndarray,
-    fstat_raw: np.ndarray,
-    fstat_level_db: np.ndarray,
-    pnr_bin_db: np.ndarray,
-    snr_shelf_db: np.ndarray,
+    coarse_power_ratio: np.ndarray,
+    normalized_coarse_power_ratio_db: np.ndarray,
+    pilot_excess_db: np.ndarray,
+    estimated_data_shelf_snr_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
+    normalized_pilot_excess: np.ndarray,
+    target_norm_sq: int,
+    reference_norm_sum_sq: int,
     pilot_below_data_db: float,
     bin_enbw_hz: float,
     dtv_bandwidth_hz: float,
@@ -613,15 +617,31 @@ def _append_detection_rows(
         den = int(row.get("p_ref_sum_u64", 0))
         p_target_u64[frame, pilot_index] = np.uint64(num)
         p_ref_sum_u64[frame, pilot_index] = np.uint64(den)
-        fstat_raw[frame, pilot_index] = float(fstat_num_den_to_raw(num, den))
-        fstat_level_db[frame, pilot_index] = float(
-            fstat_num_den_to_fstat_level_db(num, den)
+        coarse_power_ratio[frame, pilot_index] = float(
+            power_terms_to_coarse_power_ratio(num, den)
         )
-        pnr = float(fstat_num_den_to_pnr_bin_db(num, den))
-        pnr_bin_db[frame, pilot_index] = pnr
-        snr_shelf_db[frame, pilot_index] = float(
-            pnr_bin_db_to_snr_shelf_db(
-                pnr,
+        normalized_coarse_power_ratio_db[frame, pilot_index] = float(
+            power_terms_to_normalized_coarse_power_ratio_db(
+                num,
+                den,
+                target_norm_sq=target_norm_sq,
+                reference_norm_sum_sq=reference_norm_sum_sq,
+            )
+        )
+        normalized_excess = float(
+            power_terms_to_normalized_pilot_excess(
+                num,
+                den,
+                target_norm_sq=target_norm_sq,
+                reference_norm_sum_sq=reference_norm_sum_sq,
+            )
+        )
+        normalized_pilot_excess[frame, pilot_index] = normalized_excess
+        pilot_excess = float(normalized_pilot_excess_to_db(normalized_excess))
+        pilot_excess_db[frame, pilot_index] = pilot_excess
+        estimated_data_shelf_snr_db[frame, pilot_index] = float(
+            pilot_excess_db_to_data_shelf_snr_db(
+                pilot_excess,
                 pilot_below_data_db=float(pilot_below_data_db),
                 bin_enbw_hz=float(bin_enbw_hz),
                 dtv_bandwidth_hz=float(dtv_bandwidth_hz),
@@ -758,10 +778,11 @@ def run_chime_analysis(
     shape = (int(num_frames), int(len(selected)))
     p_target_u64 = np.zeros(shape, dtype=np.uint64)
     p_ref_sum_u64 = np.zeros(shape, dtype=np.uint64)
-    fstat_raw = np.full(shape, np.nan, dtype=np.float64)
-    fstat_level_db = np.full(shape, np.nan, dtype=np.float64)
-    pnr_bin_db = np.full(shape, np.nan, dtype=np.float64)
-    snr_shelf_db = np.full(shape, np.nan, dtype=np.float64)
+    coarse_power_ratio = np.full(shape, np.nan, dtype=np.float64)
+    normalized_coarse_power_ratio_db = np.full(shape, np.nan, dtype=np.float64)
+    pilot_excess_db = np.full(shape, np.nan, dtype=np.float64)
+    estimated_data_shelf_snr_db = np.full(shape, np.nan, dtype=np.float64)
+    normalized_pilot_excess = np.full(shape, np.nan, dtype=np.float64)
     mask = np.zeros(shape, dtype=np.uint8)
     valid = np.zeros(shape, dtype=np.uint8)
     baseband_power_linear = np.full(shape, np.nan, dtype=np.float64)
@@ -770,8 +791,8 @@ def run_chime_analysis(
     selected_channel_by_pilot: list[int] = []
     overflow_count_by_pilot = np.zeros(len(selected), dtype=np.uint64)
     target_norm_sq_by_pilot = np.zeros(len(selected), dtype=np.int64)
-    ref_norm_sum_sq_by_pilot = np.zeros(len(selected), dtype=np.int64)
-    mu0_by_pilot = np.full(len(selected), np.nan, dtype=np.float64)
+    reference_norm_sum_sq_by_pilot = np.zeros(len(selected), dtype=np.int64)
+    null_power_ratio_by_channel = np.full(len(selected), np.nan, dtype=np.float64)
 
     for pilot_index, dataset in enumerate(selected):
         channel = int(dataset.physical_channel)
@@ -781,14 +802,14 @@ def run_chime_analysis(
             weights_by_channel=weights_by_channel,
         )
         # Exact integer squared norms of the three weight terms; these set the
-        # H0 zero-point mu0 = 2*nt/(nl+nu) that the norm-corrected mask (and the
+        # H0 zero-point null_power_ratio = 2*nt/(nl+nu) that the norm-corrected mask (and the
         # corrected pilot excess) divide out. Computed from the weights actually
         # used, so caller-supplied test weights are handled identically.
         _nt, _nl, _nu = weight_term_norms_sq(weights)
         target_norm_sq_by_pilot[pilot_index] = int(_nt)
-        ref_norm_sum_sq_by_pilot[pilot_index] = int(_nl + _nu)
+        reference_norm_sum_sq_by_pilot[pilot_index] = int(_nl + _nu)
         if (_nl + _nu) > 0:
-            mu0_by_pilot[pilot_index] = norm_corrected_mu0(_nt, _nl + _nu)
+            null_power_ratio_by_channel[pilot_index] = null_power_ratio_from_weight_norms(_nt, _nl + _nu)
         selection = receiver_frequency_to_channel(
             float(dataset.pilot_frequency_hz),
             receiver_profile,
@@ -851,12 +872,17 @@ def run_chime_analysis(
                 pilot_index=int(pilot_index),
                 p_target_u64=p_target_u64,
                 p_ref_sum_u64=p_ref_sum_u64,
-                fstat_raw=fstat_raw,
-                fstat_level_db=fstat_level_db,
-                pnr_bin_db=pnr_bin_db,
-                snr_shelf_db=snr_shelf_db,
+                coarse_power_ratio=coarse_power_ratio,
+                normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+                pilot_excess_db=pilot_excess_db,
+                estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
                 mask=mask,
                 valid=valid,
+                normalized_pilot_excess=normalized_pilot_excess,
+                target_norm_sq=int(target_norm_sq_by_pilot[pilot_index]),
+                reference_norm_sum_sq=int(
+                    reference_norm_sum_sq_by_pilot[pilot_index]
+                ),
                 pilot_below_data_db=float(pilot_below_data_db),
                 bin_enbw_hz=float(bin_enbw_hz),
                 dtv_bandwidth_hz=float(dtv_bandwidth_hz),
@@ -873,12 +899,6 @@ def run_chime_analysis(
     # recompute the rule, or an injected detector_fn and this path could
     # silently disagree.
     mask = ((valid != 0) & (mask != 0)).astype(np.uint8)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        pilot_excess_corrected = np.where(
-            valid != 0,
-            fstat_raw / mu0_by_pilot[np.newaxis, :] - 1.0,
-            np.nan,
-        )
 
     input_manifest_path = write_input_manifest(
         run_dir,
@@ -935,7 +955,7 @@ def run_chime_analysis(
         "max_frames": None if max_frames is None else int(max_frames),
         "absolute_time_used": False,
         "weight_coordinate": weight_coordinate,
-        "mask_policy": _positive_excess_mask_policy(),
+        "mask_policy": _normalized_positive_excess_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
         **provenance,
@@ -981,11 +1001,11 @@ def run_chime_analysis(
             int(value) for value in overflow_count_by_pilot
         ],
         "target_norm_sq_by_pilot": [int(v) for v in target_norm_sq_by_pilot],
-        "ref_norm_sum_sq_by_pilot": [int(v) for v in ref_norm_sum_sq_by_pilot],
-        "mu0_by_pilot": [float(v) for v in mu0_by_pilot],
+        "reference_norm_sum_sq_by_pilot": [int(v) for v in reference_norm_sum_sq_by_pilot],
+        "null_power_ratio_by_channel": [float(v) for v in null_power_ratio_by_channel],
         "kernel_version": _kernel_version_string(kernel_obj),
         "kernel_specs": kernel_specs_dict,
-        "mask_policy": _positive_excess_mask_policy(),
+        "mask_policy": _normalized_positive_excess_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
         **provenance,
@@ -1001,16 +1021,16 @@ def run_chime_analysis(
         frame_index=frame_index,
         p_target_u64=p_target_u64,
         p_ref_sum_u64=p_ref_sum_u64,
-        fstat_raw=fstat_raw,
-        fstat_level_db=fstat_level_db,
-        pnr_bin_db=pnr_bin_db,
-        snr_shelf_db=snr_shelf_db,
+        coarse_power_ratio=coarse_power_ratio,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+        pilot_excess_db=pilot_excess_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         mask=mask,
         valid=valid,
         target_norm_sq=target_norm_sq_by_pilot,
-        ref_norm_sum_sq=ref_norm_sum_sq_by_pilot,
-        mu0=mu0_by_pilot,
-        pilot_excess_corrected=pilot_excess_corrected,
+        reference_norm_sum_sq=reference_norm_sum_sq_by_pilot,
+        null_power_ratio=null_power_ratio_by_channel,
+        normalized_pilot_excess=normalized_pilot_excess,
     )
     spectrogram_cache_path = write_spectrogram_cache(
         run_dir,
@@ -1028,9 +1048,9 @@ def run_chime_analysis(
         frame_index=frame_index,
         frame_size_samples=int(frame_size_samples),
         chunk_seconds=10.0,
-        fstat_raw=fstat_raw,
-        fstat_level_db=fstat_level_db,
-        snr_shelf_db=snr_shelf_db,
+        coarse_power_ratio=coarse_power_ratio,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         baseband_power_linear=baseband_power_linear,
         mask=mask,
         valid=valid,

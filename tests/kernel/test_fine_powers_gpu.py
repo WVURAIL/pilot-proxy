@@ -96,7 +96,7 @@ def test_device_fine_powers_match_reference_pure_stage():
 
 
 @pytest.mark.cuda
-def test_device_chain_row_sums_to_fine_powers():
+def test_device_chain_matched_filter_row_projections_to_fine_powers():
     cp = _import_cupy_or_skip()
     kernel = _kernel_or_skip()
     rng = np.random.default_rng(RNG_SEED + 1)
@@ -112,21 +112,21 @@ def test_device_chain_row_sums_to_fine_powers():
     d_in = cp.asarray(packed)
     d_diag = cp.zeros(1, dtype=cp.float32)
     handle = kernel.create_raw(rows, d_in.data.ptr, d_diag.data.ptr)
-    d_row_sums = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
+    d_matched_filter_row_projections = cp.zeros(TERMS * rows * 2, dtype=cp.int32)
     d_fine = cp.zeros((TERMS, FINE_BINS), dtype=cp.uint64)
     try:
-        kernel.compute_row_sums_i32(
-            handle, weights.ctypes.data, d_row_sums.data.ptr
+        kernel.compute_row_projections_i32(
+            handle, weights.ctypes.data, d_matched_filter_row_projections.data.ptr
         )
         # fine powers straight from the device row-sum buffer: the deployed
         # composition, no host round-trip
         kernel.compute_fine_powers_u64(
-            int(d_row_sums.data.ptr), streams, WINDOWS, 1,
+            int(d_matched_filter_row_projections.data.ptr), streams, WINDOWS, 1,
             int(d_fine.data.ptr)
         )
         cp.cuda.Device().synchronize()
         assert kernel.last_error() == ""
-        host_rows = cp.asnumpy(d_row_sums).reshape(TERMS, rows, 2)
+        host_rows = cp.asnumpy(d_matched_filter_row_projections).reshape(TERMS, rows, 2)
         got = cp.asnumpy(d_fine)
     finally:
         kernel.destroy(handle)

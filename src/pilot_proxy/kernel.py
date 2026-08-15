@@ -208,19 +208,19 @@ class FStatKernel:
                 ctypes.c_void_p,  # weights pointer
                 ctypes.c_void_p,  # uint64 device output pointer
             ]
-        self._has_row_sums_i32 = _has_symbol(
+        self._has_matched_filter_row_projections_i32 = _has_symbol(
             self._lib, "FStat_Compute_RowSums_I32"
         )
-        if self._has_row_sums_i32:
+        if self._has_matched_filter_row_projections_i32:
             self._lib.FStat_Compute_RowSums_I32.argtypes = [
                 ctypes.c_void_p,
                 ctypes.c_void_p,
                 ctypes.c_void_p,
             ]
-        self._has_supports_row_sums = _has_symbol(
+        self._has_supports_row_projections = _has_symbol(
             self._lib, "FStat_Supports_RowSums"
         )
-        if self._has_supports_row_sums:
+        if self._has_supports_row_projections:
             self._lib.FStat_Supports_RowSums.argtypes = []
             self._lib.FStat_Supports_RowSums.restype = ctypes.c_int
         self._has_fine_powers_u64 = _has_symbol(
@@ -473,30 +473,30 @@ class FStatKernel:
             )
         self._lib.FStat_Compute_Powers_U64(handle, weights_ptr, powers_ptr)
 
-    def supports_row_sums(self) -> bool:
+    def supports_row_projections(self) -> bool:
         """Return True when the v2 exact row-sum front end is available."""
-        if not getattr(self, "_has_row_sums_i32", False):
+        if not getattr(self, "_has_matched_filter_row_projections_i32", False):
             return False
-        if getattr(self, "_has_supports_row_sums", False):
+        if getattr(self, "_has_supports_row_projections", False):
             return bool(int(self._lib.FStat_Supports_RowSums()) == 1)
         return True
 
-    def compute_row_sums_i32(
-        self, handle, weights_ptr: int, row_sums_ptr: int
+    def compute_row_projections_i32(
+        self, handle, weights_ptr: int, row_projections_ptr: int
     ):
         """Write exact int32 complex row sums (v2 front end).
 
-        row_sums_ptr must address a device buffer of
+        row_projections_ptr must address a device buffer of
         batch * num_weight_terms * detector_rows_per_block * 2 int32
         elements; layout per the FStat_Compute_RowSums_I32 contract
         (term-major, stream-major rows, interleaved re/im).
         """
-        if not getattr(self, "_has_row_sums_i32", False):
+        if not getattr(self, "_has_matched_filter_row_projections_i32", False):
             raise RuntimeError(
                 "Kernel library does not expose FStat_Compute_RowSums_I32."
             )
         self._lib.FStat_Compute_RowSums_I32(
-            handle, weights_ptr, row_sums_ptr
+            handle, weights_ptr, row_projections_ptr
         )
 
     def supports_fine_powers(self) -> bool:
@@ -527,7 +527,7 @@ class FStatKernel:
 
     def compute_fine_powers_u64(
         self,
-        row_sums_ptr: int,
+        row_projections_ptr: int,
         num_streams: int,
         windows_per_stream: int,
         batch: int,
@@ -535,7 +535,7 @@ class FStatKernel:
     ):
         """On-device fine-reduction power stage (fxfft256 v1).
 
-        Composes directly with compute_row_sums_i32: row_sums_ptr is the
+        Composes directly with compute_row_projections_i32: row_projections_ptr is the
         same device buffer that call filled (term-major, stream-major rows,
         interleaved re/im int32), and fine_powers_ptr must address
         batch * num_weight_terms * 256 uint64 on the device (zeroed by the
@@ -548,7 +548,7 @@ class FStatKernel:
                 "Kernel library does not expose FStat_Compute_FinePowers_U64."
             )
         self._lib.FStat_Compute_FinePowers_U64(
-            row_sums_ptr,
+            row_projections_ptr,
             int(self.specs.num_weight_terms),
             int(num_streams),
             int(windows_per_stream),
@@ -570,7 +570,7 @@ class FStatKernel:
         weights_ptr: int,
         fine_powers_ptr: int,
         powers_ptr: int,
-        row_sums_tap_ptr: int = 0,
+        row_projections_tap_ptr: int = 0,
     ):
         """One launch from packed samples to exact fine and coarse powers.
 
@@ -581,9 +581,9 @@ class FStatKernel:
         kernel. Output layouts match the composed path exactly:
         fine_powers_ptr addresses batch * num_weight_terms * 256 uint64
         and powers_ptr addresses batch * num_weight_terms uint64 (both
-        zeroed by the library before accumulation). row_sums_tap_ptr, when
+        zeroed by the library before accumulation). row_projections_tap_ptr, when
         nonzero, addresses the same device buffer layout
-        compute_row_sums_i32 fills and receives the identical bits; leave
+        compute_row_projections_i32 fills and receives the identical bits; leave
         it 0 in production so row sums never touch global memory.
         """
         if not getattr(self, "_has_fused_fine_u64", False):
@@ -595,7 +595,7 @@ class FStatKernel:
             weights_ptr,
             fine_powers_ptr,
             powers_ptr,
-            row_sums_tap_ptr if row_sums_tap_ptr else None,
+            row_projections_tap_ptr if row_projections_tap_ptr else None,
         )
 
     def supports_fused_fine_mask(self) -> bool:
@@ -618,7 +618,7 @@ class FStatKernel:
         fine_powers_ptr: int,
         mask_ptr: int,
         powers_ptr: int = 0,
-        row_sums_tap_ptr: int = 0,
+        row_projections_tap_ptr: int = 0,
     ):
         """Deployed form: packed samples and bundle constants in, one
         mask bit per aligned frame out (kernel core 2.3.0).
@@ -630,7 +630,7 @@ class FStatKernel:
         ``mask_ptr`` must address ``batch`` int32 on the device (zeroed
         by the library; doubles as the completion counter during the
         launch). ``fine_powers_ptr`` is the required exact accumulator;
-        ``powers_ptr`` and ``row_sums_tap_ptr`` are optional debug taps
+        ``powers_ptr`` and ``row_projections_tap_ptr`` are optional debug taps
         (0 in production). anchor/width/rank/multiplier are runtime
         bundle data.
         """
@@ -654,7 +654,7 @@ class FStatKernel:
             fine_powers_ptr,
             mask_ptr,
             powers_ptr if powers_ptr else None,
-            row_sums_tap_ptr if row_sums_tap_ptr else None,
+            row_projections_tap_ptr if row_projections_tap_ptr else None,
         )
 
     def compute_numden_mask_rational_half(

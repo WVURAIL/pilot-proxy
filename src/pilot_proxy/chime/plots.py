@@ -16,10 +16,10 @@ from numpy import dtype, float64, ndarray
 from pilot_proxy.dtv_units import (
     DB_LINEAR_BASE,
     DB_POWER_FACTOR,
-    NO_PILOT_EXCESS_FSTAT,
-    fstat_raw_to_fstat_level_db,
-    pnr_bin_db_to_snr_shelf_db,
-    snr_shelf_db_to_pnr_bin_db,
+    UNIT_NORMALIZED_POWER_RATIO,
+    normalized_coarse_power_ratio_to_db,
+    pilot_excess_db_to_data_shelf_snr_db,
+    data_shelf_snr_db_to_pilot_excess_db,
 )
 from pilot_proxy.plot_style import setup_matplotlib
 
@@ -54,15 +54,15 @@ def _save_figure(fig, path) -> None:
     base = Path(path)
     for fmt in _figure_formats():
         fig.savefig(base.with_suffix("." + fmt), dpi=FIGURE_DPI)
-FSTAT_TOP_TICKS_DB = np.asarray(
+NORMALIZED_POWER_RATIO_TOP_TICKS_DB = np.asarray(
     [1.0e-5, 1.0e-4, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 20.0]
 )
-SNR_SHELF_TOP_TICKS_DB = np.asarray([-60.0, -30.0, -25.0, -20.0, -15.0, -10.0, 0.0])
+DATA_SHELF_SNR_TOP_TICKS_DB = np.asarray([-60.0, -30.0, -25.0, -20.0, -15.0, -10.0, 0.0])
 
 KNOWN_CHIME_FIGURES = frozenset({
-    "snr_shelf_histogram_by_pilot.png",
-    "fstat_survival_by_pilot.png",
-    "fstat_level_spectrogram.png",
+    "data_shelf_snr_histogram_by_channel.png",
+    "coarse_power_ratio_survival_by_channel.png",
+    "normalized_coarse_power_ratio_db_spectrogram.png",
     "baseband_spectrogram.png",
     "baseband_spectrum_before_after_mask.png",
     "mask_spectrogram.png",
@@ -105,40 +105,41 @@ def _format_db_tick(value: float) -> str:
     return f"{value:.3g}"
 
 
-def _snr_shelf_db_to_fstat_level_db(values) -> np.ndarray:
-    snr = np.asarray(values, dtype=np.float64)
-    pnr = snr_shelf_db_to_pnr_bin_db(snr)
-    raw = NO_PILOT_EXCESS_FSTAT + DB_LINEAR_BASE ** (pnr / DB_POWER_FACTOR)
-    return np.asarray(fstat_raw_to_fstat_level_db(raw), dtype=np.float64)
+def _data_shelf_snr_db_to_normalized_coarse_power_ratio_db(values) -> np.ndarray:
+    data_shelf_snr = np.asarray(values, dtype=np.float64)
+    pilot_excess_db = data_shelf_snr_db_to_pilot_excess_db(data_shelf_snr)
+    normalized_pilot_excess = DB_LINEAR_BASE ** (
+        pilot_excess_db / DB_POWER_FACTOR
+    )
+    normalized_ratio = UNIT_NORMALIZED_POWER_RATIO + normalized_pilot_excess
+    return np.asarray(
+        normalized_coarse_power_ratio_to_db(normalized_ratio),
+        dtype=np.float64,
+    )
 
 
-def _fstat_level_db_to_snr_shelf_db(values) -> np.ndarray:
-    rf = np.asarray(values, dtype=np.float64)
-    raw = DB_LINEAR_BASE ** (rf / DB_POWER_FACTOR)
-    out = np.full(rf.shape, np.nan, dtype=np.float64)
-    valid = raw > NO_PILOT_EXCESS_FSTAT
-    pnr = np.full(rf.shape, np.nan, dtype=np.float64)
-    pnr[valid] = DB_POWER_FACTOR * np.log10(raw[valid] - NO_PILOT_EXCESS_FSTAT)
-    out[valid] = pnr_bin_db_to_snr_shelf_db(pnr[valid])
+def _normalized_coarse_power_ratio_db_to_data_shelf_snr_db(values) -> np.ndarray:
+    ratio_db = np.asarray(values, dtype=np.float64)
+    normalized_ratio = DB_LINEAR_BASE ** (ratio_db / DB_POWER_FACTOR)
+    out = np.full(ratio_db.shape, np.nan, dtype=np.float64)
+    valid = normalized_ratio > UNIT_NORMALIZED_POWER_RATIO
+    pilot_excess_db = np.full(ratio_db.shape, np.nan, dtype=np.float64)
+    pilot_excess_db[valid] = DB_POWER_FACTOR * np.log10(
+        normalized_ratio[valid] - UNIT_NORMALIZED_POWER_RATIO
+    )
+    out[valid] = pilot_excess_db_to_data_shelf_snr_db(pilot_excess_db[valid])
     return out
 
 
-def _add_fstat_level_top_axis_for_snr(ax, *, xmin: float, xmax: float) -> None:
-    positions = _fstat_level_db_to_snr_shelf_db(FSTAT_TOP_TICKS_DB)
-    keep = np.isfinite(positions) & (positions >= xmin) & (positions <= xmax)
-    if not np.any(keep):
-        return
-    top = ax.twiny()
-    top.set_xlim(ax.get_xlim())
-    top.set_xticks(positions[keep])
-    top.set_xticklabels([_format_db_tick(value) for value in FSTAT_TOP_TICKS_DB[keep]])
-    top.tick_params(axis="x", labelsize="small")
-    top.set_xlabel(r"$F$-statistic, $10\log_{10}F\;[\mathrm{dB}]$")
-
-
-def _add_snr_shelf_top_axis_for_fstat(ax) -> None:
-    xmin, xmax = ax.get_xlim()
-    positions = _snr_shelf_db_to_fstat_level_db(SNR_SHELF_TOP_TICKS_DB)
+def _add_normalized_power_ratio_top_axis_for_data_shelf_snr(
+    ax,
+    *,
+    xmin: float,
+    xmax: float,
+) -> None:
+    positions = _normalized_coarse_power_ratio_db_to_data_shelf_snr_db(
+        NORMALIZED_POWER_RATIO_TOP_TICKS_DB
+    )
     keep = np.isfinite(positions) & (positions >= xmin) & (positions <= xmax)
     if not np.any(keep):
         return
@@ -146,10 +147,28 @@ def _add_snr_shelf_top_axis_for_fstat(ax) -> None:
     top.set_xlim(ax.get_xlim())
     top.set_xticks(positions[keep])
     top.set_xticklabels(
-        [_format_db_tick(value) for value in SNR_SHELF_TOP_TICKS_DB[keep]]
+        [_format_db_tick(value) for value in NORMALIZED_POWER_RATIO_TOP_TICKS_DB[keep]]
     )
     top.tick_params(axis="x", labelsize="small")
-    top.set_xlabel(r"$\mathrm{SNR}_{\mathrm{shelf}}\;[\mathrm{dB}]$")
+    top.set_xlabel(r"Normalized coarse power ratio, $10\log_{10}Q_\mathrm{coarse}\;[\mathrm{dB}]$")
+
+
+def _add_data_shelf_snr_top_axis_for_normalized_power_ratio(ax) -> None:
+    xmin, xmax = ax.get_xlim()
+    positions = _data_shelf_snr_db_to_normalized_coarse_power_ratio_db(
+        DATA_SHELF_SNR_TOP_TICKS_DB
+    )
+    keep = np.isfinite(positions) & (positions >= xmin) & (positions <= xmax)
+    if not np.any(keep):
+        return
+    top = ax.twiny()
+    top.set_xlim(ax.get_xlim())
+    top.set_xticks(positions[keep])
+    top.set_xticklabels(
+        [_format_db_tick(value) for value in DATA_SHELF_SNR_TOP_TICKS_DB[keep]]
+    )
+    top.tick_params(axis="x", labelsize="small")
+    top.set_xlabel(r"Estimated DTV data-shelf SNR $[\mathrm{dB}]$")
 
 
 def _robust_color_limits(
@@ -307,7 +326,7 @@ def _write_histogram_summary(
     physical_channel: np.ndarray,
     pilot_frequency_hz: np.ndarray,
     chime_frequency_hz: np.ndarray,
-    snr_shelf_db: np.ndarray,
+    estimated_data_shelf_snr_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
 ) -> None:
@@ -322,14 +341,14 @@ def _write_histogram_summary(
                 "num_detector_valid_frames",
                 "num_positive_excess_frames",
                 "positive_excess_fraction",
-                "mean_snr_shelf_db",
-                "max_snr_shelf_db",
+                "mean_estimated_data_shelf_snr_db",
+                "max_estimated_data_shelf_snr_db",
                 "mask_fraction",
             ],
         )
         writer.writeheader()
         for index, channel in enumerate(physical_channel):
-            values = np.asarray(snr_shelf_db[:, index], dtype=np.float64)
+            values = np.asarray(estimated_data_shelf_snr_db[:, index], dtype=np.float64)
             finite = values[np.isfinite(values)]
             detector_valid = np.asarray(valid[:, index]) != 0
             detector_valid_count = int(np.sum(detector_valid))
@@ -346,10 +365,10 @@ def _write_histogram_summary(
                         if detector_valid_count
                         else float("nan")
                     ),
-                    "mean_snr_shelf_db": (
+                    "mean_estimated_data_shelf_snr_db": (
                         float(np.mean(finite)) if finite.size else float("nan")
                     ),
-                    "max_snr_shelf_db": (
+                    "max_estimated_data_shelf_snr_db": (
                         float(np.max(finite)) if finite.size else float("nan")
                     ),
                     "mask_fraction": float(np.mean(mask[:, index] != 0)),
@@ -363,7 +382,7 @@ def _write_fstat_summary(
     physical_channel: np.ndarray,
     pilot_frequency_hz: np.ndarray,
     chime_frequency_hz: np.ndarray,
-    fstat_level_db: np.ndarray,
+    normalized_coarse_power_ratio_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
 ) -> None:
@@ -376,25 +395,25 @@ def _write_fstat_summary(
                 "pilot_frequency_hz",
                 "chime_frequency_hz",
                 "num_detector_valid_frames",
-                "mean_fstat_level_db",
-                "max_fstat_level_db",
+                "mean_normalized_coarse_power_ratio_db",
+                "max_normalized_coarse_power_ratio_db",
                 "mask_fraction",
             ],
         )
         writer.writeheader()
         for index, channel in enumerate(physical_channel):
             detector_valid = np.asarray(valid[:, index]) != 0
-            values = _finite_values(fstat_level_db[:, index], detector_valid)
+            values = _finite_values(normalized_coarse_power_ratio_db[:, index], detector_valid)
             writer.writerow(
                 {
                     "physical_channel": int(channel),
                     "pilot_frequency_hz": float(pilot_frequency_hz[index]),
                     "chime_frequency_hz": float(chime_frequency_hz[index]),
                     "num_detector_valid_frames": int(np.sum(detector_valid)),
-                    "mean_fstat_level_db": (
+                    "mean_normalized_coarse_power_ratio_db": (
                         float(np.mean(values)) if values.size else float("nan")
                     ),
-                    "max_fstat_level_db": (
+                    "max_normalized_coarse_power_ratio_db": (
                         float(np.max(values)) if values.size else float("nan")
                     ),
                     "mask_fraction": float(np.mean(mask[:, index] != 0)),
@@ -446,8 +465,8 @@ def plot_snr_shelf_histogram(run_dir: Path) -> list[Path]:
     physical_channel = detector["physical_channel"]
     pilot_frequency_hz = detector["pilot_frequency_hz"]
     chime_frequency_hz = _run_frequency_hz(Path(run_dir), detector)
-    snr_shelf_db = detector["snr_shelf_db"]
-    fstat_level_db = detector["fstat_level_db"]
+    estimated_data_shelf_snr_db = detector["estimated_data_shelf_snr_db"]
+    normalized_coarse_power_ratio_db = detector["normalized_coarse_power_ratio_db"]
     mask = detector["mask"]
     valid = (
         detector["valid"]
@@ -480,7 +499,7 @@ def plot_snr_shelf_histogram(run_dir: Path) -> list[Path]:
         channel_histograms: list[np.ndarray] = []
         for index, channel in enumerate(physical_channel):
             detector_valid = np.asarray(valid[:, index]) != 0
-            values = np.asarray(snr_shelf_db[:, index], dtype=np.float64)
+            values = np.asarray(estimated_data_shelf_snr_db[:, index], dtype=np.float64)
             hist = _histogram_probability_density(values[detector_valid], bins)
             channel_histograms.append(hist)
             ax.stairs(
@@ -521,39 +540,39 @@ def plot_snr_shelf_histogram(run_dir: Path) -> list[Path]:
     figures = Path(run_dir) / "figures"
     figures.mkdir(parents=True, exist_ok=True)
     outputs = [
-        figures / "snr_shelf_histogram_by_pilot.png",
+        figures / "data_shelf_snr_histogram_by_channel.png",
     ]
     for path in outputs:
         _save_figure(fig, path)
     plt.close(fig)
 
     _write_fstat_summary(
-        Path(run_dir) / "tables" / "fstat_summary_by_pilot.csv",
+        Path(run_dir) / "tables" / "normalized_coarse_power_ratio_summary_by_channel.csv",
         physical_channel=physical_channel,
         pilot_frequency_hz=pilot_frequency_hz,
         chime_frequency_hz=chime_frequency_hz,
-        fstat_level_db=fstat_level_db,
+        normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
         mask=mask,
         valid=valid,
     )
     _write_histogram_summary(
-        Path(run_dir) / "tables" / "snr_shelf_histogram_summary.csv",
+        Path(run_dir) / "tables" / "data_shelf_snr_histogram_summary.csv",
         physical_channel=physical_channel,
         pilot_frequency_hz=pilot_frequency_hz,
         chime_frequency_hz=chime_frequency_hz,
-        snr_shelf_db=snr_shelf_db,
+        estimated_data_shelf_snr_db=estimated_data_shelf_snr_db,
         mask=mask,
         valid=valid,
     )
     return outputs
 
 
-def plot_fstat_survival(run_dir: Path) -> list[Path]:
+def plot_coarse_power_ratio_survival(run_dir: Path) -> list[Path]:
     plt = _setup_matplotlib()
     detector = np.load(Path(run_dir) / CHIME_DETECTOR_OUTPUTS_FILENAME)
     physical_channel = detector["physical_channel"]
     chime_frequency_hz = _run_frequency_hz(Path(run_dir), detector)
-    fstat_level_db = detector["fstat_level_db"]
+    normalized_coarse_power_ratio_db = detector["normalized_coarse_power_ratio_db"]
     valid = (
         detector["valid"]
         if "valid" in detector.files
@@ -577,7 +596,7 @@ def plot_fstat_survival(run_dir: Path) -> list[Path]:
         for index, channel in enumerate(physical_channel):
             if not keep[index]:
                 continue
-            values = np.sort(_finite_values(fstat_level_db[:, index], valid[:, index]))
+            values = np.sort(_finite_values(normalized_coarse_power_ratio_db[:, index], valid[:, index]))
             if values.size == 0:
                 continue
             channel_values.append((index, int(channel), values))
@@ -634,17 +653,17 @@ def plot_fstat_survival(run_dir: Path) -> list[Path]:
         ax.set_title(title)
         ax.set_yscale("log")
         ax.grid(True, which="both", alpha=0.25)
-        _add_snr_shelf_top_axis_for_fstat(ax)
+        _add_data_shelf_snr_top_axis_for_normalized_power_ratio(ax)
         if panel_index == 0:
             ax.legend(ncol=3, fontsize="x-small")
         if panel_index == len(panels) - 1:
-            ax.set_xlabel(r"$R_F=10\log_{10}F\;[\mathrm{dB}]$")
-    fig.suptitle(r"CHIME DTV pilot $F$-statistic survival curves")
+            ax.set_xlabel(r"$10\log_{10}Q_\mathrm{coarse}\;[\mathrm{dB}]$")
+    fig.suptitle(r"CHIME DTV pilot local-reference power ratio survival curves")
 
     figures = Path(run_dir) / "figures"
     figures.mkdir(parents=True, exist_ok=True)
     outputs = [
-        figures / "fstat_survival_by_pilot.png",
+        figures / "coarse_power_ratio_survival_by_channel.png",
     ]
     for path in outputs:
         _save_figure(fig, path)
@@ -666,7 +685,7 @@ def _mask_label_from_policy(policy: object) -> str:
     if source is None:
         return ""
     source_text = str(source)
-    if source_text == "positive_excess":
+    if source_text == "normalized_positive_excess_decision":
         return (
             r"Mask rule: positive excess; valid if $P_{\mathrm{ref}}\ne0$, "
             r"mask if $P_t > (P_{\mathrm{ref}}\gg1)$"
@@ -884,20 +903,20 @@ def plot_baseband_spectrogram(run_dir: Path) -> list[Path]:
     )
 
 
-def plot_fstat_level_spectrogram(run_dir: Path) -> list[Path]:
+def plot_normalized_coarse_power_ratio_db_spectrogram(run_dir: Path) -> list[Path]:
     detector = np.load(Path(run_dir) / CHIME_DETECTOR_OUTPUTS_FILENAME)
     cache = np.load(Path(run_dir) / CHIME_SPECTROGRAM_CACHE_FILENAME)
     return _plot_spectrogram(
         run_dir=Path(run_dir),
-        values=detector["fstat_level_db"],
+        values=detector["normalized_coarse_power_ratio_db"],
         physical_channel=detector["physical_channel"],
         frequency_hz=_run_frequency_hz(Path(run_dir), detector),
         frame_index=detector["frame_index"],
         relative_time_s=cache["relative_time_s"],
         event_boundaries=_event_boundaries(Path(run_dir)),
-        title=r"$F$-statistic level spectrogram",
-        colorbar_label=r"$R_F=10\log_{10}F\;[\mathrm{dB}]$",
-        basename="fstat_level_spectrogram",
+        title=r"local-reference power ratio level spectrogram",
+        colorbar_label=r"$10\log_{10}Q_\mathrm{coarse}\;[\mathrm{dB}]$",
+        basename="normalized_coarse_power_ratio_db_spectrogram",
         cmap="magma",
         robust_limits=True,
     )
@@ -944,8 +963,8 @@ def generate_chime_plots(run_dir: Path) -> list[Path]:
     if not (run / CHIME_DETECTOR_OUTPUTS_FILENAME).exists():
         return outputs
     outputs.extend(plot_snr_shelf_histogram(run))
-    outputs.extend(plot_fstat_survival(run))
-    outputs.extend(plot_fstat_level_spectrogram(run))
+    outputs.extend(plot_coarse_power_ratio_survival(run))
+    outputs.extend(plot_normalized_coarse_power_ratio_db_spectrogram(run))
     outputs.extend(plot_baseband_spectrogram(run))
     outputs.extend(plot_baseband_spectrum(run))
     outputs.extend(plot_mask_spectrogram(run))

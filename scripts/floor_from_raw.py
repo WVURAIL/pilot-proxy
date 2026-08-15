@@ -5,7 +5,7 @@ CPU-only. Runs the exact float64 reference correlator (the same
 detector_reference path the Fig-3 sweep validated) over every frame of every
 staged file, using a real ATSC channel's weight vectors applied to a
 pilot-free coarse channel. Produces the provisional H0 floor for the paper's
-control slot: measured zero point, gap to analytic mu0, tail fractions, and
+control slot: measured zero point, gap to analytic null_power_ratio, tail fractions, and
 the per-frame F series.
 
     python floor_from_raw.py --input-dir ~/control_staging \
@@ -52,7 +52,7 @@ def main():
     import h5py
     from pilot_proxy.detector_weights import DetectorWeightBank
     from pilot_proxy.detector_reference import (
-        fstat_cpu_reference,
+        coarse_power_ratio_cpu_reference,
         unpack_packed_complex,
         REFERENCE_TARGET_TERM_INDEX as IT,
         REFERENCE_LOWER_TERM_INDEX as IL,
@@ -80,9 +80,9 @@ def main():
                    dtype=np.complex128).reshape(3, K)
     nq = lambda v: float(np.sum(np.abs(v) ** 2))
     tns, lns, uns = nq(w[IT]), nq(w[IL]), nq(w[IU])
-    mu0 = 2.0 * tns / (lns + uns)
+    null_power_ratio = 2.0 * tns / (lns + uns)
     print(f"like-channel {args.like_channel}: K={K} bits={bits} "
-          f"tns={tns:.0f} rnss={lns+uns:.0f} mu0={mu0:.6f}")
+          f"tns={tns:.0f} rnss={lns+uns:.0f} null_power_ratio={null_power_ratio:.6f}")
 
     files = sorted(args.input_dir.rglob(args.pattern))
     if args.max_files:
@@ -132,7 +132,7 @@ def main():
                 S = x.shape[1]
                 W = args.frame_size // K
                 rows = np.ascontiguousarray(x.T).reshape(S * W, K)
-                f, sums = fstat_cpu_reference(rows, w)
+                f, sums = coarse_power_ratio_cpu_reference(rows, w)
                 F.append(f)
                 PT.append(sums[IT])
                 PR.append(sums[IL] + sums[IU])
@@ -152,15 +152,15 @@ def main():
     hist, edges = np.histogram(fv, bins=200, range=(lo_q, hi_q))
     mu_hat = 0.5 * (edges[np.argmax(hist)] + edges[np.argmax(hist) + 1])
     for _ in range(3):
-        core = fv[np.abs(fv - mu_hat) <= 6e-3 * mu0]
+        core = fv[np.abs(fv - mu_hat) <= 6e-3 * null_power_ratio]
         if core.size < 50:
             break
         mu_hat = float(np.median(core))
-    core = fv[np.abs(fv - mu_hat) <= 6e-3 * mu0]
-    gap = 1e3 * (mu_hat - mu0) / mu0
-    lo_t = float((fv < mu_hat - 12e-3 * mu0).mean())
-    hi_t = float((fv > mu_hat + 12e-3 * mu0).mean())
-    mf_an = float((fv > mu0).mean())
+    core = fv[np.abs(fv - mu_hat) <= 6e-3 * null_power_ratio]
+    gap = 1e3 * (mu_hat - null_power_ratio) / null_power_ratio
+    lo_t = float((fv < mu_hat - 12e-3 * null_power_ratio).mean())
+    hi_t = float((fv > mu_hat + 12e-3 * null_power_ratio).mean())
+    mf_an = float((fv > null_power_ratio).mean())
     mf_em = float((fv > mu_hat).mean())
     err = (1.2533 * np.std(core) / max(np.sqrt(core.size), 1)
            if core.size else float("nan"))
@@ -169,23 +169,23 @@ def main():
         args.output_dir / "control_floor_frames.npz",
         f=F, p_target=PT, p_ref_sum=PR, file_index=np.asarray(FIDX),
         files=np.asarray([str(p) for p in files]),
-        like_channel=args.like_channel, mu0_like=mu0,
+        like_channel=args.like_channel, null_power_ratio_like=null_power_ratio,
         stream_stride=args.stream_stride)
     with open(args.output_dir / "control_floor_summary.csv", "w",
               newline="") as fh:
         cw = csv.writer(fh)
         cw.writerow(["like_channel", "n_files", "n_frames", "stream_stride",
-                     "mu0_like", "mu_hat_control", "mu_hat_err",
+                     "null_power_ratio_like", "mu_hat_control", "mu_hat_err",
                      "gap_1e3", "core_frac", "low_tail_frac",
                      "high_tail_frac", "mask_frac_analytic",
                      "mask_frac_empirical"])
         cw.writerow([args.like_channel, len(files), int(fv.size),
-                     args.stream_stride, f"{mu0:.6f}", f"{mu_hat:.6f}",
+                     args.stream_stride, f"{null_power_ratio:.6f}", f"{mu_hat:.6f}",
                      f"{err:.6f}", f"{gap:+.3f}",
                      f"{core.size / max(fv.size, 1):.3f}", f"{lo_t:.4f}",
                      f"{hi_t:.4f}", f"{mf_an:.4f}", f"{mf_em:.4f}"])
     print(f"\ncontrol floor: n={fv.size} frames from {len(files)} files")
-    print(f"  mu0(like ch{args.like_channel}) = {mu0:.6f}")
+    print(f"  null_power_ratio(like ch{args.like_channel}) = {null_power_ratio:.6f}")
     print(f"  mu_hat(control)  = {mu_hat:.6f} +/- {err:.6f} "
           f"(gap {gap:+.3f} x10^-3)")
     print(f"  tails beyond +/-12e-3: low {100*lo_t:.2f}%  high {100*hi_t:.2f}%")
@@ -196,14 +196,14 @@ def main():
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt
         fig, ax = plt.subplots(figsize=(7.2, 4.2))
-        span = 40e-3 * mu0
+        span = 40e-3 * null_power_ratio
         ax.hist(fv, bins=240, range=(mu_hat - span, mu_hat + span),
                 color="#0072B2", alpha=0.85)
-        ax.axvline(mu0, color="#D55E00", lw=1.2, label=r"analytic $\mu_0$")
+        ax.axvline(null_power_ratio, color="#D55E00", lw=1.2, label=r"analytic $\mu_0$")
         ax.axvline(mu_hat, color="k", lw=1.2, ls="--",
                    label=r"measured $\hat\mu_0$ (control)")
         for s in (-1, 1):
-            ax.axvline(mu_hat + s * 12e-3 * mu0, color="0.6", lw=0.8, ls=":")
+            ax.axvline(mu_hat + s * 12e-3 * null_power_ratio, color="0.6", lw=0.8, ls=":")
         ax.set_xlabel("F")
         ax.set_ylabel("frames")
         ax.set_title(f"Pilot-free control floor "

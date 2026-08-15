@@ -24,7 +24,7 @@ import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from pilot_proxy.detector_contract import norm_corrected_mu0, POSITIVE_EXCESS_MASK_RULE
+from pilot_proxy.detector_contract import null_power_ratio_from_weight_norms, NORMALIZED_POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.fine_reduction import fine_bin_count
 from pilot_proxy.product_contract import (
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
@@ -81,7 +81,7 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
             and PER_PILOT_PRODUCT_SCHEMA_TOKEN in dv,
             "detector_version tokens")
     src = next((t[len("source="):][:12] for t in dv.split() if t.startswith("source=")), "?")
-    a.check(str(scalar("mask_rule")) == POSITIVE_EXCESS_MASK_RULE, "mask_rule string")
+    a.check(str(scalar("mask_rule")) == NORMALIZED_POSITIVE_EXCESS_MASK_RULE, "mask_rule string")
     if bank_sha is not None:
         a.check(str(scalar("weight_bank_sha256")) == bank_sha, "weight_bank_sha256 vs shipped bank")
     if manifest_sha is not None:
@@ -108,15 +108,15 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(int(scalar("pilot_in_band")) == 1, "pilot_in_band flag")
 
     # ---- per-frame arrays: lengths ---------------------------------------
-    F = r("fstat_raw").astype(np.float64)
+    F = r("coarse_power_ratio").astype(np.float64)
     n = F.size
     per_frame = ["p_target_u64", "p_ref_sum_u64", "valid", "reject_mask",
-                 "fstat_level_db", "pnr_bin_db", "snr_shelf_db",
+                 "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
                  "baseband_power_linear", "frame_index", "frame_unit_index",
-                 "frame_in_unit", "pilot_excess_corrected",
+                 "frame_in_unit", "normalized_pilot_excess",
                  "fine_null_bulk_exceedance_fraction",
                  "fine_cfar_location", "fine_cfar_scale", "fine_cfar_threshold",
-                 "fine_detected_count"]
+                 "fine_threshold_exceedance_count"]
     for k in per_frame:
         a.check(r(k).size == n, f"len({k})=={n}")
     a.check(np.array_equal(r("frame_index"), np.arange(n)), "frame_index == arange")
@@ -126,18 +126,18 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(pt.dtype == np.uint64 and pr.dtype == np.uint64, "u64 dtypes")
     v = r("valid").astype(bool); m = r("reject_mask").astype(bool)
     a.check(np.array_equal(v, pr != 0), "valid == (p_ref_sum != 0)")
-    tn = int(scalar("target_norm_sq")); rn = int(scalar("ref_norm_sum_sq"))
+    tn = int(scalar("target_norm_sq")); rn = int(scalar("reference_norm_sum_sq"))
     expected_mask = np.array([bool(vv) and (int(p) * rn > tn * int(q))
                               for vv, p, q in zip(v, pt.tolist(), pr.tolist())])
     a.check(np.array_equal(m, expected_mask), "reject_mask exact integer rule")
-    mu0 = float(scalar("mu0"))
-    a.check(abs(mu0 - norm_corrected_mu0(tn, rn)) < 1e-12, "mu0 == norm_corrected_mu0")
+    null_power_ratio = float(scalar("null_power_ratio"))
+    a.check(abs(null_power_ratio - null_power_ratio_from_weight_norms(tn, rn)) < 1e-12, "null_power_ratio == null_power_ratio_from_weight_norms")
     with np.errstate(divide="ignore", invalid="ignore"):
         f_re = 2.0 * pt.astype(np.float64) / pr.astype(np.float64)
-    a.check(np.allclose(F[v], f_re[v], rtol=1e-9, atol=0), "fstat_raw == 2*pt/pr")
-    exc = r("pilot_excess_corrected").astype(np.float64)
-    a.check(np.allclose(exc[v], F[v] / mu0 - 1.0, rtol=1e-9, atol=1e-12),
-            "pilot_excess_corrected == F/mu0 - 1")
+    a.check(np.allclose(F[v], f_re[v], rtol=1e-9, atol=0), "coarse_power_ratio == 2*pt/pr")
+    exc = r("normalized_pilot_excess").astype(np.float64)
+    a.check(np.allclose(exc[v], F[v] / null_power_ratio - 1.0, rtol=1e-9, atol=1e-12),
+            "normalized_pilot_excess == F/null_power_ratio - 1")
     a.check(np.all(np.isnan(exc[~v])) if (~v).any() else True, "excess NaN on invalid")
     a.check(int(r("rational_overflow_count").sum()) == 0, "rational_overflow_count == 0")
 
@@ -145,14 +145,14 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(str(scalar("fine_status")) == "enabled", "fine_status enabled")
     bins = int(scalar("fine_num_bins"))
     a.check(bins == fine_bin_count(nfft // K) == 256, f"fine_num_bins={bins}")
-    ff = g("fstat_fine")
-    a.check(ff.shape == (n, bins), f"fstat_fine shape {ff.shape}")
-    counts = r("fine_detected_count").astype(np.int64)
-    db = r("fine_detected_bin"); df_ = r("fine_detected_frame")
+    ff = g("fine_power_ratio")
+    a.check(ff.shape == (n, bins), f"fine_power_ratio shape {ff.shape}")
+    counts = r("fine_threshold_exceedance_count").astype(np.int64)
+    db = r("fine_threshold_exceedance_bin"); df_ = r("fine_threshold_exceedance_frame")
     a.check(counts.min() >= 0 and counts.sum() == db.size == df_.size,
             "ragged sizes: sum(counts) == rows")
     a.check(np.array_equal(df_, np.repeat(np.arange(n), counts)),
-            "fine_detected_frame == repeat(arange, counts)  [fix+repair]")
+            "fine_threshold_exceedance_frame == repeat(arange, counts)  [fix+repair]")
     a.check(db.min() >= 0 and db.max() < bins if db.size else True, "detected bins in range")
     null_bulk_exceedance = r(
         "fine_null_bulk_exceedance_fraction"
@@ -194,7 +194,7 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     stats = {
         "ch": ch, "fid": fid, "units": U, "frames": n,
         "valid%": 100.0 * v.mean(), "mask%": 100.0 * m.mean(),
-        "medF/mu0": float(np.median(F[v] / mu0)) if v.any() else float("nan"),
+        "medF/null_power_ratio": float(np.median(F[v] / null_power_ratio)) if v.any() else float("nan"),
         "null_bulk_exceedance_median": float(np.nanmedian(null_bulk_exceedance)),
         "det_rows": int(db.size),
         "span": (datetime.datetime.fromtimestamp(t0.min(), datetime.timezone.utc).strftime("%Y-%m")
@@ -232,12 +232,12 @@ def main() -> int:
             print(f"    FAIL: {f}")
     print()
     hdr = f"{'ch':>3} {'fid':>4} {'units':>5} {'frames':>6} {'valid%':>6} " \
-          f"{'mask%':>6} {'medF/mu0':>8} {'null_exc':>8} " \
+          f"{'mask%':>6} {'medF/null_power_ratio':>8} {'null_exc':>8} " \
           f"{'det_rows':>8} {'span':>16}"
     print(hdr)
     for s in rows:
         print(f"{s['ch']:>3} {s['fid']:>4} {s['units']:>5} {s['frames']:>6} "
-              f"{s['valid%']:>6.1f} {s['mask%']:>6.1f} {s['medF/mu0']:>8.4f} "
+              f"{s['valid%']:>6.1f} {s['mask%']:>6.1f} {s['medF/null_power_ratio']:>8.4f} "
               f"{s['null_bulk_exceedance_median']:>8.3f} "
               f"{s['det_rows']:>8} {s['span']:>16}")
     print("\nOVERALL:", "ALL PASS" if all_ok else "FAILURES PRESENT")

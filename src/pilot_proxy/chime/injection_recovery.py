@@ -7,14 +7,14 @@ also holding its ladder point's ``injection_manifest.json``) and produces the
 two referee-facing results:
 
 * **Recovery linearity** --- mean corrected pilot excess
-  ``rho_hat = mean(pilot_excess_corrected[valid])`` per point, with standard
+  ``rho_hat = mean(normalized_pilot_excess[valid])`` per point, with standard
   errors, and the weighted linear fit ``rho_hat = floor + gain * a^2`` against
   injected tone power. Slope-one behavior in the signal-dominated regime is
   the "recovered tracks injected" claim; the intercept is the channel's
   ambient floor, anchored by the mandatory ``a = 0`` control point (which the
   injection harness guarantees is byte-identical to the source data).
 * **Radiometer baseline** --- on identical frames, detection rates for the
-  F-statistic (``fstat_raw``) and the classical total-power detector
+  F-statistic (``coarse_power_ratio``) and the classical total-power detector
   (``baseband_power_linear``) at matched false-alarm rates, thresholds taken
   as empirical quantiles of the ``a = 0`` control, with Wilson 95% intervals
   from ``evaluate_snr.wilson_interval``. The horizontal gap between the two
@@ -62,7 +62,7 @@ def _load_point(point_dir: Path) -> dict[str, Any]:
                 "injected-input directory)"
             )
     detector = np.load(detector_path)
-    for key in ("fstat_raw", "pilot_excess_corrected", "valid"):
+    for key in ("coarse_power_ratio", "normalized_pilot_excess", "valid"):
         if key not in detector:
             raise SystemExit(
                 f"{detector_path} lacks {key!r}; the recovery analysis needs "
@@ -82,12 +82,12 @@ def _load_point(point_dir: Path) -> dict[str, Any]:
             "single (amplitude, frequency) setting"
         )
     valid = detector["valid"].astype(bool)
-    rho = detector["pilot_excess_corrected"].astype(np.float64)[valid]
+    rho = detector["normalized_pilot_excess"].astype(np.float64)[valid]
     rho = rho[np.isfinite(rho)]
     if rho.size == 0:
         raise SystemExit(f"ladder point {point_dir} has no valid frames")
     power = cache["baseband_power_linear"].astype(np.float64)[valid]
-    fstat = detector["fstat_raw"].astype(np.float64)[valid]
+    fstat = detector["coarse_power_ratio"].astype(np.float64)[valid]
     amplitude = amplitudes.pop()
     return {
         "point_dir": str(point_dir),

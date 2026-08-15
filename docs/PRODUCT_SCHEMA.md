@@ -19,7 +19,7 @@ Detailed arrays are listed in
 
 `decision_contract_json` separates three roles:
 
-1. `active_decision`: `coarse_norm_corrected_positive_excess`, implemented as
+1. `active_decision`: `coarse_normalized_positive_excess`, implemented as
    an exact host integer comparison and stored in `reject_mask`;
 2. `fine_diagnostic`: `per_frame_robust_null_bulk_threshold`, diagnostic only;
 3. `fine_candidate_decision`: `fine_order_statistic_cfar`, implemented and

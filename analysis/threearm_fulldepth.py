@@ -3,7 +3,7 @@
 
 Arms (trusted channels):
   1. ceiling    : mask F > mu_hat
-  2. band floor : mask F < mu_hat - 12e-3*mu0
+  2. band floor : mask F < mu_hat - 12e-3*null_power_ratio
   3. power veto : mask P/base_unit > 1 + 5*sigma_P   (high side only)
 Untrusted channels (ch24, ch30): one-sided manifest ceiling + power veto,
 matching the adopted operating point.
@@ -65,8 +65,8 @@ rows = []
 ccdf_data = {}
 for ch in chans:
     s = study[ch]
-    mu0 = float(s["mu0_analytic"])
-    mu_hat = float(s["mu0_empirical"])
+    null_power_ratio = float(s["null_power_ratio_analytic"])
+    mu_hat = float(s["null_power_ratio_empirical"])
     trusted = s["zero_point_trusted"] == "1"
     pt = PF[f"ch{ch}_p_target_u64"].astype(np.float64)
     pr = PF[f"ch{ch}_p_ref_sum_u64"].astype(np.float64)
@@ -79,15 +79,15 @@ for ch in chans:
     ok = valid & np.isfinite(f) & np.isfinite(P) & (P > 0)
 
     # F-arm keep regions
-    keep_c_an = ok & (f <= mu0)                       # analytic ceiling
+    keep_c_an = ok & (f <= null_power_ratio)                       # analytic ceiling
     if trusted:
         keep_c = ok & (f <= mu_hat)                   # measured ceiling
-        keep_b = keep_c & (f >= mu_hat - 12e-3 * mu0)  # + band floor
-        core = ok & (np.abs(f - mu_hat) <= 6e-3 * mu0)
+        keep_b = keep_c & (f >= mu_hat - 12e-3 * null_power_ratio)  # + band floor
+        core = ok & (np.abs(f - mu_hat) <= 6e-3 * null_power_ratio)
     else:
         keep_c = keep_c_an                            # manifest one-sided
         keep_b = keep_c
-        core = ok & (np.abs(f - mu0) <= 6e-3 * mu0)
+        core = ok & (np.abs(f - null_power_ratio) <= 6e-3 * null_power_ratio)
 
     # per-unit power baseline from core frames (slow-tracker emulation)
     base = np.full(n_units, np.nan)
