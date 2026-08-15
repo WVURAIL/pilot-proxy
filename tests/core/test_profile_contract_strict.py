@@ -23,7 +23,7 @@ from pilot_proxy.integration.receiver_profile import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RECEIVER_PROFILE_DIR = REPO_ROOT / "configs" / "receiver_profiles"
 DETECTOR_CORE_PATH = (
-    REPO_ROOT / "configs" / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+    REPO_ROOT / "configs" / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
 )
 ACTIVE_WEIGHT_MANIFESTS = (
     REPO_ROOT / "weights" / "chime_dtv_weights_k128.bin.manifest.json",
@@ -148,7 +148,7 @@ def test_detector_core_rejects_reference_offset_input() -> None:
 
 def test_detector_core_rejects_omitted_contract_field() -> None:
     raw = _read_json(DETECTOR_CORE_PATH)
-    del raw["kernel_contract"]["statistic"]
+    del raw["kernel_contract"]["coarse_power_ratio_definition"]
 
     with pytest.raises(ValueError, match="missing required fields"):
         DetectorCoreProfile.from_dict(raw)

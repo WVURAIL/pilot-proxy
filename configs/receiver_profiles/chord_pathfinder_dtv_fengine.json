@@ -1,6 +1,6 @@
 {
   "schema_version": "fstat_receiver_profile_v1",
-  "receiver_profile_id": "chord_pathfinder_dtv_fengine_v1",
+  "receiver_profile_id": "chord_pathfinder_dtv_fengine",
   "instrument_name": "CHORD Pathfinder",
   "rf_band": {
     "lower_hz": 0.0,
@@ -38,7 +38,7 @@
     "record_clip_fraction_by_stream": false
   },
   "detector_adapter": {
-    "compatible_detector_core_id": "pilotproxy_cuda_fstat_v1",
+    "compatible_detector_core_id": "pilotproxy_cuda_local_reference_power_ratio",
     "detector_window_samples": 64,
     "fine_bin_enbw_hz": 3051.7578125,
     "dtv_bandwidth_hz": 6000000.0,

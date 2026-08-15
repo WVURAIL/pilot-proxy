@@ -60,3 +60,18 @@ Frozen evidence and manuscript provenance are not rewritten by this hard cut.
 They document earlier development snapshots and are not valid current product
 inputs; regenerate current products and figures rather than adding readers for
 those retired fields.
+
+## Configuration and implementation identities
+
+Current receiver profiles use stable descriptive IDs without development
+suffixes: `reference_800mhz_pfb`, `chime_dtv_fengine`,
+`chord_dtv_fengine`, and `chord_pathfinder_dtv_fengine`.  Every profile
+binds to the single detector-core identity
+`pilotproxy_cuda_local_reference_power_ratio`.  Stream maps and packed
+weight headers record those same IDs, so provenance does not depend on the
+order in which pre-release designs were tried.
+
+The compiled C/CUDA ABI remains `FStat_*` / `libfstatistic.so` in this
+series.  Those symbol and library names are an implementation boundary and
+are changed only by the separate ABI series; no compatibility aliases are
+introduced here.

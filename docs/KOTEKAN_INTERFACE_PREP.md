@@ -160,7 +160,7 @@ Export and validate a candidate CHIME bundle with:
 ```bash
 pilot-proxy export-runtime-weight-bundle \
   --receiver-profile configs/receiver_profiles/chime_dtv_fengine.json \
-  --detector-core-profile configs/detector_core/pilotproxy_cuda_fstat_v1.json \
+  --detector-core-profile configs/detector_core/pilotproxy_cuda_local_reference_power_ratio.json \
   --weight-coordinate-system post_spectral_sense_normalization \
   --physical-channel-range 14:36 \
   --output-dir generated/runtime_bundle

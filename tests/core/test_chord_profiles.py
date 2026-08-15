@@ -55,7 +55,7 @@ PATHFINDER_PROFILE = (
     CONFIGS_DIR / "receiver_profiles" / "chord_pathfinder_dtv_fengine.json"
 )
 CHIME_PROFILE = CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
-CORE_PROFILE = CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+CORE_PROFILE = CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
 CHORD_STREAM_MAP = CONFIGS_DIR / "stream_maps" / "chord_dish_pol_example.json"
 PATHFINDER_STREAM_MAP = (
     CONFIGS_DIR / "stream_maps" / "chord_pathfinder_dish_pol_example.json"

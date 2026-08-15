@@ -12,7 +12,7 @@ acceptance test.
 ## Working title and target claim
 
 *Recovering DTV-contaminated bandwidth for 21 cm cosmology: a pilot-informed
-F-statistic detector for CHIME.*
+local-reference power-ratio detector for CHIME.*
 
 The target headline is that a pilot-informed F-statistic can retain usable
 parts of ATSC-contaminated CHIME coarse channels at the approximately 10 s
@@ -137,7 +137,7 @@ production pass and before any relaunch.
    own integrated spectra places it at DC. The ROM was mistuned by exactly
    fs/2 (~192.26 kHz), suppressing real pilots by 39-47 dB at the line. The
    receiver profile now declares the frame explicitly
-   (`chime_dtv_fengine_v2`, `baseband_frame.channel_center_normalized = 0.0`)
+   (`chime_dtv_fengine`, `baseband_frame.channel_center_normalized = 0.0`)
    and the rebuilt bank is validated by `tools/framing_audit.py`
    (ALIGNED; deployed-configuration rerun on the event file yields
    per-chunk F ~ 12.9-14.0 versus 1.0 with the legacy ROM). Package version

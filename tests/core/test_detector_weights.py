@@ -67,7 +67,7 @@ def test_weight_bank_rejects_unknown_pilot_frequency() -> None:
 def test_noncontract_detector_spacing_field_is_rejected() -> None:
     old_key = "_".join(("reference", "guard", "bins"))
     data = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     ).to_dict()
     data[old_key] = 2
 

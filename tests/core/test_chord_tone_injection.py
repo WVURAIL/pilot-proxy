@@ -56,7 +56,7 @@ CHORD_PROFILE = CONFIGS_DIR / "receiver_profiles" / "chord_dtv_fengine.json"
 PATHFINDER_PROFILE = (
     CONFIGS_DIR / "receiver_profiles" / "chord_pathfinder_dtv_fengine.json"
 )
-CORE_PROFILE = CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+CORE_PROFILE = CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
 CHORD_BANK = REPO_ROOT / "weights" / "chord_dtv_weights_k64.bin"
 
 COARSE_WIDTH_HZ = 195312.5  # CHORD coarse width == channelized sample rate

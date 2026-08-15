@@ -182,7 +182,7 @@ The detector resolves these runtime artifacts unless explicit alternatives are
 passed:
 
 - `configs/receiver_profiles/chime_dtv_fengine.json` - must be the
-  frame-verified `chime_dtv_fengine_v2` profile
+  frame-verified `chime_dtv_fengine` profile
   (`baseband_frame.channel_center_normalized = 0.0`);
 - `weights/chime_dtv_weights_k128.bin` - manifest
   `receiver_profile_hash` starts `135bb194cfa58f67`; the legacy half-band

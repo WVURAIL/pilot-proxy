@@ -38,7 +38,7 @@ def test_export_runtime_weight_bundle_writes_compact_profiles(tmp_path) -> None:
             CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14, 21],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -101,7 +101,7 @@ def test_chime_runtime_bundle_post_coordinate_uses_detector_coordinate(
             CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14, 21],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -137,7 +137,7 @@ def test_chime_runtime_bundle_raw_coordinate_uses_native_inverted_coordinate(
             CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14, 21],
         weight_coordinate_system=WEIGHT_COORDINATE_RAW_INPUT,
@@ -169,7 +169,7 @@ def test_validate_runtime_weight_bundle_reports_bad_offset(tmp_path) -> None:
             CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14, 21],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -195,7 +195,7 @@ def test_validate_runtime_weight_bundle_reports_coordinate_mismatch(tmp_path) ->
             CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -221,7 +221,7 @@ def test_validate_runtime_weight_bundle_reports_input_coordinate_mismatch(
             CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -246,7 +246,7 @@ def _export_reference_bundle(tmp_path):
             CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
         ),
         detector_core_profile_path=(
-            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+            CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
         ),
         physical_channels=[14, 21],
         weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,

@@ -402,7 +402,7 @@ def test_check_profile_loads_nested_receiver_profile(capsys) -> None:
     assert result == 0
     out = capsys.readouterr().out
     assert "receiver_profile_id" in out
-    assert "reference_800mhz_pfb_v1" in out
+    assert "reference_800mhz_pfb" in out
 
 
 def test_make_weights_from_reference_profile(tmp_path, capsys) -> None:

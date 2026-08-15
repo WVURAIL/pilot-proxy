@@ -98,12 +98,12 @@ def test_receiver_profile_exact_json_roundtrip() -> None:
     document = profile.to_dict()
     reparsed = ReceiverProfile.from_dict(document)
 
-    assert profile.receiver_profile_id == "reference_800mhz_pfb_v1"
+    assert profile.receiver_profile_id == "reference_800mhz_pfb"
     assert profile.instrument_name == "reference"
     assert profile.frame_size_samples == FRAME_SIZE_SAMPLES
     assert profile.num_input_streams == 1
     assert document["detector_adapter"]["compatible_detector_core_id"] == (
-        "pilotproxy_cuda_fstat_v1"
+        "pilotproxy_cuda_local_reference_power_ratio"
     )
     assert reparsed.to_dict() == profile.to_dict()
 
@@ -156,7 +156,7 @@ def test_receiver_profile_hash_changes_when_frequency_mapping_changes() -> None:
 
 def test_detector_core_profile_json_roundtrip() -> None:
     profile = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     )
     reparsed = DetectorCoreProfile.from_dict(profile.to_dict())
 
@@ -172,7 +172,7 @@ def test_detector_core_profile_json_roundtrip() -> None:
 
 def test_detector_core_accepts_skipped_guard_bins_as_source_of_truth() -> None:
     data = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     ).to_dict()
     data["kernel_contract"]["skipped_guard_bins"] = 2
     profile = DetectorCoreProfile.from_dict(data)
@@ -183,7 +183,7 @@ def test_detector_core_accepts_skipped_guard_bins_as_source_of_truth() -> None:
 
 def test_detector_core_rejects_reference_offset_bins_as_input_source() -> None:
     data = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     ).to_dict()
     data["reference_offset_bins"] = 3
     with pytest.raises(ValueError, match="unknown fields"):
@@ -192,7 +192,7 @@ def test_detector_core_rejects_reference_offset_bins_as_input_source() -> None:
 
 def test_detector_core_rejects_kernel_contract_reference_offset_bins() -> None:
     data = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     ).to_dict()
     data["kernel_contract"]["reference_offset_bins"] = 3
     with pytest.raises(ValueError, match="unknown fields"):
@@ -219,7 +219,7 @@ def test_make_weights_from_receiver_profile_roundtrip(tmp_path) -> None:
         CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
     )
     core = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     )
     output = tmp_path / "generated_weights.bin"
 
@@ -297,7 +297,7 @@ def test_chime_weight_generation_post_coordinate_uses_detector_coordinate() -> N
         CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
     )
     core = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     )
 
     _, layouts = generate_weight_table_from_receiver_profile(
@@ -325,7 +325,7 @@ def test_chime_weight_generation_raw_coordinate_uses_native_inverted_coordinate(
         CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
     )
     core = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     )
 
     _, layouts = generate_weight_table_from_receiver_profile(
@@ -353,7 +353,7 @@ def test_chime_post_coordinate_generation_matches_shipped_weight_layout() -> Non
         CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
     )
     core = load_detector_core_profile(
-        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_fstat_v1.json"
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     )
     table, layouts = generate_weight_table_from_receiver_profile(
         profile=profile,

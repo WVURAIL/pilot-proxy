@@ -1,6 +1,6 @@
 # Submission checklist v5 — pilot-proxy paper (RASTI) — 2026-07-16 (post round-3 review)
 
-R3 status: title retitled per R3 ("A pilot-informed F-statistic detector for
+R3 status: title retitled per R3 ("A pilot-informed local-reference power-ratio detector for
 digital television in CHIME baseband data"); abstract/contributions synced
 with the cautious body (rate language, 38–39%, eligibility, evidence
 classes, frozen-not-preregistered); status quo now states the allocation-wide

@@ -1,6 +1,6 @@
 # paper/ -- RASTI article + dissertation supplement
 
-LaTeX source for "A pilot-informed F-statistic detector for digital
+LaTeX source for "A pilot-informed local-reference power-ratio detector for digital
 television in CHIME baseband data" (RASTI, in prep) and the companion
 dissertation supplement. Everything here builds from the analysis chain in
 `../analysis/` against the frozen 2026-07 snapshot products.

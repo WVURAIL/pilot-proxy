@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "pilot-proxy"
 version = "1.0.0"
-description = "PilotProxy pilot-informed CUDA F-statistic detector with GNU Radio ATSC 1.0 testbench"
+description = "PilotProxy pilot-informed CUDA local-reference power-ratio detector with GNU Radio ATSC 1.0 testbench"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -14,7 +14,7 @@ authors = [
   { name = "Dylan Gormley" },
   { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
 ]
-keywords = ["radio-astronomy", "RFI", "ATSC", "DTV-pilot", "F-statistic", "CUDA", "CHIME"]
+keywords = ["radio-astronomy", "RFI", "ATSC", "DTV-pilot", "power-ratio", "CUDA", "CHIME"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
