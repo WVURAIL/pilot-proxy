@@ -29,10 +29,10 @@ reference_offset_bins = 2
 mask mode = positive_excess
 ```
 
-The CUDA kernel and the shipped weight bank fix the detector window at
-`K = 128`; it is not a runtime tuning parameter. `K = 256` remains a future
-candidate discussed in the design documents, but it is not part of this run
-contract.
+The detector core supports compile-time `K = 64` and `K = 128` builds. The
+CHIME receiver profile and shipped CHIME weight bank select `K = 128`; it is
+not a runtime tuning parameter. Another value would require a separately
+supported kernel geometry, weight bank, profile, and validation campaign.
 
 No GPU session is required for the CPU-only synthetic publication sweeps in
 item 2 of `docs/PUBLICATION_VALIDATION.md`. Run those sweeps with:
@@ -128,19 +128,19 @@ Run in order after environment setup, stop at the first failure. Do not
 launch any scan until every gate passes.
 
 ```bash
-# S2.1 - library built from the current sources and reporting kernel core 2.1.x
+# S2.1 - library built from the current sources and reporting kernel core 2.3.0
 make -C cuda clean && make -C cuda
 python - <<'PY'
 from pilot_proxy.kernel import FStatKernel
 v = FStatKernel().version.as_string()
-assert v.startswith("2."), f"stale kernel library: {v}"
+assert v == "2.3.0", f"stale kernel library: {v}"
 print("kernel core", v)
 PY
 
-# S2.2 - CUDA regression + exact v2 row-sum parity (integers, no tolerance)
+# S2.2 - CUDA regression + exact row-sum parity (integers, no tolerance)
 make -C cuda test_cuda
 
-# S2.3 - GPU pytest gates: numpy-reference equality, bit-exact v1 marginal
+# S2.3 - GPU pytest gates: numpy-reference equality, bit-exact coarse marginal
 #        identity, and the pre-registered ULP gate on the cupy fine FFT.
 #        These FAIL (not skip) on a stale library.
 python -m pytest tests/kernel -q
@@ -158,7 +158,7 @@ Optional belt-and-braces with any archived odd-`freq_id` baseband file:
 python tools/framing_audit.py /path/to/baseband_<event>_<odd_freq_id>.h5
 ```
 
-The bounded smoke test below is gate S2.5. Its v3 pass criteria and the
+The bounded smoke test below is gate S2.5. Its current per-pilot-schema pass criteria and the
 interrupt/resume check are listed at the end of that section.
 
 ---
@@ -185,7 +185,7 @@ passed:
   frame-verified `chime_dtv_fengine` profile
   (`baseband_frame.channel_center_normalized = 0.0`);
 - `weights/chime_dtv_weights_k128.bin` - manifest
-  `receiver_profile_hash` starts `135bb194cfa58f67`; the legacy half-band
+  `receiver_profile_hash` starts `da047cdf453764e4`; the legacy half-band
   bank lives only under `weights/legacy_halfband/` and must never be
   deployed;
 - `cuda/libfstatistic.so`, or its staged cache copy;
@@ -335,7 +335,7 @@ sv = str(np.asarray(z["schema_version"]).reshape(()).item())
 dv = str(np.asarray(z["detector_version"]).reshape(()).item())
 fs = str(np.asarray(z["fine_status"]).reshape(()).item())
 assert sv == "pilotproxy_per_pilot_product_v1", sv
-assert "pilot-proxy/" in dv and "kernel=2." in dv, dv
+assert "pilot-proxy/" in dv and "kernel=2.3.0" in dv, dv
 assert fs == "enabled", fs
 assert z["fine_power_ratio"].shape[1] == int(z["fine_num_bins"]), z["fine_power_ratio"].shape
 r = np.asarray(z["fine_null_bulk_exceedance_fraction"]).reshape(-1)
@@ -469,7 +469,7 @@ is stale, which is the correct failure mode for a production launch.
 
 ```bash
 pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-v2" \
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
   --inventory-name chime-pilots \
   --set fine_products=on \
   --checkpoint-every 50
@@ -486,11 +486,11 @@ complete and the terminal stack is skipped. Inspect channel presence and choose
 a subset:
 
 ```bash
-pilot-proxy chime-combine --report --work-dir "$HOME/pilot_proxy_runs/chime-pilots-v2/_per_pilot"
+pilot-proxy chime-combine --report --work-dir "$HOME/pilot_proxy_runs/chime-pilots-current/_per_pilot"
 pilot-proxy chime-combine \
-  --work-dir "$HOME/pilot_proxy_runs/chime-pilots-v2/_per_pilot" \
+  --work-dir "$HOME/pilot_proxy_runs/chime-pilots-current/_per_pilot" \
   --drop 598,690 \
-  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-v2-subset"
+  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-current-subset"
 ```
 
 The report gives the event count per channel, the presence histogram, and a
@@ -502,16 +502,16 @@ Validate and plot whichever directory contains the final combined products:
 
 ```bash
 pilot-proxy validate-products \
-  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-v2" \
-  --output-json "$HOME/pilot_proxy_runs/chime-pilots-v2/product_validation.json"
+  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
+  --output-json "$HOME/pilot_proxy_runs/chime-pilots-current/product_validation.json"
 
 pilot-proxy chime-plot \
-  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-v2" \
+  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
   --clean-figures
 ```
 
-If a subset combine was required, replace `chime-pilots-v2` with
-`chime-pilots-v2-subset` in both commands.
+If a subset combine was required, replace `chime-pilots-current` with
+`chime-pilots-current-subset` in both commands.
 
 ---
 

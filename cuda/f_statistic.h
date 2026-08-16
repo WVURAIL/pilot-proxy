@@ -465,6 +465,11 @@ void FStat_Compute_Powers(void* handle, const InputType* w_in);
  * @note This API is intended for exact diagnostics and regression tests. The
  *       deployed detector product is the NumDen half-threshold API.
  */
+void FStat_Compute_Powers_U64(
+    void* handle,
+    const InputType* w_in,
+    unsigned long long* d_power_out);
+
 /**
  * @brief Emit exact complex per-row dot products (v2 time-coherent front end).
  *
@@ -501,11 +506,6 @@ void FStat_Compute_RowSums_I32(
  * @brief Runtime capability probe: returns 1 when row-sum emission exists.
  */
 int FStat_Supports_RowSums(void);
-
-void FStat_Compute_Powers_U64(
-    void* handle,
-    const InputType* w_in,
-    unsigned long long* d_power_out);
 
 /**
  * @brief On-device fine-reduction power stage (fxfft256 v1, kernel core 2.1.0).

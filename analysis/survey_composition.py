@@ -42,7 +42,6 @@ import datetime
 import gzip
 import json
 import os
-import sys
 from pathlib import Path
 
 import numpy as np

@@ -5,6 +5,7 @@ import pytest
 
 from pilot_proxy.atsc_channels import (
     parse_physical_channel_range,
+    parse_physical_channel_spec,
     physical_channel_to_center_hz,
     physical_channel_to_lower_edge_hz,
     physical_channel_to_pilot_hz,
@@ -37,6 +38,15 @@ def test_physical_channel_range_parsing() -> None:
         CHANNEL_15,
         CHANNEL_14,
     ]
+
+
+def test_physical_channel_spec_parsing() -> None:
+    assert parse_physical_channel_spec(
+        f"{CHANNEL_14},{CHANNEL_15}:{CHANNEL_16}"
+    ) == [CHANNEL_14, CHANNEL_15, CHANNEL_16]
+
+    with pytest.raises(ValueError, match="must not be empty"):
+        parse_physical_channel_spec(" , ")
 
 
 def test_invalid_physical_channel_raises() -> None:

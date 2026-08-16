@@ -26,12 +26,16 @@ a GPU-free plumbing parity test in the same way PilotProxy's own runner test doe
 """
 from __future__ import annotations
 
+import hashlib
 import inspect
+import json
+import warnings
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 import numpy as np
 
+from datatrawl import accel
 from datatrawl.instruments import nyquist_sign
 from datatrawl.interfaces import Analyzer, RunContext, PluginInfo, EXPERIMENTAL
 
@@ -41,12 +45,22 @@ except Exception:  # pragma: no cover - registry shape guard
     def _register_analyzer(cls):  # type: ignore[no-redef]
         return cls
 
-from pilot_proxy.chime.frame_adapter import pack_chime_block_for_detector
+from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
 from pilot_proxy.chime.hdf5_input import (
     CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
     nearest_atsc_physical_channel,
 )
-from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
+from pilot_proxy.chime.frame_adapter import pack_chime_block_for_detector
+from pilot_proxy.chime.products import SAMPLE_RATE_HZ
+from pilot_proxy.detector_contract import (
+    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
+    WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+    WEIGHT_COORDINATE_RAW_INPUT,
+    build_detector_contract,
+    null_power_ratio_from_weight_norms,
+    normalize_weight_coordinate_system,
+    weight_term_norms_sq,
+)
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED, SPECTRAL_SENSE_NORMAL
 from pilot_proxy.dtv_units import (
     DETECTOR_WINDOW_SAMPLES,
@@ -54,30 +68,12 @@ from pilot_proxy.dtv_units import (
     EFFECTIVE_BIN_BW_HZ,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
-    power_terms_to_normalized_coarse_power_ratio_db,
     normalized_pilot_excess_to_db,
-    power_terms_to_normalized_pilot_excess,
-    power_terms_to_coarse_power_ratio,
     pilot_excess_db_to_data_shelf_snr_db,
+    power_terms_to_coarse_power_ratio,
+    power_terms_to_normalized_coarse_power_ratio_db,
+    power_terms_to_normalized_pilot_excess,
 )
-from pilot_proxy.detector_contract import (
-    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
-    WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    WEIGHT_COORDINATE_RAW_INPUT,
-    build_chime_detector_contract,
-    null_power_ratio_from_weight_norms,
-    normalize_weight_coordinate_system,
-    weight_term_norms_sq,
-)
-from pilot_proxy.provenance import (
-    detector_version_build_id,
-    detector_version_geometry,
-    file_sha256,
-    package_source_sha256,
-    sidecar_manifest_path,
-)
-import json
-
 from pilot_proxy.fine_reduction import (
     CFAR_DEFAULT_GUARD_FINE_BINS,
     CFAR_DEFAULT_P_FA,
@@ -88,12 +84,24 @@ from pilot_proxy.fine_reduction import (
     reduce_and_detect,
 )
 from pilot_proxy.product_contract import (
+    CurrentProductContractError,
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
     current_decision_contract,
     current_decision_contract_json,
+    validate_current_product_identity,
 )
+from pilot_proxy.provenance import (
+    detector_version_build_id,
+    detector_version_geometry,
+    file_sha256,
+    package_source_sha256,
+    sidecar_manifest_path,
+)
+
+from ._chime_coarse import chime_freq_id_from_hz, source_event_key
+from .stream_kinds import STREAM_PACKED_COMPLEX_INT4_BASEBAND
 
 _FINE_MODE_CODES = {
     "": 0,
@@ -101,13 +109,6 @@ _FINE_MODE_CODES = {
     CFAR_MODE_QUANTILE_FALLBACK: 2,
 }
 _FINE_MODE_NAMES = {code: name for name, code in _FINE_MODE_CODES.items()}
-import hashlib
-
-from datatrawl import accel
-
-from ._chime_coarse import chime_freq_id_from_hz, source_event_key
-
-import warnings
 
 # The public product contract starts at schema revision 1 and records
 # active, diagnostic, and candidate decisions explicitly. Resume accepts only
@@ -185,6 +186,236 @@ def _detector_fft_backend():
 
 _DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ = 10.0
 
+_RESUME_REQUIRED_FIELDS = frozenset(
+    {
+        "archive_version",
+        "bin_enbw_hz",
+        "detector_window_samples",
+        "detector_contract_json",
+        "detector_version",
+        "decision_contract_json",
+        "dtv_bandwidth_hz",
+        "fine_census_excluded_bins",
+        "fine_cfar_location",
+        "fine_cfar_mode",
+        "fine_cfar_scale",
+        "fine_cfar_threshold",
+        "fine_designated_bins",
+        "fine_guard_fine_bins",
+        "fine_num_bins",
+        "fine_p_fa",
+        "fine_pad_factor",
+        "fine_status",
+        "fine_threshold_exceedance_bin",
+        "fine_threshold_exceedance_count",
+        "fine_threshold_exceedance_frame",
+        "max_chunks_per_file",
+        "mask_rule",
+        "num_input_streams",
+        "nfft",
+        "pilot_below_data_db",
+        "pilot_capture_efficiency",
+        "pilot_in_band",
+        "rational_overflow_count",
+        "reference_placement_json",
+        "sample_rate_hz",
+        "sense",
+        "unit_delta_time",
+        "unit_event_id",
+        "unit_keys",
+        "unit_order",
+        "unit_time0_ctime",
+        "unit_time0_fpga",
+        "weight_bank_sha256",
+        "weight_manifest_sha256",
+        "weights_hash",
+    }
+)
+
+
+def _validate_resume_product(data: Mapping[str, Any], path: str) -> None:
+    """Require a complete current product before restoring mutable state."""
+    try:
+        validate_current_product_identity(data)
+    except CurrentProductContractError as exc:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} is not a complete current "
+            f"per-pilot product ({exc}). Remove it to rebuild."
+        ) from exc
+    missing = sorted(_RESUME_REQUIRED_FIELDS.difference(data))
+    if missing:
+        raise SystemExit(
+            "pilot-proxy-detector: existing product lacks resume-critical fields "
+            f"{missing}; remove it and rebuild with the current version."
+        )
+
+
+def _validated_resume_axes(
+    data: Mapping[str, Any], path: str
+) -> tuple[list[str], set[str]]:
+    """Validate the frame-to-unit relationship before restoring its arrays."""
+    unit_order = [
+        str(value) for value in np.asarray(data["unit_order"]).reshape(-1)
+    ]
+    unit_key_values = [
+        str(value) for value in np.asarray(data["unit_keys"]).reshape(-1)
+    ]
+    unit_keys = set(unit_key_values)
+    if len(unit_order) != len(set(unit_order)):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has duplicate unit_order "
+            "entries; remove it and rebuild."
+        )
+    if len(unit_key_values) != len(unit_keys):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has duplicate unit_keys; "
+            "remove it and rebuild."
+        )
+    if set(unit_order) != unit_keys:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has unit_order entries that "
+            "do not match unit_keys; remove it and rebuild."
+        )
+
+    per_unit_fields = (
+        "source_event_keys",
+        "unit_time0_ctime",
+        "unit_time0_fpga",
+        "unit_event_id",
+        "unit_delta_time",
+        "archive_version",
+    )
+    for name in per_unit_fields:
+        size = int(np.asarray(data[name]).reshape(-1).size)
+        if size != len(unit_order):
+            raise SystemExit(
+                f"pilot-proxy-detector: product {path} field {name!r} has "
+                f"{size} entries but unit_order has {len(unit_order)}; remove "
+                "it and rebuild."
+            )
+    try:
+        saved_sample_rate = np.asarray(
+            data["sample_rate_hz"], dtype=np.float64
+        ).reshape(-1)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has an invalid "
+            "sample_rate_hz; remove it and rebuild."
+        ) from exc
+    if (
+        saved_sample_rate.size != 1
+        or not np.isfinite(saved_sample_rate[0])
+        or saved_sample_rate[0] <= 0.0
+    ):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has an invalid "
+            "sample_rate_hz; remove it and rebuild."
+        )
+    try:
+        finite_delta_time = np.asarray(
+            data["unit_delta_time"], dtype=np.float64
+        ).reshape(-1)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has invalid "
+            "unit_delta_time values; remove it and rebuild."
+        ) from exc
+    finite_delta_time = finite_delta_time[
+        np.isfinite(finite_delta_time) & (finite_delta_time > 0.0)
+    ]
+    if finite_delta_time.size and not np.allclose(
+        finite_delta_time,
+        1.0 / float(saved_sample_rate[0]),
+        rtol=1e-12,
+        atol=0.0,
+    ):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} sample_rate_hz disagrees "
+            "with unit_delta_time; remove it and rebuild."
+        )
+    expected_event_keys = [
+        source_event_key(key, int(np.asarray(data["freq_id"]).reshape(-1)[0]))
+        for key in unit_order
+    ]
+    saved_event_keys = [
+        str(value) for value in np.asarray(data["source_event_keys"]).reshape(-1)
+    ]
+    if saved_event_keys != expected_event_keys:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} source_event_keys are not "
+            "aligned with unit_order; remove it and rebuild."
+        )
+
+    frame_index = np.asarray(data["frame_index"], dtype=np.int64).reshape(-1)
+    frame_count = int(frame_index.size)
+    if not np.array_equal(frame_index, np.arange(frame_count, dtype=np.int64)):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has a non-contiguous "
+            "frame_index; remove it and rebuild."
+        )
+    per_frame_fields = (
+        "p_target_u64",
+        "p_ref_sum_u64",
+        "coarse_power_ratio",
+        "normalized_coarse_power_ratio_db",
+        "pilot_excess_db",
+        "estimated_data_shelf_snr_db",
+        "normalized_pilot_excess",
+        "reject_mask",
+        "valid",
+        "baseband_power_linear",
+        "fine_power_ratio",
+        "fine_cfar_location",
+        "fine_cfar_scale",
+        "fine_cfar_threshold",
+        "fine_null_bulk_exceedance_fraction",
+        "fine_cfar_mode",
+        "fine_threshold_exceedance_count",
+        "frame_unit_index",
+        "frame_in_unit",
+    )
+    for name in per_frame_fields:
+        values = np.asarray(data[name])
+        size = int(values.shape[0]) if values.ndim else 1
+        if size != frame_count:
+            raise SystemExit(
+                f"pilot-proxy-detector: product {path} field {name!r} has "
+                f"{size} frame rows but frame_index has {frame_count}; remove "
+                "it and rebuild."
+            )
+
+    fine = np.asarray(data["fine_power_ratio"])
+    fine_bins = int(np.asarray(data["fine_num_bins"]).reshape(()).item())
+    if fine.ndim != 2 or fine.shape[1] != fine_bins:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} fine_power_ratio shape does "
+            "not match fine_num_bins; remove it and rebuild."
+        )
+    nfft = int(np.asarray(data["nfft"]).reshape(()).item())
+    for name in (
+        "integrated_spectrum_before_mask",
+        "integrated_spectrum_after_mask",
+    ):
+        if np.asarray(data[name]).reshape(-1).size != nfft:
+            raise SystemExit(
+                f"pilot-proxy-detector: product {path} field {name!r} does not "
+                "match nfft; remove it and rebuild."
+            )
+
+    unit_index = np.asarray(data["frame_unit_index"], dtype=np.int64).reshape(-1)
+    frame_in_unit = np.asarray(data["frame_in_unit"], dtype=np.int64).reshape(-1)
+    if np.any(frame_in_unit < 0):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has negative frame_in_unit "
+            "entries; remove it and rebuild."
+        )
+    if np.any(unit_index < 0) or np.any(unit_index >= len(unit_order)):
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has frame_unit_index entries "
+            "outside unit_order; remove it and rebuild."
+        )
+    return unit_order, unit_keys
+
 
 @_register_analyzer
 class PilotProxyDetectorAnalyzer(Analyzer):
@@ -201,6 +432,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         instruments=("chime", "kko", "gbo", "hco"),
         produces="<channel>.npz (chime_detector_outputs schema)",
         requires=("h5py", "pilot-proxy", "GPU+libfstatistic.so (CUDA kernel)"),
+        accepts_stream_kinds=(STREAM_PACKED_COMPLEX_INT4_BASEBAND,),
         notes="Use with the 'chime-baseband-packed' reader. Wraps "
               "pack_chime_block_for_detector + detect_packed_for_positive_excess; "
               "detector_fn/kernel/weights injectable via options (CPU ref for tests).",
@@ -213,6 +445,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._physical_channel = -1
         self._freq_id = -1
         self._f0_hz = 800_000_000.0
+        self._sample_rate_hz = float("nan")
         self._pilot_in_band = True
         self._pilot_rf_hz = float("nan")
         self._coarse_center_hz = float("nan")
@@ -244,7 +477,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._p_target: list[int] = []
         self._p_ref_sum: list[int] = []
         self._coarse_power_ratio: list[float] = []
-        # ---- v2 fine-reduction products (schema v3) ----
+        # Fine-diagnostic products in the current per-pilot contract.
         self._fine_mode_opt: str = "auto"
         self._fine_supported: bool | None = None
         self._fine_status: str = "not_configured"
@@ -289,10 +522,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._unit_event_id: list[int] = []
         self._unit_delta_time: list[float] = []
         self._unit_archive_version: list[str] = []
-        # run provenance (set in begin())
-        self._weights_hash = ""
-        self._detector_version = ""
-
     # -- selection / fan-out (per CHIME coarse channel / freq_id) -----------
     def resolve_selection(self, ctx: RunContext, spec: Any) -> Any:
         # --select is CHIME freq_id (coarse-channel indices), the namespace the
@@ -353,6 +582,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 f"from scratch, or point --output-dir at a clean directory."
             )
 
+        _validate_resume_product(data, path)
+        saved_unit_order, saved_unit_keys = _validated_resume_axes(data, path)
+
         # -- compatibility guards (refuse; never silently overwrite/complete) --
         saved_schema = str(data["schema_version"].item())
         if saved_schema != _SCHEMA_VERSION:
@@ -389,6 +621,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._pilot_rf_hz = float(data["pilot_frequency_hz"][0])
         self._coarse_center_hz = float(data["chime_frequency_hz"][0])
         self._nfft = int(data["nfft"])
+        self._sample_rate_hz = float(
+            np.asarray(data["sample_rate_hz"]).reshape(()).item()
+        )
         self._K = int(data["detector_window_samples"])
         self._spectral_sense = (
             SPECTRAL_SENSE_INVERTED if int(data["sense"]) == -1
@@ -399,24 +634,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._dtv_bandwidth_hz = float(data["dtv_bandwidth_hz"])
         self._pilot_capture_efficiency = float(data["pilot_capture_efficiency"])
         self._max_chunks_per_file = None if saved_cap < 0 else saved_cap
-
-        required_provenance = (
-            "num_input_streams",
-            "weights_hash",
-            "weight_bank_sha256",
-            "weight_manifest_sha256",
-            "detector_version",
-            "mask_rule",
-            "detector_contract_json",
-            "reference_placement_json",
-            "decision_contract_json",
-        )
-        missing = [name for name in required_provenance if name not in data]
-        if missing:
-            raise SystemExit(
-                "pilot-proxy-detector: existing product lacks resume-critical provenance "
-                f"fields {missing}; remove it and rebuild with the current version."
-            )
 
         self._num_input_streams = int(
             np.asarray(data["num_input_streams"]).reshape(()).item()
@@ -448,10 +665,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "weights_hash": _text("weights_hash"),
             "detector_version": _text("detector_version"),
             "mask_rule": _text("mask_rule"),
-            "target_norm_sq": int(np.asarray(data["target_norm_sq"]).reshape(-1)[0])
-            if "target_norm_sq" in data else None,
-            "reference_norm_sum_sq": int(np.asarray(data["reference_norm_sum_sq"]).reshape(-1)[0])
-            if "reference_norm_sum_sq" in data else None,
+            "target_norm_sq": int(
+                np.asarray(data["target_norm_sq"]).reshape(-1)[0]
+            ),
+            "reference_norm_sum_sq": int(
+                np.asarray(data["reference_norm_sum_sq"]).reshape(-1)[0]
+            ),
             "detector_contract": saved_contract,
             "weight_bank_sha256": _text("weight_bank_sha256"),
             "weight_manifest_sha256": _text("weight_manifest_sha256"),
@@ -467,40 +686,38 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._normalized_coarse_power_ratio_db = [float(x) for x in _col("normalized_coarse_power_ratio_db")]
         self._pilot_excess_db = [float(x) for x in _col("pilot_excess_db")]
         self._estimated_data_shelf_snr_db = [float(x) for x in _col("estimated_data_shelf_snr_db")]
-        self._normalized_pilot_excess = (
-            [float(x) for x in _col("normalized_pilot_excess")]
-            if "normalized_pilot_excess" in data
-            else [float("nan")] * len(self._estimated_data_shelf_snr_db)
-        )
+        self._normalized_pilot_excess = [
+            float(x) for x in _col("normalized_pilot_excess")
+        ]
         self._reject_mask = [int(x) for x in _col("reject_mask")]
-        # ---- v2 fine-reduction restore (schema v3 products) ----
-        if "fine_power_ratio" in data:
-            fine_arr = np.asarray(data["fine_power_ratio"], dtype=np.float32)
-            self._fine_bins = int(fine_arr.shape[1]) if fine_arr.ndim == 2 else 0
-            self._fine_power_ratio = [fine_arr[i] for i in range(fine_arr.shape[0])]
-            self._fine_loc = [float(x) for x in _col("fine_cfar_location")]
-            self._fine_scale = [float(x) for x in _col("fine_cfar_scale")]
-            self._fine_thr = [float(x) for x in _col("fine_cfar_threshold")]
-            self._fine_null_bulk_exceedance_fraction = [
-                float(x) for x in _col("fine_null_bulk_exceedance_fraction")
-            ]
-            self._fine_mode_code = [int(x) for x in _col("fine_cfar_mode")]
-            self._fine_threshold_exceedance_count = [int(x) for x in _col("fine_threshold_exceedance_count")]
-            self._fine_threshold_exceedance_frames = [
-                int(x) for x in _col("fine_threshold_exceedance_frame")
-            ]
-            self._fine_threshold_exceedance_bins = [int(x) for x in _col("fine_threshold_exceedance_bin")]
-            self._fine_p_fa = float(np.asarray(data["fine_p_fa"]))
-            self._fine_guard = int(np.asarray(data["fine_guard_fine_bins"]))
-            self._fine_designated = [
-                int(x) for x in _col("fine_designated_bins")
-            ]
-            self._fine_census = [
-                int(x) for x in _col("fine_census_excluded_bins")
-            ]
-            self._fine_status = str(
-                np.asarray(data["fine_status"]).reshape(()).item()
-            )
+        # Restore the current fine-diagnostic arrays; current checkpoints carry
+        # these fields even when there are zero frames.
+        fine_arr = np.asarray(data["fine_power_ratio"], dtype=np.float32)
+        self._fine_bins = int(fine_arr.shape[1]) if fine_arr.ndim == 2 else 0
+        self._fine_power_ratio = [fine_arr[i] for i in range(fine_arr.shape[0])]
+        self._fine_loc = [float(x) for x in _col("fine_cfar_location")]
+        self._fine_scale = [float(x) for x in _col("fine_cfar_scale")]
+        self._fine_thr = [float(x) for x in _col("fine_cfar_threshold")]
+        self._fine_null_bulk_exceedance_fraction = [
+            float(x) for x in _col("fine_null_bulk_exceedance_fraction")
+        ]
+        self._fine_mode_code = [int(x) for x in _col("fine_cfar_mode")]
+        self._fine_threshold_exceedance_count = [
+            int(x) for x in _col("fine_threshold_exceedance_count")
+        ]
+        self._fine_threshold_exceedance_frames = [
+            int(x) for x in _col("fine_threshold_exceedance_frame")
+        ]
+        self._fine_threshold_exceedance_bins = [
+            int(x) for x in _col("fine_threshold_exceedance_bin")
+        ]
+        self._fine_p_fa = float(np.asarray(data["fine_p_fa"]))
+        self._fine_guard = int(np.asarray(data["fine_guard_fine_bins"]))
+        self._fine_designated = [int(x) for x in _col("fine_designated_bins")]
+        self._fine_census = [
+            int(x) for x in _col("fine_census_excluded_bins")
+        ]
+        self._fine_status = str(np.asarray(data["fine_status"]).reshape(()).item())
         self._valid = [int(x) for x in _col("valid")]
         self._baseband_power = [float(x) for x in _col("baseband_power_linear")]
         self._frame_unit_index = [int(x) for x in _col("frame_unit_index")]
@@ -517,11 +734,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         ).reshape(-1)
 
         # -- restore processed keys + consumption order ------------------------
-        self._keys = {str(k) for k in _col("unit_keys")}
-        if "unit_order" in data:
-            self._unit_order = [str(k) for k in _col("unit_order")]
-        else:  # products written before unit_order was persisted
-            self._unit_order = sorted(self._keys)
+        self._keys = saved_unit_keys
+        self._unit_order = saved_unit_order
         # -- restore the per-unit time axis (aligned to unit_order) ------------
         self._unit_time0_ctime = [float(x) for x in _col("unit_time0_ctime")]
         self._unit_time0_fpga = [int(x) for x in _col("unit_time0_fpga")]
@@ -531,7 +745,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
 
         # let begin() verify the new input's identity matches what we restored
         self._resumed_identity = (
-            self._freq_id, int(self._nfft), int(self._K), self._spectral_sense,
+            self._freq_id, int(self._nfft), self._sample_rate_hz,
+            int(self._K), self._spectral_sense,
             self._physical_channel, self._pilot_below_data_db,
             self._bin_enbw_hz, self._dtv_bandwidth_hz,
             self._pilot_capture_efficiency,
@@ -574,6 +789,15 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._nfft = int(getattr(inst, "nfft", 0) or first_meta.get("nfft") or 0)
         if self._nfft <= 0:
             raise ValueError("detector analyzer: nfft must come from the instrument")
+        instrument_sample_rate_hz = float(getattr(inst, "fs_hz", 0.0) or 0.0)
+        metadata_sample_rate_hz = float(first_meta.get("sample_rate_hz", 0.0) or 0.0)
+        self._sample_rate_hz = (
+            instrument_sample_rate_hz
+            if instrument_sample_rate_hz > 0.0
+            else metadata_sample_rate_hz
+            if metadata_sample_rate_hz > 0.0
+            else float(SAMPLE_RATE_HZ)
+        )
         # datatrawl exposes the spectral sense as nyquist_zone (1=normal, 2=inverted),
         # not a "sense" attribute. nyquist_sign maps that to +1/-1.
         sense = int(nyquist_sign(int(getattr(inst, "nyquist_zone", 1) or 1)))
@@ -624,7 +848,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         # different coarse channel (a wrong --select freq_id), so the detection is
         # meaningless. Flag it; consume_file then emits an explicitly invalid
         # product (mask=0, valid=0) instead of fabricating detections.
-        _coarse_width = float(getattr(inst, "fs_hz", 0.0)) or (400e6 / 1024.0)
+        _coarse_width = self._sample_rate_hz
         _expected_offset = self._pilot_rf_hz - f_center_hz
         self._pilot_in_band = abs(_expected_offset) < (_coarse_width / 2.0)
         if not self._pilot_in_band:
@@ -789,15 +1013,23 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             return int(getattr(specs, attr, default) or default)
 
         ref_off = _spec("reference_offset_bins", "reference_offset_bins", 2)
-        self._detector_contract = build_chime_detector_contract(
-            detector_window_samples=int(self._K),
-            skipped_guard_bins=max(0, ref_off - 1),
-            reference_offset_bins=ref_off,
-            num_weight_terms=_spec("num_weight_terms", "N", 3),
-            sample_bits_per_component=_spec("sample_bits_per_component", "bits", 4),
-            weight_coordinate_system=contract_weight_coordinate,
-            time_reverse_detector_windows_before_kernel=time_reverse,
-        )
+        try:
+            self._detector_contract = build_detector_contract(
+                detector_window_samples=int(self._K),
+                skipped_guard_bins=max(0, ref_off - 1),
+                reference_offset_bins=ref_off,
+                num_weight_terms=_spec("num_weight_terms", "N", 3),
+                sample_bits_per_component=_spec(
+                    "sample_bits_per_component", "bits", 4
+                ),
+                weight_coordinate_system=contract_weight_coordinate,
+                time_reverse_detector_windows_before_kernel=time_reverse,
+            )
+        except ValueError as exc:
+            raise SystemExit(
+                "pilot-proxy-detector: detector_contract is incompatible with "
+                f"the current detector ({exc})."
+            ) from exc
 
         # If this run resumed a prior product, the identity begin() just derived
         # from the first NEW file must match the restored one. Otherwise new
@@ -807,7 +1039,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         prev = getattr(self, "_resumed_identity", None)
         if prev is not None:
             now = (
-                self._freq_id, int(self._nfft), int(self._K),
+                self._freq_id, int(self._nfft), self._sample_rate_hz,
+                int(self._K),
                 self._spectral_sense, self._physical_channel,
                 self._pilot_below_data_db, self._bin_enbw_hz,
                 self._dtv_bandwidth_hz, self._pilot_capture_efficiency,
@@ -816,7 +1049,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 raise SystemExit(
                     "pilot-proxy-detector: resumed product identity does not match the "
                     "identity derived from new input (instrument / kernel / "
-                    "--select / dB-calibration changed between runs). Use a clean "
+                    "--select / sample rate / dB-calibration changed between runs). "
+                    "Use a clean "
                     f"--output-dir to rebuild. restored={prev} new={now}"
                 )
 
@@ -1288,7 +1522,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             p_target_u64=col_u(self._p_target, np.uint64),
             p_ref_sum_u64=col_u(self._p_ref_sum, np.uint64),
             coarse_power_ratio=col_f(self._coarse_power_ratio),
-            # --- v2 fine-reduction per-frame products (schema v3) ---
+            # --- current fine-diagnostic per-frame products ---
             fine_power_ratio=(
                 np.stack(self._fine_power_ratio).astype(np.float32)
                 if self._fine_power_ratio
@@ -1349,6 +1583,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             # --- datatrawl provenance / resume keys ---
             schema_version=np.asarray(_SCHEMA_VERSION),
             nfft=np.asarray(int(self._nfft), dtype=np.int64),
+            sample_rate_hz=np.asarray(self._sample_rate_hz, dtype=np.float64),
             detector_window_samples=np.asarray(int(self._K), dtype=np.int64),
             num_input_streams=np.asarray(int(self._num_input_streams), dtype=np.int64),
             sense=np.asarray(

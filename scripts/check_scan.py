@@ -82,7 +82,7 @@ def check_per_pilot(path: Path, r: Report):
                    f"schema_version == {SCHEMA}"):
         return None
     missing = [k for k in PER_FRAME + PER_UNIT if k not in z.files]
-    r.check(not missing, f"all v2 fields present"
+    r.check(not missing, "all current product fields present"
             + (f" (missing {missing})" if missing else ""))
 
     # per-frame arrays all the same length
@@ -124,10 +124,10 @@ def check_per_pilot(path: Path, r: Report):
 
     # time axis: real data is timed; flag if not (no LST possible)
     t0 = _1d(z, "unit_time0_ctime")
-    dt = _1d(z, "unit_delta_time")
+    _1d(z, "unit_delta_time")  # Validate the required per-unit time-step field.
     n_timed = int(np.isfinite(t0).sum())
     if n_timed == 0:
-        r.warning(f"no unit has a finite time0_ctime -- LST/time folding unavailable")
+        r.warning("no unit has a finite time0_ctime -- LST/time folding unavailable")
     else:
         r.check(n_timed == u, f"all {u} units carry a finite time0_ctime")
         # per-frame time monotonic within each unit

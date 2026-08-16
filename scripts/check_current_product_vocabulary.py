@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BANNED = {
     "pilotproxy_detector_datatrawl_" + "v2": "pilotproxy_per_pilot_product_v1",
     "pilotproxy_detector_datatrawl_" + "v3": "pilotproxy_per_pilot_product_v1",
+    "pilotproxy_chime_detector_contract_" + "v1": "pilotproxy_detector_contract_v1",
     "fine_" + "nd_flag_rate": "fine_null_bulk_exceedance_fraction",
     "_fine_" + "ndrate": "_fine_null_bulk_exceedance_fraction",
     "product_schema_" + "v2.md": "PER_PILOT_PRODUCT_FIELDS.md",
@@ -34,6 +35,7 @@ CURRENT_FILES = (
     ROOT / "docs" / "DISSERTATION_EXPORTS.md",
     ROOT / "docs" / "PilotProxy_DS001_Data_Sheet.tex",
     ROOT / "docs" / "PilotProxy_UG001_User_Guide.tex",
+    ROOT / "docs" / "generated" / "specs.tex",
 )
 RUNTIME_TREES = (ROOT / "src", ROOT / "scripts", ROOT / "tools")
 TEXT_SUFFIXES = {".py", ".md", ".tex", ".json", ".sh", ".h", ".cu", ".cpp"}
@@ -56,10 +58,20 @@ def current_files() -> list[Path]:
     return sorted(set(files))
 
 
+def searchable_text(text: str) -> str:
+    r"""Normalize presentation escapes before checking retired identifiers.
+
+    TeX writes identifiers as ``name\_with\_underscores``. Searching only the
+    source spelling allowed a retired schema token to survive in generated
+    formal-document input, so compare both the source and rendered spelling.
+    """
+    return text + "\n" + text.replace(r"\_", "_")
+
+
 def main() -> int:
     failures: list[str] = []
     for path in current_files():
-        text = path.read_text(encoding="utf-8")
+        text = searchable_text(path.read_text(encoding="utf-8"))
         for removed, replacement in BANNED.items():
             if removed in text:
                 failures.append(

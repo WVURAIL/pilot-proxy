@@ -206,10 +206,8 @@ def test_weight_bank_rejects_manifest_binary_binding_mismatch(tmp_path) -> None:
         DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
     )
     manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
-    # The shipped manifest binds the binary via artifacts.weights_sha256 (v2);
+    # The current manifest binds the binary via artifacts.weights_sha256;
     # corrupt that field so the loader's manifest/binary check must reject it.
-    # (The legacy weights_git_blob_sha1 path is only reached when weights_sha256
-    # is absent, so tampering it here would be silently skipped.)
     manifest["artifacts"]["weights_sha256"] = "0" * 64
     copied.with_suffix(copied.suffix + ".manifest.json").write_text(
         json.dumps(manifest), encoding="utf-8"
@@ -218,7 +216,24 @@ def test_weight_bank_rejects_manifest_binary_binding_mismatch(tmp_path) -> None:
         DetectorWeightBank(explicit_path=copied)
 
 
-def test_weight_bank_rejects_v2_manifest_without_coordinate_system(tmp_path) -> None:
+def test_weight_bank_requires_sha256_manifest_binding(tmp_path) -> None:
+    copied = tmp_path / DEFAULT_WEIGHTS_PATH.name
+    shutil.copyfile(DEFAULT_WEIGHTS_PATH, copied)
+    source_manifest = DEFAULT_WEIGHTS_PATH.with_suffix(
+        DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
+    )
+    manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+    manifest["artifacts"].pop("weights_sha256")
+    manifest["artifacts"]["weights_git_blob_sha1"] = "0" * 40
+    copied.with_suffix(copied.suffix + ".manifest.json").write_text(
+        json.dumps(manifest), encoding="utf-8"
+    )
+
+    with pytest.raises(ValueError, match="weights_sha256"):
+        DetectorWeightBank(explicit_path=copied)
+
+
+def test_weight_bank_rejects_current_manifest_without_coordinate_system(tmp_path) -> None:
     copied = tmp_path / DEFAULT_WEIGHTS_PATH.name
     shutil.copyfile(DEFAULT_WEIGHTS_PATH, copied)
     source_manifest = DEFAULT_WEIGHTS_PATH.with_suffix(

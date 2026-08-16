@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,7 +28,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("h5py")
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt
 from datatrawl.instruments import load_instrument
@@ -189,6 +190,82 @@ def test_analyzer_resume_absent_product_is_fresh(tmp_path):
     assert a.processed_keys() == set()
 
 
+@pytest.mark.parametrize("missing_field", ["unit_order", "nfft"])
+def test_analyzer_resume_requires_current_checkpoint_fields(
+    tmp_path, missing_field
+):
+    files = _make_files(tmp_path / "data", n_events=1)
+    path = files[("evt0", FREQ_ID)]
+    reader = ChimeBasebandPackedReader()
+    weights = np.ones((3, K), dtype=np.int8)
+    ctx = RunContext(
+        instrument=load_instrument("chime"),
+        selection=[FREQ_ID],
+        options={
+            "detector_fn": _cpu_ref_detector_fn,
+            "kernel": _stub_kernel(K),
+            "weights": weights,
+        },
+    )
+    meta = dict(reader.probe(str(path)))
+    meta["unit_key"] = "synth:0"
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(ctx, meta)
+    first.consume_file(reader.iter_arrays(str(path), ctx), meta)
+    checkpoint = tmp_path / f"missing-{missing_field}.npz"
+    first.save(str(checkpoint))
+
+    with np.load(checkpoint, allow_pickle=False) as product:
+        payload = {name: product[name] for name in product.files}
+    payload.pop(missing_field)
+    np.savez_compressed(checkpoint, **payload)
+
+    with pytest.raises(
+        SystemExit, match=rf"resume-critical fields.*{missing_field}"
+    ):
+        PilotProxyDetectorAnalyzer().resume(str(checkpoint), ctx)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid_value"),
+    (
+        ("sample_rate_hz", np.asarray("bad")),
+        ("unit_delta_time", np.asarray(["bad"])),
+    ),
+)
+def test_analyzer_resume_reports_malformed_timing_metadata(
+    tmp_path, field, invalid_value
+):
+    files = _make_files(tmp_path / "data", n_events=1)
+    path = files[("evt0", FREQ_ID)]
+    reader = ChimeBasebandPackedReader()
+    weights = np.ones((3, K), dtype=np.int8)
+    ctx = RunContext(
+        instrument=load_instrument("chime"),
+        selection=[FREQ_ID],
+        options={
+            "detector_fn": _cpu_ref_detector_fn,
+            "kernel": _stub_kernel(K),
+            "weights": weights,
+        },
+    )
+    meta = dict(reader.probe(str(path)))
+    meta["unit_key"] = "synth:0"
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(ctx, meta)
+    first.consume_file(reader.iter_arrays(str(path), ctx), meta)
+    checkpoint = tmp_path / f"malformed-{field}.npz"
+    first.save(str(checkpoint))
+
+    with np.load(checkpoint, allow_pickle=False) as product:
+        payload = {name: product[name] for name in product.files}
+    payload[field] = invalid_value
+    np.savez_compressed(checkpoint, **payload)
+
+    with pytest.raises(SystemExit, match=rf"invalid.*{field}.*remove it and rebuild"):
+        PilotProxyDetectorAnalyzer().resume(str(checkpoint), ctx)
+
+
 def test_analyzer_resume_rejects_changed_weights(tmp_path):
     files = _make_files(tmp_path / "data", n_events=1)
     path = files[("evt0", FREQ_ID)]
@@ -245,6 +322,47 @@ def test_analyzer_resume_rejects_changed_detector_contract(tmp_path):
     assert resumed.resume(str(checkpoint), changed_ctx)
     with pytest.raises(SystemExit, match="detector_contract"):
         resumed.begin(changed_ctx, meta)
+
+
+def test_analyzer_resume_rejects_changed_sample_rate(tmp_path):
+    files = _make_files(tmp_path / "data", n_events=2)
+    first_path = files[("evt0", FREQ_ID)]
+    next_path = files[("evt1", FREQ_ID)]
+    reader = ChimeBasebandPackedReader()
+    weights = np.ones((3, K), dtype=np.int8)
+    options = {
+        "detector_fn": _cpu_ref_detector_fn,
+        "kernel": _stub_kernel(K),
+        "weights": weights,
+    }
+    original_instrument = load_instrument("chime")
+    assert original_instrument.fs_hz == pytest.approx(390_625.0)
+    original_ctx = RunContext(
+        instrument=original_instrument,
+        selection=[FREQ_ID],
+        options=options,
+    )
+    first_meta = dict(reader.probe(str(first_path)))
+    first_meta["unit_key"] = "synth:0"
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(original_ctx, first_meta)
+    first.consume_file(reader.iter_arrays(str(first_path), original_ctx), first_meta)
+    checkpoint = tmp_path / "sample-rate.npz"
+    first.save(str(checkpoint))
+
+    changed_instrument = replace(original_instrument, bandwidth_mhz=200.0)
+    assert changed_instrument.fs_hz == pytest.approx(195_312.5)
+    changed_ctx = RunContext(
+        instrument=changed_instrument,
+        selection=[FREQ_ID],
+        options=options,
+    )
+    next_meta = dict(reader.probe(str(next_path)))
+    next_meta["unit_key"] = "synth:1"
+    resumed = PilotProxyDetectorAnalyzer()
+    assert resumed.resume(str(checkpoint), changed_ctx)
+    with pytest.raises(SystemExit, match="sample rate"):
+        resumed.begin(changed_ctx, next_meta)
 
 
 def test_analyzer_resume_allows_release_version_bump(tmp_path, monkeypatch, capsys):

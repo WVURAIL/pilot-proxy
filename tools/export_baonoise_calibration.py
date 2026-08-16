@@ -98,7 +98,6 @@ class Channel:
         self.t = t0[self.unit_index]
         self.power = r("baseband_power_linear").astype(float)
         self.detector_version = str(np.asarray(z["detector_version"]))
-        det_frame = r("fine_threshold_exceedance_frame").astype(int)
         det_bin = r("fine_threshold_exceedance_bin").astype(int)
         self.det_frac = (
             np.bincount(det_bin, minlength=FINE_BINS).astype(float)
@@ -554,8 +553,6 @@ def main() -> int:
                     "for the File-3 substitute)"
                 )
 
-    n_null = sum(n for *_, n, s in
-                 [(r[0], r[1], r[2], r[3], r[4], r[5]) for r in null_rows])
     print(f"channels exported: {[c.atsc for c in chans]}")
     print(f"null window samples: {sum(r[4] for r in null_rows):,} "
           f"(offpilot + off-epoch)")

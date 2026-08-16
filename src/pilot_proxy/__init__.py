@@ -1,3 +1,5 @@
 """Standalone CUDA local-reference power ratio DTV pilot detector package."""
 
-__version__ = "1.0.0"
+from ._version import __version__
+
+__all__ = ["__version__"]

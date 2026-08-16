@@ -14,8 +14,6 @@ Writes the grid figure and subthreshold_leakage.csv (leak at tau = null_power_ra
 at tau = mu_hat; estimator grid fixed at BINW independent of display bins).
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

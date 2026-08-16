@@ -37,24 +37,23 @@ def _named_inventory_path(name: str, source_root: str | Path | None = None) -> P
     ``source_root`` (the directory passed to ``datatrawl survey --root``)
     always wins when given: ``<root>/data/<name>/inventory.jsonl``. Otherwise
     datatrawl's ``invpaths`` resolver is the single source of truth for named
-    inventories (canonical root plus legacy fallbacks), so ``datatrawl survey
+    inventories, so ``datatrawl survey
     --name <name>`` followed by ``pilot-proxy chime-scan --inventory-name
-    <name>`` agree from any working directory. Only when that resolver is
-    unavailable (a datatrawl without ``invpaths``) does the
-    ``<cwd>/data/<name>/inventory.jsonl`` fallback apply, in which case both
-    commands must run from the same directory.
+    <name>`` agree from any working directory.
     """
     if not str(name).strip():
         raise ValueError("inventory name may not be empty")
     if source_root is not None:
         return Path(source_root) / "data" / str(name).strip() / "inventory.jsonl"
     try:
-        # single source of truth for inventory locations (canonical root +
-        # legacy fallbacks) whenever datatrawl's invpaths is importable
         from datatrawl.invpaths import resolve_inventory
-        return Path(resolve_inventory(str(name).strip()))
-    except ImportError:
-        return Path.cwd() / "data" / str(name).strip() / "inventory.jsonl"
+    except ImportError as exc:
+        raise SystemExit(
+            "chime-scan: the installed datatrawl does not provide its canonical "
+            "inventory resolver. Install the pinned supported datatrawl revision "
+            "or pass --source-root explicitly."
+        ) from exc
+    return Path(resolve_inventory(str(name).strip()))
 
 
 def _read_inventory_meta(inventory_path: Path) -> dict | None:

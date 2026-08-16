@@ -23,18 +23,6 @@ def file_sha256(path: Path | str | None) -> str | None:
     return digest.hexdigest()
 
 
-def git_blob_sha1(path: Path | str | None) -> str | None:
-    """Return Git's SHA-1 object id for an existing file's blob contents."""
-    if path is None:
-        return None
-    file_path = Path(path)
-    if not file_path.is_file():
-        return None
-    payload = file_path.read_bytes()
-    header = f"blob {len(payload)}\0".encode("ascii")
-    return hashlib.sha1(header + payload).hexdigest()  # noqa: S324 - Git object id
-
-
 @functools.lru_cache(maxsize=8)
 def package_source_sha256(package_root: Path | str | None = None) -> str:
     """Hash the installed Python implementation, independent of absolute paths.
@@ -136,7 +124,6 @@ __all__ = [
     "detector_version_build_id",
     "detector_version_geometry",
     "file_sha256",
-    "git_blob_sha1",
     "package_source_sha256",
     "sidecar_manifest_path",
 ]

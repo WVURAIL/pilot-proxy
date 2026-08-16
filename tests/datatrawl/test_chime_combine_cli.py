@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 h5py = pytest.importorskip("h5py")
-pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.instruments import load_instrument  # noqa: E402
 from datatrawl.interfaces import RunContext  # noqa: E402

@@ -11,6 +11,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pilot_proxy.detector_constants import (
+    DEFAULT_DETECTOR_WINDOW_SAMPLES,
+    LOCKED_INPUT_FORMAT as DEFAULT_ADAPTER_OUTPUT_FORMAT,
+    LOCKED_SAMPLE_BITS_PER_COMPONENT as DEFAULT_BITS_PER_COMPONENT,
+)
 from pilot_proxy.detector_geometry import (
     SPECTRAL_SENSE_NORMAL,
     normalize_spectral_sense,
@@ -40,13 +45,10 @@ from .schemas import (
 
 DEFAULT_FRAME_SIZE_SAMPLES = 16_384
 DEFAULT_NUM_INPUT_STREAMS = 1
-DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
-DEFAULT_BITS_PER_COMPONENT = 4
 DEFAULT_CLIP_SIGMA = 3.0
 DEFAULT_CHANNELIZER_TYPE = "pfb"
 DEFAULT_CHANNELIZER_RESPONSE = "sinc_hamming"
 DEFAULT_NATIVE_CHANNELIZED_SAMPLE_FORMAT = "complex64"
-DEFAULT_ADAPTER_OUTPUT_FORMAT = "complex_int4_packed_int8"
 DEFAULT_QUANTIZATION_SCALE_MODE = "global"
 REFERENCE_PROFILE_ID = "reference_800mhz_pfb"
 PROFILE_HASH_HEX_CHARS = 64

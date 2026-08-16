@@ -12,10 +12,21 @@ from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_TOKEN,
     CHIME_STATS_SCHEMA_TOKEN,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    build_chime_detector_contract,
+    build_detector_contract,
     normalized_positive_excess_policy,
 )
 from pilot_proxy.chime.validate_products import validate_products
+from pilot_proxy.chime.products import (
+    CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
+    SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
+)
+
+
+def _replace_npz_array(path, name, values) -> None:
+    with np.load(path) as product:
+        arrays = {key: product[key] for key in product.files}
+    arrays[name] = np.asarray(values)
+    np.savez_compressed(path, **arrays)
 
 
 def _write_products(
@@ -118,7 +129,7 @@ def _write_products(
         mask_fraction_total=mask_fraction_total,
     )
     mask_policy = dict(normalized_positive_excess_policy())
-    detector_contract = build_chime_detector_contract(
+    detector_contract = build_detector_contract(
         detector_window_samples=128,
         skipped_guard_bins=1,
         reference_offset_bins=2,
@@ -134,7 +145,46 @@ def _write_products(
     run_config["mask_policy"] = mask_policy
     (run_dir / "run_config.json").write_text(json.dumps(run_config), encoding="utf-8")
     (run_dir / "input_manifest.json").write_text(
-        json.dumps({"schema_version": "pilotproxy_chime_input_manifest_v1"}),
+        json.dumps(
+            {
+                "schema_version": CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
+                "input_dir": "/synthetic/input",
+                "absolute_time_used": False,
+                "datasets": [
+                    {
+                        "physical_channel": int(channel),
+                        "pilot_frequency_hz": float(pilot_frequency_hz[index]),
+                        "coarse_channel_center_hz": float(
+                            chime_frequency_hz[index]
+                        ),
+                        "freq_id": None,
+                        "dataset_path": "baseband",
+                        "time_axis": 0,
+                        "stream_axis": 1,
+                        "complex_axis": None,
+                        "sample_encoding": "packed_twos_complement_complex_int4",
+                        "num_input_streams": 1,
+                        "total_time_samples": 3,
+                        "segments": [
+                            {
+                                "path": f"/synthetic/channel-{int(channel)}.h5",
+                                "num_time_samples": 3,
+                                "shape": [3, 1],
+                                "dtype": "int8",
+                                "freq_id": None,
+                                "coarse_channel_center_hz": float(
+                                    chime_frequency_hz[index]
+                                ),
+                                "sample_encoding": (
+                                    "packed_twos_complement_complex_int4"
+                                ),
+                            }
+                        ],
+                    }
+                    for index, channel in enumerate(physical_channel)
+                ],
+            }
+        ),
         encoding="utf-8",
     )
     (run_dir / "stats.json").write_text(
@@ -153,6 +203,14 @@ def _write_products(
     )
 
 
+def _mutate_detector_contract(run_dir, mutate) -> None:
+    for filename in ("run_config.json", "stats.json"):
+        path = run_dir / filename
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        mutate(payload["detector_contract"])
+        path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def test_validate_products_accepts_consistent_run(tmp_path) -> None:
     run_dir = tmp_path / "run"
     report_path = tmp_path / "product_validation.json"
@@ -165,6 +223,178 @@ def test_validate_products_accepts_consistent_run(tmp_path) -> None:
     assert report_path.exists()
     saved = json.loads(report_path.read_text(encoding="utf-8"))
     assert saved["valid"] is True
+
+
+def test_validate_products_accepts_current_scan_manifest(tmp_path) -> None:
+    run_dir = tmp_path / "scan"
+    _write_products(run_dir)
+    (run_dir / "input_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
+                "source": "chime-scan",
+                "physical_channels": [14, 15],
+                "input_files": ["cadc:one", "cadc:two"],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is True, report["errors"]
+
+
+def test_validate_products_rejects_manifest_shape_for_wrong_schema(tmp_path) -> None:
+    run_dir = tmp_path / "wrong_shape"
+    _write_products(run_dir)
+    (run_dir / "input_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
+                "source": "chime-scan",
+                "physical_channels": [14, 15],
+                "input_files": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "input_manifest.fields" in checks
+
+
+def test_validate_products_rejects_manifest_channel_mismatch(tmp_path) -> None:
+    run_dir = tmp_path / "wrong_channels"
+    _write_products(run_dir)
+    path = run_dir / "input_manifest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["datasets"][0]["physical_channel"] = 99
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "input_manifest.physical_channels" in checks
+
+
+@pytest.mark.parametrize(
+    ("field", "expected_check"),
+    [
+        ("pilot_frequency_hz", "input_manifest.pilot_frequency_hz"),
+        (
+            "coarse_channel_center_hz",
+            "input_manifest.coarse_channel_center_hz",
+        ),
+    ],
+)
+def test_validate_products_rejects_manifest_frequency_mismatch(
+    tmp_path,
+    field,
+    expected_check,
+) -> None:
+    run_dir = tmp_path / "wrong_frequency"
+    _write_products(run_dir)
+    path = run_dir / "input_manifest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["datasets"][0][field] += 1.0
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    assert expected_check in {error["check"] for error in report["errors"]}
+
+
+def test_validate_products_matches_unknown_manifest_center_to_detector_nan(
+    tmp_path,
+) -> None:
+    run_dir = tmp_path / "unknown_center"
+    _write_products(run_dir)
+    manifest_path = run_dir / "input_manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["datasets"][0]["coarse_channel_center_hz"] = None
+    manifest["datasets"][0]["segments"][0]["coarse_channel_center_hz"] = None
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    centers = np.asarray([np.nan, 476_171_875.0])
+    _replace_npz_array(
+        run_dir / "chime_detector_outputs.npz",
+        "chime_frequency_hz",
+        centers,
+    )
+    _replace_npz_array(
+        run_dir / "chime_spectrogram_cache.npz",
+        "chime_frequency_hz",
+        centers,
+    )
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is True, report["errors"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "expected_check"),
+    [
+        (
+            lambda row: row.__setitem__("pilot_frequency_hz", "not-a-frequency"),
+            "input_manifest.datasets[0].pilot_frequency_hz",
+        ),
+        (
+            lambda row: row.__setitem__("dataset_path", 17),
+            "input_manifest.datasets[0].dataset_path",
+        ),
+        (
+            lambda row: row.__setitem__("time_axis", True),
+            "input_manifest.datasets[0].time_axis",
+        ),
+        (
+            lambda row: row.__setitem__("num_input_streams", -5),
+            "input_manifest.datasets[0].num_input_streams",
+        ),
+        (
+            lambda row: row.__setitem__("sample_encoding", []),
+            "input_manifest.datasets[0].sample_encoding",
+        ),
+        (
+            lambda row: row.__setitem__("total_time_samples", 4),
+            "input_manifest.datasets[0].total_time_samples",
+        ),
+        (
+            lambda row: row.__setitem__("segments", [{"anything": "goes"}]),
+            "input_manifest.datasets[0].segments[0].fields",
+        ),
+    ],
+    ids=(
+        "pilot-frequency-type",
+        "dataset-path-type",
+        "boolean-axis",
+        "negative-stream-count",
+        "malformed-sample-encoding",
+        "segment-length-mismatch",
+        "malformed-segment",
+    ),
+)
+def test_validate_products_rejects_malformed_chime_manifest_rows(
+    tmp_path,
+    mutate,
+    expected_check,
+) -> None:
+    run_dir = tmp_path / "malformed_manifest"
+    _write_products(run_dir)
+    path = run_dir / "input_manifest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    mutate(payload["datasets"][0])
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    assert expected_check in {error["check"] for error in report["errors"]}
 
 
 def test_validate_products_reports_cross_product_mismatch(tmp_path) -> None:
@@ -245,3 +475,48 @@ def test_validate_products_normalized_rule_requires_norms(tmp_path) -> None:
     assert report["valid"] is False
     checks = {error["check"] for error in report["errors"]}
     assert "detector.mask.norms_missing" in checks
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message_fragment"),
+    [
+        (lambda contract: contract.pop("threshold_mode"), "missing required fields"),
+        (
+            lambda contract: contract.__setitem__("power_accumulator", "float32"),
+            "power_accumulator",
+        ),
+        (
+            lambda contract: contract.__setitem__("historical_alias", True),
+            "unknown fields",
+        ),
+        (
+            lambda contract: contract.__setitem__("skipped_guard_bins", "one"),
+            "must be an integer",
+        ),
+    ],
+    ids=(
+        "missing-threshold-mode",
+        "bad-accumulator",
+        "unknown-field",
+        "nonnumeric-guard",
+    ),
+)
+def test_validate_products_uses_canonical_detector_contract_validation(
+    tmp_path,
+    mutate,
+    message_fragment,
+) -> None:
+    run_dir = tmp_path / "run"
+    _write_products(run_dir)
+    _mutate_detector_contract(run_dir, mutate)
+
+    report = validate_products(run_dir=run_dir)
+
+    assert report["valid"] is False
+    contract_errors = [
+        error
+        for error in report["errors"]
+        if error["check"].endswith("detector_contract.current_schema")
+    ]
+    assert contract_errors
+    assert any(message_fragment in error["message"] for error in contract_errors)

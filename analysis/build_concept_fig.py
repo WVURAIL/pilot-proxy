@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Pedagogical schematic: why deep one-sided cuts concentrate contamination
 and why the core (mean) anchor is the efficient operating point."""
-import sys
-from pathlib import Path
 
 import numpy as np
 from scipy.stats import norm

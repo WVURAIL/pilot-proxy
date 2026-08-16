@@ -3,6 +3,9 @@ name: tests
 on:
   push:
   pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
 
 jobs:
   smoke:
@@ -39,6 +42,27 @@ jobs:
       - run: make release-check
 
   datatrawl-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: WVURAIL/datatrawl
+          # Required integration tests use a reviewed upstream revision. The
+          # scheduled canary below tests datatrawl's moving head separately.
+          ref: 49dddb4c6d039da827e990005e653a5d716451d2
+          path: datatrawl
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install -U pip setuptools wheel
+      - run: python -m pip install -e "./datatrawl[cadc,survey]"
+      - run: python -m pip install -e ".[chime,plot,test]"
+      - run: make integration-check
+
+  datatrawl-head-canary:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -17,8 +17,6 @@ Outputs: deliverables/threearm_fulldepth.csv, fig_threearm_veto.png/pdf,
 printed ladder (analytic ceiling -> measured ceiling -> +floor -> +veto).
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

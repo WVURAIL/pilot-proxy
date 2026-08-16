@@ -66,10 +66,17 @@ pre-import sweep set (`run_pd_curves_cpu_1000.tar.gz`), GPU parity zips,
 `all_spectra.npz` and other npz dumps -- stays in the archive channel.
 Two manifests keep their identity under version control even though their
 bytes are not: `manuscript/provenance/hashes.sha256` fingerprints the
-paper's physical inputs (the original capture and the shipped weight
-bank), and `manuscript/provenance/provenance_blobs.sha256` fingerprints
+paper's physical inputs (the original capture and the explicitly named
+historical half-band weight bank), and
+`manuscript/provenance/provenance_blobs.sha256` fingerprints
 every excluded blob. If a hash and an archived blob disagree, trust
 neither and regenerate.
+
+The historical bank is retained under `../weights/legacy_halfband/`; it is the
+bank used by the frozen 2026-07 sweep, not the active DC-centered CHIME bank.
+From the repository root, `sha256sum --check
+paper/manuscript/provenance/hashes.sha256 --ignore-missing` verifies every
+manifest entry whose bytes are present.
 
 `manuscript/provenance/*.md` are working memos (decisions, status
 snapshots, adversarial referee-triage rounds). They document how results

@@ -24,10 +24,20 @@ def test_missing_coarse_frequency_is_not_replaced_by_pilot_frequency(tmp_path) -
         estimated_data_shelf_snr_db=np.asarray([[np.nan]]),
         mask=np.asarray([[0]], dtype=np.uint8),
         valid=np.asarray([[1]], dtype=np.uint8),
+        target_norm_sq=np.asarray([1], dtype=np.int64),
+        reference_norm_sum_sq=np.asarray([2], dtype=np.int64),
+        null_power_ratio=np.asarray([1.0]),
+        normalized_pilot_excess=np.asarray([[0.0]]),
     )
     with np.load(outputs) as product:
         assert np.isnan(product["chime_frequency_hz"][0])
         assert product["pilot_frequency_hz"][0] == pilot[0]
+        assert {
+            "target_norm_sq",
+            "reference_norm_sum_sq",
+            "null_power_ratio",
+            "normalized_pilot_excess",
+        }.issubset(product.files)
 
 
 def test_spectrogram_preserves_supplied_coarse_frequency(tmp_path) -> None:
@@ -42,6 +52,7 @@ def test_spectrogram_preserves_supplied_coarse_frequency(tmp_path) -> None:
         chime_frequency_hz=centre,
         frame_index=np.asarray([0]),
         frame_size_samples=16384,
+        sample_rate_hz=390_625.0,
         valid=np.asarray([[1]], dtype=np.uint8),
     )
     with np.load(cache) as product:

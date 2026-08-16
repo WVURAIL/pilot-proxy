@@ -405,6 +405,19 @@ def test_check_profile_loads_nested_receiver_profile(capsys) -> None:
     assert "reference_800mhz_pfb" in out
 
 
+def test_check_profile_rejects_incompatible_stream_map() -> None:
+    with pytest.raises(ValueError, match="receiver_profile_id"):
+        cli.main(
+            [
+                "check-profile",
+                "--receiver-profile",
+                str(CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"),
+                "--stream-map",
+                str(CONFIGS_DIR / "stream_maps" / "chord_dish_pol_example.json"),
+            ]
+        )
+
+
 def test_make_weights_from_reference_profile(tmp_path, capsys) -> None:
     output = tmp_path / "weights.bin"
 

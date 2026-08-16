@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 
 from pilot_proxy.chime.products import (
+    SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
     ensure_run_dirs,
     write_detector_outputs,
     write_integrated_spectra,
@@ -34,6 +35,7 @@ from pilot_proxy.detector_contract import (
     CHIME_RUN_CONFIG_SCHEMA_TOKEN,
     CHIME_STATS_SCHEMA_TOKEN,
     normalized_positive_excess_policy,
+    validate_detector_contract,
 )
 from pilot_proxy.provenance import (
     detector_version_build_id,
@@ -205,10 +207,9 @@ def report_products(product_paths: Sequence[str | Path]) -> str:
 
 
 def _detector_contract_from(
-    products: Sequence[Mapping[str, Any]], nfft: int
+    products: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Return the required analyzer-stored detector contract."""
-    del nfft  # retained in the call signature until the combine refactor lands
     try:
         contract = json.loads(
             str(np.asarray(products[0]["detector_contract_json"]).reshape(()).item())
@@ -221,6 +222,13 @@ def _detector_contract_from(
         raise ValueError(
             "combine: detector_contract_json must encode a non-empty object"
         )
+    try:
+        validate_detector_contract(contract)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "combine: detector_contract_json does not satisfy the current "
+            f"detector contract: {exc}"
+        ) from exc
     return contract
 
 
@@ -347,26 +355,46 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
 
 
 def _common_sample_rate_hz(products: Sequence[Mapping[str, Any]]) -> float:
-    """Return a shared sample rate, refusing mixed or partially missing timing."""
-    per_product: list[np.ndarray] = []
+    """Return the common rate from explicit or canonical timing metadata."""
+    per_product: list[float] = []
     for z in products:
+        recorded = np.asarray(z.get("sample_rate_hz", []), dtype=np.float64).reshape(-1)
         values = np.asarray(z.get("unit_delta_time", []), dtype=np.float64).reshape(-1)
         finite = values[np.isfinite(values) & (values > 0.0)]
-        per_product.append(finite)
-    if not any(values.size for values in per_product):
-        return float("nan")
-    if not all(values.size for values in per_product):
-        raise ValueError(
-            "combine: timing metadata is present for only some per-pilot products"
+        recorded_rate = (
+            float(recorded[0])
+            if recorded.size == 1 and np.isfinite(recorded[0]) and recorded[0] > 0.0
+            else None
         )
-    reference = float(per_product[0][0])
-    for values in per_product:
-        if not np.allclose(values, reference, rtol=1e-12, atol=0.0):
+        timing_rate = float(1.0 / finite[0]) if finite.size else None
+        if finite.size and not np.allclose(finite, finite[0], rtol=1e-12, atol=0.0):
             raise ValueError(
-                "combine: per-pilot products disagree on unit_delta_time; refusing "
-                "to construct a shared spectral frequency axis"
+                "combine: one per-pilot product contains inconsistent "
+                "unit_delta_time values"
             )
-    return float(1.0 / reference)
+        if (
+            recorded_rate is not None
+            and timing_rate is not None
+            and not np.isclose(recorded_rate, timing_rate, rtol=1e-12, atol=0.0)
+        ):
+            raise ValueError(
+                "combine: sample_rate_hz disagrees with unit_delta_time in a "
+                "per-pilot product"
+            )
+        resolved = recorded_rate if recorded_rate is not None else timing_rate
+        if resolved is None:
+            raise ValueError(
+                "combine: a current per-pilot product has neither a positive "
+                "sample_rate_hz nor usable unit_delta_time metadata"
+            )
+        per_product.append(float(resolved))
+    reference = per_product[0]
+    if not np.allclose(per_product, reference, rtol=1e-12, atol=0.0):
+        raise ValueError(
+            "combine: per-pilot products disagree on sample_rate_hz/"
+            "unit_delta_time; refusing to construct shared time and spectral axes"
+        )
+    return float(reference)
 
 
 def _json_scalar(z: Mapping[str, Any], key: str) -> dict[str, Any]:
@@ -493,6 +521,10 @@ def combine_detector_products(
          "dtv_bandwidth_hz", "pilot_capture_efficiency"),
         "detector geometry",
     )
+    # Validate the shared serialized contract before producing any output. The
+    # invariant check above proves every selected product carries the same JSON
+    # scalar, so validating the decoded document once covers the entire stack.
+    contract = _detector_contract_from(products)
     products_full = products
     products, frame_index, align_info = _align_frames(products_full)
     nfft = int(np.asarray(products[0]["nfft"]))
@@ -521,9 +553,8 @@ def combine_detector_products(
     normalized_coarse_power_ratio_db = _stack_cols(products, "normalized_coarse_power_ratio_db", np.float64)
     pilot_excess_db = _stack_cols(products, "pilot_excess_db", np.float64)
     estimated_data_shelf_snr_db = _stack_cols(products, "estimated_data_shelf_snr_db", np.float64)
-    # per-channel products renamed `mask` -> `reject_mask` at schema v2 (1 = discard,
-    # positive excess); the canonical combined outputs keep the `mask` field name, so
-    # only this read changes; write_* below stays byte-identical.
+    # Per-pilot products use the unambiguous reject_mask name (1 = discard,
+    # positive excess); canonical combined outputs retain their mask field.
     mask = _stack_cols(products, "reject_mask", np.uint8)
     valid = _stack_cols(products, "valid", np.uint8)
     baseband_power_linear = _stack_cols(products, "baseband_power_linear", np.float64)
@@ -580,6 +611,7 @@ def combine_detector_products(
         chime_frequency_hz=chime_frequency_hz,
         frame_index=frame_index,
         frame_size_samples=nfft,
+        sample_rate_hz=sample_rate_hz,
         valid=valid,
     )
     outputs["integrated_spectra"] = write_integrated_spectra(
@@ -598,6 +630,7 @@ def combine_detector_products(
         run_dir,
         frame_index=frame_index,
         frame_size_samples=nfft,
+        sample_rate_hz=sample_rate_hz,
         chunk_seconds=float(chunk_seconds),
         coarse_power_ratio=coarse_power_ratio,
         normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,
@@ -619,7 +652,6 @@ def combine_detector_products(
     # These carry the schema-gated fields (detector_contract, mask_policy, geometry)
     # honestly labeled as chime-scan provenance rather than a byte-faithful imitation of
     # a single run_chime_analysis run.
-    contract = _detector_contract_from(products, nfft)
     reference_placement = _combined_reference_placement_summary(products)
     if reference_placement is not None:
         contract = dict(contract)
@@ -683,7 +715,7 @@ def combine_detector_products(
         **common,
     })
     _write_json(run_dir / "input_manifest.json", {
-        "schema_version": "fstat_chime_scan_input_manifest_v1",
+        "schema_version": SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
         "source": "chime-scan",
         "physical_channels": [int(v) for v in physical_channel],
         "input_files": sorted({

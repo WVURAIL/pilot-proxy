@@ -8,8 +8,6 @@ low-tail, core, and high-tail frames -- and test event-level coincidence and
 diurnal structure of the two tails.
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

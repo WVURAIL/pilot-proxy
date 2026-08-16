@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pilot-proxy"
-version = "1.0.0"
+dynamic = ["version"]
 description = "PilotProxy pilot-informed CUDA local-reference power-ratio detector with GNU Radio ATSC 1.0 testbench"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -32,7 +32,8 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "h5py",
-  "pytest",
+  "pytest>=8",
+  "ruff>=0.9",
 ]
 cuda = [
   "cupy-cuda12x",
@@ -69,6 +70,9 @@ pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader
 [tool.setuptools]
 package-dir = {"" = "src"}
 
+[tool.setuptools.dynamic]
+version = {attr = "pilot_proxy._version.__version__"}
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["pilot_proxy*"]
@@ -87,3 +91,11 @@ pythonpath = ["src"]
 markers = [
   "cuda: requires CUDA runtime/GPU",
 ]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with correctness-oriented checks so legacy analysis scripts can be
+# cleaned incrementally without making style changes a release blocker.
+select = ["F"]

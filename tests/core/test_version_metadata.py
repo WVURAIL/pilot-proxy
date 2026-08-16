@@ -18,12 +18,18 @@ def _match(path: Path, pattern: str) -> str:
 
 def test_version_metadata_is_consistent():
     package_version = pilot_proxy.__version__
-    pyproject_version = _match(
-        ROOT / "pyproject.toml",
-        r'^version\s*=\s*"([^"]+)"$',
+    source_version = _match(
+        ROOT / "src" / "pilot_proxy" / "_version.py",
+        r'^__version__\s*=\s*"([^"]+)"$',
     )
     citation_version = _match(
         ROOT / "CITATION.cff",
         r'^version:\s*"([^"]+)"$',
     )
-    assert package_version == pyproject_version == citation_version
+    assert package_version == source_version == citation_version
+
+
+def test_build_metadata_reads_version_from_package():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert 'dynamic = ["version"]' in pyproject
+    assert 'version = {attr = "pilot_proxy._version.__version__"}' in pyproject

@@ -65,6 +65,7 @@ DEBUG_BUILD   := $(NVCC_BASE) $(ARCH_FLAGS) $(DEBUG_FLAGS) $(WARN_FLAGS)
 # Files
 # ------------------------------------------------------------------------------
 override TARGET   := libfstatistic.so
+override DEBUG_TARGET := libfstatistic_debug.so
 SOURCES           := f_statistic.cu
 HEADERS           := f_statistic.h config.h
 REF_TEST          := test_fstat_reference
@@ -80,7 +81,7 @@ CUDA_TEST_HEADERS := f_statistic.h f_statistic_reference.h config.h
 # ------------------------------------------------------------------------------
 # Goals that compile device code need a concrete SM; everything else (clean,
 # test_ref, test_c_header, help, ...) must keep working on GPU-less hosts.
-SM_REQUIRED_GOALS := all debug test test_cuda test_cuda_grid_stride $(TARGET) $(CUDA_TEST)
+SM_REQUIRED_GOALS := all debug test test_cuda test_cuda_grid_stride $(TARGET) $(DEBUG_TARGET) $(CUDA_TEST)
 ifeq ($(strip $(SM)),)
 ifneq ($(filter $(SM_REQUIRED_GOALS),$(if $(MAKECMDGOALS),$(MAKECMDGOALS),all)),)
 $(error no GPU detected (nvidia-smi absent or predates the compute_cap query); pass SM=<arch> explicitly, e.g. make SM=80 for A100)
@@ -100,12 +101,18 @@ endif
 
 # The arch and CONFIG_DEFS live only in recipe flags, invisible to make's
 # timestamp check, so changing them used to reuse stale objects silently.
-# Encode them in a stamp filename: switching any knob invalidates the old
-# stamp and forces a rebuild; rebuilds with unchanged flags stay incremental.
-CONFIG_STAMP := .config_sm$(SM)_dp4a$(DP4A)_k$(DETECTOR_WINDOW_SAMPLES)_bt$(BLOCK_THREADS)_gmb$(GRID_MAX_BLOCKS)_cwl$(CONSTANT_WEIGHT_LANES)_swl$(SHARED_WEIGHT_LANES).stamp
+# Encode them and the build mode in stamp filenames: switching any knob
+# invalidates the relevant output; release and debug builds remain independent.
+CONFIG_KEY := sm$(SM)_dp4a$(DP4A)_k$(DETECTOR_WINDOW_SAMPLES)_bt$(BLOCK_THREADS)_gmb$(GRID_MAX_BLOCKS)_cwl$(CONSTANT_WEIGHT_LANES)_swl$(SHARED_WEIGHT_LANES)
+RELEASE_CONFIG_STAMP := .config_release_$(CONFIG_KEY).stamp
+DEBUG_CONFIG_STAMP := .config_debug_$(CONFIG_KEY).stamp
 
-$(CONFIG_STAMP):
-	@rm -f .config_*.stamp
+$(RELEASE_CONFIG_STAMP):
+	@rm -f .config_release_*.stamp
+	@touch $@
+
+$(DEBUG_CONFIG_STAMP):
+	@rm -f .config_debug_*.stamp
 	@touch $@
 
 # ------------------------------------------------------------------------------
@@ -115,19 +122,21 @@ $(CONFIG_STAMP):
 
 all: $(TARGET)
 
-$(TARGET): $(SOURCES) $(HEADERS) $(CONFIG_STAMP)
+$(TARGET): $(SOURCES) $(HEADERS) $(RELEASE_CONFIG_STAMP)
 	$(NVCC) $(RELEASE_FLAGS) -o $@ $(SOURCES)
 	@echo "Built $(TARGET) for SM $(SM)"
 
-debug: $(SOURCES) $(HEADERS)
-	$(NVCC) $(DEBUG_BUILD) -o $(TARGET) $(SOURCES)
-	@echo "Built $(TARGET) (DEBUG) for SM $(SM)"
+debug: $(DEBUG_TARGET)
 
-$(REF_TEST): $(REF_TEST_SOURCES) $(REF_TEST_HEADERS) $(CONFIG_STAMP)
+$(DEBUG_TARGET): $(SOURCES) $(HEADERS) $(DEBUG_CONFIG_STAMP)
+	$(NVCC) $(DEBUG_BUILD) -o $@ $(SOURCES)
+	@echo "Built $(DEBUG_TARGET) for SM $(SM)"
+
+$(REF_TEST): $(REF_TEST_SOURCES) $(REF_TEST_HEADERS) $(RELEASE_CONFIG_STAMP)
 	$(CXX) -std=c++14 -O2 -Wall $(CONFIG_DEFS) -I. -o $@ $(REF_TEST_SOURCES)
 	@echo "Built $(REF_TEST)"
 
-$(C_HEADER_TEST_OBJ): tests/test_c_header.c f_statistic.h config.h $(CONFIG_STAMP)
+$(C_HEADER_TEST_OBJ): tests/test_c_header.c f_statistic.h config.h $(RELEASE_CONFIG_STAMP)
 	$(CC) -std=c11 -Wall $(CONFIG_DEFS) -I. -c tests/test_c_header.c -o $@
 	@echo "Compiled C header smoke test"
 
@@ -136,7 +145,7 @@ test_c_header: $(C_HEADER_TEST_OBJ)
 test_ref: $(REF_TEST)
 	./$(REF_TEST)
 
-$(CUDA_TEST): $(TARGET) $(CUDA_TEST_SOURCES) $(CUDA_TEST_HEADERS) $(CONFIG_STAMP)
+$(CUDA_TEST): $(TARGET) $(CUDA_TEST_SOURCES) $(CUDA_TEST_HEADERS) $(RELEASE_CONFIG_STAMP)
 	$(NVCC) -std=c++14 -O2 -I. $(ARCH_FLAGS) $(CONFIG_DEFS) $(CUDA_TEST_SOURCES) \
 	    -L. -lfstatistic -Xlinker -rpath -Xlinker . -o $@
 	@echo "Built $(CUDA_TEST)"
@@ -159,7 +168,7 @@ test_cuda_grid_stride:
 test: test_c_header test_ref test_cuda
 
 clean:
-	rm -f $(TARGET) $(REF_TEST) $(CUDA_TEST) $(C_HEADER_TEST_OBJ) .config_*.stamp
+	rm -f $(TARGET) $(DEBUG_TARGET) $(REF_TEST) $(CUDA_TEST) $(C_HEADER_TEST_OBJ) .config_*.stamp
 	@echo "Cleaned build artifacts"
 
 info:
@@ -170,6 +179,7 @@ info:
 	@echo "C compiler:   $(CC)"
 	@echo "C++ compiler: $(CXX)"
 	@echo "Target:       $(TARGET)"
+	@echo "Debug target: $(DEBUG_TARGET)"
 	@echo "SM Version:   $(if $(SM),$(SM),(not detected))"
 	@echo "DP4A:         $(DP4A)"
 	@echo "Window samples: $(DETECTOR_WINDOW_SAMPLES)"
@@ -190,7 +200,7 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  all     Build release library (default)"
-	@echo "  debug   Build with debug symbols"
+	@echo "  debug   Build libfstatistic_debug.so with debug symbols"
 	@echo "  test    Build and run C header, CPU reference, and CUDA regression tests"
 	@echo "  test_c_header"
 	@echo "          Compile public C header smoke test"

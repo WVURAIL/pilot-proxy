@@ -43,6 +43,7 @@ from pilot_proxy.integration.weight_generation import (
     generate_weight_table_from_receiver_profile,
     target_layout,
 )
+from pilot_proxy.provenance import file_sha256
 from pilot_proxy.runtime_bundle import (
     export_runtime_weight_bundle,
     validate_runtime_weight_bundle,
@@ -78,6 +79,23 @@ EXPECTED_CHORD_CHANNEL_IDS = [
     2746, 2777, 2807, 2838, 2869, 2900, 2930, 2961, 2992, 3022, 3053,
     3084,
 ]
+
+
+def _rewrite_bundle_json_and_refresh_checksum(
+    outputs: dict[str, Path], key: str, payload: dict
+) -> None:
+    path = outputs[key]
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    sums_path = outputs["sha256sums"]
+    replacement = f"{file_sha256(path)}  {path.name}"
+    sums_path.write_text(
+        "\n".join(
+            replacement if line.endswith(f"  {path.name}") else line
+            for line in sums_path.read_text(encoding="utf-8").splitlines()
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 def _expected_channel_and_offset(physical_channel: int) -> tuple[int, Fraction]:
@@ -387,3 +405,94 @@ def test_runtime_bundle_validator_rejects_alias_mismatch(tmp_path) -> None:
     assert not report["valid"]
     checks = {error["check"] for error in report["errors"]}
     assert "pilot_profiles.chord_channel_id" in checks
+
+
+def test_runtime_bundle_validator_binds_chord_ids_to_coarse_channel(
+    tmp_path,
+) -> None:
+    outputs = export_runtime_weight_bundle(
+        receiver_profile_path=CHORD_PROFILE,
+        detector_core_profile_path=CORE_PROFILE,
+        physical_channels=[14],
+        weight_coordinate_system="post_spectral_sense_normalization",
+        output_dir=tmp_path / "bundle",
+    )
+    payload = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    payload["profiles"][0]["receiver_channel_id"] = 999
+    payload["profiles"][0]["chord_channel_id"] = 999
+    _rewrite_bundle_json_and_refresh_checksum(outputs, "pilot_profiles", payload)
+
+    report = validate_runtime_weight_bundle(bundle_dir=tmp_path / "bundle")
+
+    assert not report["valid"]
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "pilot_profiles.chord_channel_binding" in checks
+
+
+def test_runtime_bundle_validator_requires_consistent_channel_namespace(
+    tmp_path,
+) -> None:
+    outputs = export_runtime_weight_bundle(
+        receiver_profile_path=CHORD_PROFILE,
+        detector_core_profile_path=CORE_PROFILE,
+        physical_channels=[14],
+        weight_coordinate_system="post_spectral_sense_normalization",
+        output_dir=tmp_path / "bundle",
+    )
+    payload = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    payload["profiles"][0]["receiver_channel_id_namespace"] = "chime_freq_id"
+    _rewrite_bundle_json_and_refresh_checksum(outputs, "pilot_profiles", payload)
+
+    report = validate_runtime_weight_bundle(bundle_dir=tmp_path / "bundle")
+
+    assert not report["valid"]
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "pilot_profiles.receiver_channel_id_namespace" in checks
+
+
+def test_runtime_bundle_validator_requires_null_chime_id_for_chord(
+    tmp_path,
+) -> None:
+    outputs = export_runtime_weight_bundle(
+        receiver_profile_path=CHORD_PROFILE,
+        detector_core_profile_path=CORE_PROFILE,
+        physical_channels=[14],
+        weight_coordinate_system="post_spectral_sense_normalization",
+        output_dir=tmp_path / "bundle",
+    )
+    payload = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    payload["profiles"][0]["chime_channel_id"] = payload["profiles"][0][
+        "coarse_channel_index"
+    ]
+    _rewrite_bundle_json_and_refresh_checksum(outputs, "pilot_profiles", payload)
+
+    report = validate_runtime_weight_bundle(bundle_dir=tmp_path / "bundle")
+
+    assert not report["valid"]
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "pilot_profiles.chord_channel_binding" in checks
+
+
+def test_runtime_bundle_validator_requires_null_ids_for_null_namespace(
+    tmp_path,
+) -> None:
+    outputs = export_runtime_weight_bundle(
+        receiver_profile_path=CHIME_PROFILE,
+        detector_core_profile_path=CORE_PROFILE,
+        physical_channels=[14],
+        weight_coordinate_system="post_spectral_sense_normalization",
+        output_dir=tmp_path / "bundle",
+    )
+    payload = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    payload["profiles"][0]["receiver_channel_id"] = 999
+    _rewrite_bundle_json_and_refresh_checksum(outputs, "pilot_profiles", payload)
+
+    report = validate_runtime_weight_bundle(bundle_dir=tmp_path / "bundle")
+
+    assert not report["valid"]
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "pilot_profiles.receiver_channel_binding" in checks

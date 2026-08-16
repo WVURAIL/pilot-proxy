@@ -13,10 +13,10 @@ import numpy as np
 
 from pilot_proxy.detector_geometry import DetectorFrameLayout
 
+from .detector_core import DetectorCoreProfile
 from .receiver_profile import ChannelSelection, ReceiverProfile
 from .schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
-    COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
     STREAM_MAP_SCHEMA_TOKEN,
     SUPPORTED_QUANTIZATION_SCALE_MODES,
 )
@@ -82,13 +82,25 @@ class InputStreamMap:
                 "stream map entries must match declared num_streams: "
                 f"{len(self.streams)} != {int(self.num_streams)}"
             )
-        if self.streams:
-            max_index = max(int(item["stream_index"]) for item in self.streams)
-            if max_index >= int(self.num_streams):
+        stream_indices: list[int] = []
+        for position, item in enumerate(self.streams):
+            if "stream_index" not in item:
                 raise ValueError(
-                    "stream_index exceeds declared num_streams: "
-                    f"{max_index} >= {int(self.num_streams)}"
+                    f"stream map entry {position} is missing stream_index."
                 )
+            stream_index = item["stream_index"]
+            if isinstance(stream_index, bool) or not isinstance(stream_index, int):
+                raise ValueError(
+                    f"stream map entry {position} stream_index must be an integer."
+                )
+            stream_indices.append(stream_index)
+        expected_indices = list(range(int(self.num_streams)))
+        if sorted(stream_indices) != expected_indices:
+            raise ValueError(
+                "stream_index values must contain every integer in "
+                f"[0, {int(self.num_streams)}) exactly once; got "
+                f"{stream_indices[:10]}{'...' if len(stream_indices) > 10 else ''}."
+            )
         if self.indexing_convention is not None:
             object.__setattr__(
                 self,
@@ -143,6 +155,74 @@ class InputStreamMap:
         if self.polarization_labels is not None:
             out["polarization_labels"] = dict(self.polarization_labels)
         return out
+
+
+def validate_integration_compatibility(
+    *,
+    profile: ReceiverProfile,
+    detector_core: DetectorCoreProfile | None = None,
+    stream_map: InputStreamMap | None = None,
+    require_stream_map: bool = False,
+) -> None:
+    """Validate that receiver, detector-core, and stream-map contracts agree.
+
+    The individual JSON loaders validate each document in isolation. This
+    check covers the cross-document identities and dimensions that cannot be
+    established by any one loader.
+    """
+    if detector_core is not None:
+        if profile.compatible_detector_core_id != detector_core.detector_core_id:
+            raise ValueError(
+                "receiver profile detector core is incompatible: "
+                f"{profile.compatible_detector_core_id!r} != "
+                f"{detector_core.detector_core_id!r}."
+            )
+        if int(profile.detector_window_samples) not in set(
+            detector_core.supported_detector_window_samples
+        ):
+            raise ValueError(
+                "receiver profile detector_window_samples is not supported by "
+                f"the detector core: {profile.detector_window_samples} not in "
+                f"{list(detector_core.supported_detector_window_samples)}."
+            )
+        if profile.adapter_output_format != detector_core.input_format:
+            raise ValueError(
+                "receiver profile adapter output format does not match the "
+                f"detector core input format: {profile.adapter_output_format!r} "
+                f"!= {detector_core.input_format!r}."
+            )
+        if int(profile.bits_per_component) != int(
+            detector_core.sample_bits_per_component
+        ):
+            raise ValueError(
+                "receiver profile component bit depth does not match the "
+                f"detector core: {profile.bits_per_component} != "
+                f"{detector_core.sample_bits_per_component}."
+            )
+
+    if stream_map is None:
+        if require_stream_map and profile.stream_map_required:
+            raise ValueError(
+                f"receiver profile {profile.receiver_profile_id!r} requires a "
+                "stream map."
+            )
+        return
+    if stream_map.receiver_profile_id != profile.receiver_profile_id:
+        raise ValueError(
+            "stream map receiver_profile_id does not match the receiver "
+            f"profile: {stream_map.receiver_profile_id!r} != "
+            f"{profile.receiver_profile_id!r}."
+        )
+    if int(stream_map.num_streams) != int(profile.num_input_streams):
+        raise ValueError(
+            "stream map num_streams does not match the receiver profile: "
+            f"{stream_map.num_streams} != {profile.num_input_streams}."
+        )
+    if stream_map.stream_unit != profile.input_stream_unit:
+        raise ValueError(
+            "stream map stream_unit does not match the receiver profile: "
+            f"{stream_map.stream_unit!r} != {profile.input_stream_unit!r}."
+        )
 
 
 def build_stream_map_for_channel(
@@ -320,4 +400,5 @@ __all__ = [
     "layout_uint64_bound_check",
     "load_stream_map",
     "quantization_metadata",
+    "validate_integration_compatibility",
 ]

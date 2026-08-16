@@ -39,7 +39,10 @@ from pilot_proxy.integration import (
 )
 from pilot_proxy.integration.packing import pack_channelized_streams_for_detector
 from pilot_proxy.integration.receiver_profile import load_receiver_profile
-from pilot_proxy.integration.stream_layout import load_stream_map
+from pilot_proxy.integration.stream_layout import (
+    load_stream_map,
+    validate_integration_compatibility,
+)
 from pilot_proxy.paths import DEFAULT_WEIGHTS_PATH
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -170,15 +173,13 @@ def test_detector_core_profile_json_roundtrip() -> None:
     assert reparsed.to_dict() == profile.to_dict()
 
 
-def test_detector_core_accepts_skipped_guard_bins_as_source_of_truth() -> None:
+def test_detector_core_rejects_skipped_guard_bins_not_compiled_by_kernel() -> None:
     data = load_detector_core_profile(
         CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
     ).to_dict()
     data["kernel_contract"]["skipped_guard_bins"] = 2
-    profile = DetectorCoreProfile.from_dict(data)
-
-    assert profile.skipped_guard_bins == 2
-    assert profile.reference_offset_bins == 3
+    with pytest.raises(ValueError, match="compiled reference offset"):
+        DetectorCoreProfile.from_dict(data)
 
 
 def test_detector_core_rejects_reference_offset_bins_as_input_source() -> None:
@@ -212,6 +213,53 @@ def test_stream_map_json_roundtrip() -> None:
     assert stream_map.streams[-1]["cylinder_index"] == 3
     assert stream_map.streams[-1]["feed_index_within_cylinder"] == 255
     assert stream_map.streams[-1]["polarization_label"] == "Y"
+
+
+@pytest.mark.parametrize(
+    "indices",
+    ([0, 0], [-1, 0], [0, 2], [False, 1]),
+)
+def test_stream_map_rejects_non_contiguous_indices(indices) -> None:
+    with pytest.raises(ValueError, match="stream_index"):
+        InputStreamMap(
+            schema_version="pilotproxy_stream_map_v1",
+            receiver_profile_id="reference_800mhz_pfb",
+            stream_unit="input_stream",
+            num_streams=2,
+            streams=[{"stream_index": value} for value in indices],
+        )
+
+
+def test_integration_compatibility_rejects_wrong_stream_map_profile() -> None:
+    profile = load_receiver_profile(
+        CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
+    )
+    stream_map = load_stream_map(
+        CONFIGS_DIR / "stream_maps" / "chord_dish_pol_example.json"
+    )
+
+    with pytest.raises(ValueError, match="receiver_profile_id"):
+        validate_integration_compatibility(profile=profile, stream_map=stream_map)
+
+
+def test_weight_generation_enforces_receiver_core_compatibility() -> None:
+    profile_data = load_receiver_profile(
+        CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
+    ).to_dict()
+    profile_data["quantization"]["adapter_output_format"] = "complex64"
+    profile = ReceiverProfile.from_dict(profile_data)
+    core = load_detector_core_profile(
+        CONFIGS_DIR
+        / "detector_core"
+        / "pilotproxy_cuda_local_reference_power_ratio.json"
+    )
+
+    with pytest.raises(ValueError, match="adapter output format"):
+        generate_weight_table_from_receiver_profile(
+            profile=profile,
+            core=core,
+            physical_channels=[PHYSICAL_CHANNEL_14],
+        )
 
 
 def test_make_weights_from_receiver_profile_roundtrip(tmp_path) -> None:

@@ -5,6 +5,16 @@ from __future__ import annotations
 
 from typing import Any
 
+from pilot_proxy.detector_constants import (
+    DEFAULT_DETECTOR_WINDOW_SAMPLES as LOCKED_DETECTOR_WINDOW_SAMPLES,
+    LOCKED_NUM_WEIGHT_TERMS,
+    LOCKED_PACKED_COMPLEX_BITS,
+    LOCKED_REFERENCE_OFFSET_BINS,
+    LOCKED_SAMPLE_BITS_PER_COMPONENT,
+    LOCKED_SKIPPED_GUARD_BINS,
+    POWER_SUM_ACCUMULATOR_BITS,
+    SUPPORTED_DETECTOR_WINDOW_SAMPLES as _SUPPORTED_DETECTOR_WINDOW_SAMPLES,
+)
 from pilot_proxy.schema_identity import schema_token
 
 RESULT_SCHEMA_NAME = "pilotproxy_result_schema"
@@ -18,13 +28,9 @@ MASK_CONVENTION_SCHEMA_TOKEN = schema_token(
 )
 MASK_VALUE_EXCLUDED = 1
 MASK_VALUE_INCLUDED = 0
-LOCKED_DETECTOR_WINDOW_SAMPLES = 128
-LOCKED_NUM_WEIGHT_TERMS = 3
-LOCKED_SKIPPED_GUARD_BINS = 1
-LOCKED_REFERENCE_OFFSET_BINS = LOCKED_SKIPPED_GUARD_BINS + 1
-LOCKED_PACKED_COMPLEX_BITS = 8
-LOCKED_SAMPLE_BITS_PER_COMPONENT = 4
-POWER_SUM_ACCUMULATOR_BITS = 64
+SUPPORTED_DETECTOR_WINDOW_SAMPLES = tuple(
+    sorted(_SUPPORTED_DETECTOR_WINDOW_SAMPLES)
+)
 
 COARSE_POWER_RATIO_DEFINITION = (
     "R_coarse = 2 * P_target / (P_ref_lower + P_ref_upper)"
@@ -49,11 +55,11 @@ MASKED_AVERAGE_DEFINITION = (
     "before averaging"
 )
 MASKED_AVERAGE_FORMULA = "sum_b(P_b * (1 - M_b)) / sum_b(1 - M_b)"
-K128_LOCK_REASON = (
+DETECTOR_WINDOW_SUPPORT_REASON = (
     "With signed 4-bit real/imaginary samples and weights, each real/imaginary "
-    "dot-product component grows as 9 + log2(K) bits; K=128 is the largest "
-    "power-of-two detector window that keeps the component accumulator inside "
-    "signed int16."
+    "dot-product component grows as 9 + log2(K) bits. K=64 and K=128 are "
+    "supported; K=128 is the largest supported power-of-two detector window "
+    "that keeps the component accumulator inside signed int16."
 )
 REFERENCE_OFFSET_LOCK_REASON = (
     "skipped_guard_bins=1 leaves one fine DFT bin between the target bin and "
@@ -91,11 +97,26 @@ def fixed_point_contract(
     reference_offset_bins: int = LOCKED_REFERENCE_OFFSET_BINS,
 ) -> dict[str, Any]:
     """Return the fixed-point detector contract for one run's geometry."""
+    window = int(detector_window_samples)
+    if window not in SUPPORTED_DETECTOR_WINDOW_SAMPLES:
+        raise ValueError(
+            "detector_window_samples must be one of "
+            f"{list(SUPPORTED_DETECTOR_WINDOW_SAMPLES)}; got {window}."
+        )
+    offset = int(reference_offset_bins)
+    if offset != LOCKED_REFERENCE_OFFSET_BINS:
+        raise ValueError(
+            "reference_offset_bins must match the compiled detector contract: "
+            f"expected {LOCKED_REFERENCE_OFFSET_BINS}, got {offset}."
+        )
     return {
-        "detector_window_samples": int(detector_window_samples),
+        "detector_window_samples": window,
+        "supported_detector_window_samples": list(
+            SUPPORTED_DETECTOR_WINDOW_SAMPLES
+        ),
         "num_weight_terms": int(LOCKED_NUM_WEIGHT_TERMS),
-        "skipped_guard_bins": int(max(0, int(reference_offset_bins) - 1)),
-        "reference_offset_bins": int(reference_offset_bins),
+        "skipped_guard_bins": int(offset - 1),
+        "reference_offset_bins": offset,
         "locked_skipped_guard_bins": int(LOCKED_SKIPPED_GUARD_BINS),
         "locked_reference_offset_bins": int(LOCKED_REFERENCE_OFFSET_BINS),
         "packed_complex_bits": int(LOCKED_PACKED_COMPLEX_BITS),
@@ -105,7 +126,9 @@ def fixed_point_contract(
         "power_accumulator_bits": int(POWER_SUM_ACCUMULATOR_BITS),
         "host_masking_policy": "normalized_positive_excess_from_uint64_powers",
         "per_frequency_threshold": False,
-        "k128_lock_reason": K128_LOCK_REASON,
+        "detector_window_support_reason": (
+            f"{DETECTOR_WINDOW_SUPPORT_REASON} This run selects K={window}."
+        ),
         "reference_offset_lock_reason": REFERENCE_OFFSET_LOCK_REASON,
     }
 

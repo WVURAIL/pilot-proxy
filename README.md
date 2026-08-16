@@ -6,7 +6,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="license: MIT"></a>
 </p>
 
-`pilot-proxy` evaluates an local-reference power ratio detector for Advanced Television Systems
+`pilot-proxy` evaluates a local-reference power ratio detector for Advanced Television Systems
 Committee (ATSC) 1.0 digital television (DTV) signals. We use the narrow ATSC
 pilot tone as a measurable proxy for the broadband data shelf. This provides a
 narrow-band observable when the shelf is below the instantaneous noise level.
@@ -173,8 +173,13 @@ operating documentation as follows:
   GNU Radio; environment-specific defaults --- override `SM`, `CUDA_PYTHON`,
   `GNURADIO_PYTHON`).
 
-We commit the documentation sources. Generated PDFs, figures, products, and
-CUDA shared libraries are build artifacts and should not be committed.
+We commit documentation sources and the small, explicitly named artifacts
+needed for reproducibility: shipped weight banks and manifests, frozen test
+fixtures, manuscript figures, and dated scientific-provenance snapshots.
+Ordinary run products, rebuilt plots, formal-document PDFs, generated TeX
+facts, and CUDA shared libraries are ignored build artifacts. The active and
+historical weight-bank boundary is documented in `weights/README.md`; the
+manuscript's artifact policy is documented in `paper/README.md`.
 
 Built wheels include the shipped receiver profiles, stream map, weight bank, and
 weight manifest. The CUDA shared library is architecture-specific and is not
@@ -223,7 +228,7 @@ After this translation, the CUDA kernel sees only:
 CHIME run products record the detector contract in
 `run_config.json` and `stats.json` with:
 
-- `schema_version = pilotproxy_chime_detector_contract_v1`;
+- `schema_version = pilotproxy_detector_contract_v1`;
 - K, weight-term, skipped-guard, and reference-offset geometry;
 - packed input and uint64 accumulator metadata;
 - the all-row summation rule;
@@ -450,9 +455,10 @@ pilot-proxy check-layout \
     --stream-map configs/stream_maps/chime_feed_pol_example.json
 ```
 
-This command checks the configuration rather than a CHIME file. Because the CHIME
-profile is marked as requiring data-product verification, compare its frame
-size, stream count, and ordering with the operational data product separately.
+This command checks the configuration rather than a CHIME file. The CHIME
+profile records the baseband-frame verification performed in 2026-07, but its
+planned F-engine frame size, stream count, and ordering must still be compared
+with the operational data product for each run.
 
 The shared library is loaded by PilotProxy and is not executed directly.
 
@@ -571,6 +577,7 @@ Generated PDFs are ignored by git. Build them locally with:
 
 ```bash
 make docs        # latexmk; scratch in docs/auxil/, PDFs in docs/out/
+make docs-specs-check  # validate canonical documentation facts without writing
 ```
 
 The package set tested on Debian/Ubuntu is:

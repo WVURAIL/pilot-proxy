@@ -89,7 +89,7 @@ per-channel measured-line anchors, designated-set widths, and CFAR
 threshold multipliers, with their calibration provenance (epoch lists,
 quantiles, source product hashes); anchors need on-epochs only, while
 multiplier depth follows the verified-null program. The survey's recorded
-null_power_ratio flag is unchanged mid-survey; the deployed-contract change lands at a
+null_power_ratio flag is unchanged mid-survey; any active-decision change lands at a
 survey epoch boundary.
 
 The proposed handoff exploits that asymmetry with a per-node FIFO queue:
@@ -242,7 +242,7 @@ rational half-threshold path remains bound for the recorded coarse flag
 and debug comparison. The target deployed form is a single fused kernel
 --- packed samples, packed weights, and bundle constants in; one mask
 bit per aligned frame out; row sums and exact powers as optional debug
-taps --- per the deployment section of `docs/DESIGN_DECISIONS.md`.
+taps --- per the candidate-decision section of `docs/DESIGN_DECISIONS.md`.
 Kernel core 2.2.0 lands the fused datapath
 (`FStat_Compute_FusedFine_U64`: packed samples and weights in, exact
 fine and coarse power sums out in one launch, row sums global only via

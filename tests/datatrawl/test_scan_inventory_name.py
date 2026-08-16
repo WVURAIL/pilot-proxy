@@ -17,20 +17,14 @@ def test_named_inventory_path_uses_source_root(tmp_path: Path) -> None:
     )
 
 
-def test_named_inventory_path_defaults_to_cwd(tmp_path: Path, monkeypatch) -> None:
-    # Exercise the documented legacy fallback: no source root and no
-    # datatrawl.invpaths resolver installed. Forcing the ImportError branch
-    # keeps this test meaningful on hosts whose datatrawl ships invpaths.
+def test_named_inventory_path_requires_canonical_resolver(monkeypatch) -> None:
     monkeypatch.setitem(sys.modules, "datatrawl.invpaths", None)
-    monkeypatch.chdir(tmp_path)
-    assert _named_inventory_path("chime-ch614-706", None) == (
-        tmp_path / "data" / "chime-ch614-706" / "inventory.jsonl"
-    )
+    with pytest.raises(SystemExit, match="canonical inventory resolver"):
+        _named_inventory_path("chime-ch614-706", None)
 
 
 def test_named_inventory_path_delegates_to_datatrawl_invpaths() -> None:
-    # When datatrawl ships invpaths, it is the single source of truth for
-    # named-inventory locations (canonical root + legacy fallbacks).
+    # datatrawl's resolver is the single source of truth for named inventories.
     invpaths = pytest.importorskip("datatrawl.invpaths")
     expected = Path(invpaths.resolve_inventory("chime-ch614-706"))
     assert _named_inventory_path("chime-ch614-706", None) == expected

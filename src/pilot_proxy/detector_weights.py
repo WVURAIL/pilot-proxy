@@ -19,7 +19,7 @@ from pilot_proxy.detector_contract import (
     input_coordinate_system_for_weight_coordinate,
     normalize_weight_coordinate_system,
 )
-from pilot_proxy.provenance import file_sha256, git_blob_sha1
+from pilot_proxy.provenance import file_sha256
 from pilot_proxy.schema_identity import schema_token
 
 from .atsc_channels import (
@@ -484,32 +484,17 @@ def _validate_manifest_weight_binding(
         raise ValueError("Weight manifest requires an artifacts object.")
 
     expected_sha256 = artifacts.get("weights_sha256")
-    if expected_sha256 is not None:
-        actual_sha256 = file_sha256(path)
-        if actual_sha256 != str(expected_sha256):
-            raise ValueError(
-                "Weight manifest/binary SHA256 mismatch: "
-                f"{actual_sha256!r} != {str(expected_sha256)!r}."
-            )
-        return
-
-    # A manifest without weights_sha256 falls back to its Git blob id, which
-    # still binds the complete file; newly generated banks always emit
-    # weights_sha256.
-    expected_blob = artifacts.get("weights_git_blob_sha1")
-    if expected_blob is not None:
-        actual_blob = git_blob_sha1(path)
-        if actual_blob != str(expected_blob):
-            raise ValueError(
-                "Weight manifest/binary Git-blob mismatch: "
-                f"{actual_blob!r} != {str(expected_blob)!r}."
-            )
-        return
-
-    raise ValueError(
-        "Weight manifest must bind the binary with artifacts.weights_sha256 "
-        "or artifacts.weights_git_blob_sha1."
-    )
+    if expected_sha256 is None:
+        raise ValueError(
+            "Current weight manifests must bind the binary with "
+            "artifacts.weights_sha256."
+        )
+    actual_sha256 = file_sha256(path)
+    if actual_sha256 != str(expected_sha256):
+        raise ValueError(
+            "Weight manifest/binary SHA256 mismatch: "
+            f"{actual_sha256!r} != {str(expected_sha256)!r}."
+        )
 
 
 def _validate_manifest_spacing_schema(manifest: dict[str, object]) -> None:
@@ -524,13 +509,13 @@ def _validate_manifest_spacing_schema(manifest: dict[str, object]) -> None:
     coordinate = manifest.get("weight_coordinate_system")
     if coordinate is None:
         raise ValueError(
-            "Weight manifest schema v2 requires weight_coordinate_system."
+            "Current weight manifest requires weight_coordinate_system."
         )
     coordinate_system = normalize_weight_coordinate_system(coordinate)
     input_coordinate = manifest.get("input_coordinate_system")
     if input_coordinate is None:
         raise ValueError(
-            "Weight manifest schema v2 requires input_coordinate_system."
+            "Current weight manifest requires input_coordinate_system."
         )
     expected_input_coordinate = input_coordinate_system_for_weight_coordinate(
         coordinate_system
@@ -543,7 +528,7 @@ def _validate_manifest_spacing_schema(manifest: dict[str, object]) -> None:
         )
     input_preprocessing = manifest.get("input_preprocessing")
     if not isinstance(input_preprocessing, dict):
-        raise ValueError("Weight manifest schema v2 requires input_preprocessing.")
+        raise ValueError("Current weight manifest requires input_preprocessing.")
     if "time_reverse_detector_windows_before_kernel" not in input_preprocessing:
         raise ValueError(
             "Weight manifest input_preprocessing requires "

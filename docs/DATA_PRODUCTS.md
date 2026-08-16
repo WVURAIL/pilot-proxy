@@ -65,9 +65,16 @@ The `detector_contract` states the coordinate convention through:
 
 ### `input_manifest.json`
 
-This file records the HDF5 inputs. The staged runner includes discovered dataset
-metadata. The archive combine records its `chime-scan` source and the input unit
-keys collected from the per-pilot products.
+This file records the HDF5 inputs using one of two explicit document shapes:
+
+- the staged runner writes `pilotproxy_chime_input_manifest_v1` with
+  `input_dir`, `absolute_time_used`, and discovered `datasets` metadata;
+- the archive combine writes receiver-neutral
+  `pilotproxy_scan_input_manifest_v1` with `source`, `physical_channels`, and
+  the `input_files` unit keys collected from the per-pilot products.
+
+The distinct identities prevent consumers from interpreting one manifest shape
+as the other.
 
 ### `product_validation.json`
 
@@ -109,10 +116,10 @@ The current mask is the norm-corrected positive-excess comparison:
 valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the integer form of `F > null_power_ratio`. Products written before the correction
-declare the legacy `F > 1` rule in `mask_rule` and may omit the four norm-related
-arrays. Therefore readers should check the recorded contract before assuming
-that those arrays exist.
+This is the integer form of `F > null_power_ratio`. The current product
+contract requires the exact powers, all norm-related arrays, schema identity,
+and decision contract. Development snapshots that predate this contract are
+not accepted; regenerate them from authoritative inputs.
 
 For `chime-scan`, `num_frames` is the event/frame intersection retained by the
 combine. The source per-pilot products can contain additional frames that were
@@ -135,7 +142,7 @@ mask used by the plotting functions.
 | `pilot_frequency_hz` | `(num_pilots,)` | `float64` | Hz | ATSC pilot RF frequency |
 | `chime_frequency_hz` | `(num_pilots,)` | `float64` | Hz | CHIME coarse-channel center |
 | `frame_index` | `(num_frames,)` | `int64` | frame | Contiguous positional frame index |
-| `relative_time_s` | `(num_frames,)` | `float64` | s | `frame_index*nfft/390625` |
+| `relative_time_s` | `(num_frames,)` | `float64` | s | `frame_index*nfft/sample_rate_hz` |
 
 `relative_time_s` is accumulated data time. It does not restore gaps between
 separate archive events and should not be interpreted as wall-clock time.
@@ -182,8 +189,8 @@ This distinction is recorded by the per-pilot products and
 
 This file groups the canonical frame arrays into approximately 10 s of
 contiguous data time. The grouping uses `frame_index`, the analysis frame length,
-and a 390,625 Hz channel sample rate; it does not use the per-file absolute-time
-axis.
+and the sample rate recorded by the products; it does not use the per-file
+absolute-time axis.
 
 All arrays below have a leading dimension of `num_chunks`. Arrays that also
 vary by pilot have shape `(num_chunks, num_pilots)`.
@@ -212,8 +219,8 @@ canonical stack:
 | `frame_event_key` | `(num_frames,)` | `str` | Source event identity with the per-channel `freq_id` token removed |
 | `frame_in_unit` | `(num_frames,)` | `int64` | Frame position within the source file |
 
-Legacy products without identity tags fall back to strict positional alignment
-and do not produce this sidecar.
+The event key, per-unit index, and frame-within-unit identity are mandatory.
+Products without those tags are rejected rather than positionally aligned.
 
 ## Tables
 

@@ -317,7 +317,9 @@ def _census_rows(source: Path, radius_miles: float) -> list[dict[str, str]]:
         try:
             distance = float(row["distance_km"])
             bearing = float(row["bearing_deg"])
-            channel = int(row["rf_channel"])
+            # Parsing validates the channel even though the original text is
+            # retained in the exported row.
+            _ = int(row["rf_channel"])
         except (TypeError, ValueError) as exc:
             raise ExportError(
                 f"invalid census numeric value in {source} line {index}"

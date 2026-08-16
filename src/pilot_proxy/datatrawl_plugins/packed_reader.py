@@ -29,6 +29,8 @@ except Exception:  # pragma: no cover - registry shape guard
 
 from datatrawl.plugins.readers import _baseband_format as fmt
 
+from .stream_kinds import STREAM_PACKED_COMPLEX_INT4_BASEBAND
+
 
 def _iter_packed_chunks(path: str, nfft: int) -> Iterator:
     """Yield raw uint8 [nfft, n_feeds] blocks (final partial frame dropped)."""
@@ -49,6 +51,7 @@ class ChimeBasebandPackedReader(Reader):
         status=READY,
         instruments=("chime", "kko", "gbo", "hco"),
         requires=("h5py", "pilot-proxy"),
+        stream_kind=STREAM_PACKED_COMPLEX_INT4_BASEBAND,
         notes="Same on-disk format as 'chime-baseband'; yields uint8 [nfft, n_feeds] "
               "instead of complex64 so the kernel packing keeps the native int4 grid.",
     )

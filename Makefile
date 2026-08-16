@@ -6,7 +6,7 @@ CUDA_LIB := cuda/libfstatistic.so
 CACHED_CUDA_LIB := $(CUDA_CACHE_DIR)/libfstatistic.so
 PYTHON_TEST_ENV := MPLBACKEND=Agg PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PILOT_PROXY_USE_TEX=0 PYTHONPATH=src
 
-.PHONY: build-kernel test-kernel test-python test integration-check generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs
+.PHONY: build-kernel test-kernel test-python test lint integration-check generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs docs-specs-check
 
 build-kernel:
 	$(MAKE) -C cuda
@@ -22,6 +22,9 @@ test-python:
 
 test: test-kernel test-python
 
+lint:
+	$(PYTHON) -m ruff check src scripts tools analysis --select F
+
 integration-check:
 	$(PYTHON) scripts/check_test_environment.py --integration
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
@@ -34,6 +37,9 @@ integration-check:
 docs-specs:
 	$(PYTHON) tools/generate_doc_specs.py
 
+docs-specs-check:
+	$(PYTHON) tools/generate_doc_specs.py --check
+
 docs: docs-specs
 	@command -v latexmk >/dev/null || { \
 	    echo "latexmk not found -- see 'Build documentation' in README.md"; exit 1; }
@@ -45,6 +51,8 @@ docs: docs-specs
 
 release-check:
 	$(PYTHON) scripts/check_test_environment.py
+	$(MAKE) lint
+	$(MAKE) docs-specs-check
 	bash scripts/check_no_legacy_guard_terms.sh
 	$(PYTHON) scripts/check_current_product_vocabulary.py
 	$(PYTHON) scripts/check_current_layout_vocabulary.py
@@ -79,8 +87,8 @@ commit-check:
 	bash scripts/check_repo_clean_for_commit.sh
 
 release-clean:
-	rm -rf .pytest_cache .ruff_cache .idea generated inspection \
-	    src/pilot_proxy.egg-info docs/auxil docs/out
+	rm -rf .pytest_cache .ruff_cache .idea build dist generated inspection \
+	    src/pilot_proxy.egg-info docs/auxil docs/out docs/generated
 	find src tests -type d -name __pycache__ -prune -exec rm -rf {} +
 	$(MAKE) -C cuda clean
 

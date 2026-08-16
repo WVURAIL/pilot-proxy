@@ -11,7 +11,6 @@ the rate and the trials column.
 import csv
 import math
 import sys
-from pathlib import Path
 
 import numpy as np
 
@@ -149,7 +148,6 @@ def bench_mean_excess(s_lin, off_hz):
 
 
 def bench_pd(s_lin, off_hz):
-    from scipy.stats import ncx2, f as fdist
     s_eff = s_lin * np.sinc(off_hz / BIN_HZ) ** 2
     d1, d2 = 2 * R_TRIAL, 4 * R_TRIAL
     lam = d1 * C_ALLOC * s_eff

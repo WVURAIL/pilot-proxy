@@ -11,12 +11,13 @@ analyzer needs only a stub kernel / weights / dummy detector_fn to reach it.
 """
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 pytest.importorskip("h5py")
 
 from datatrawl.instruments import load_instrument
@@ -25,6 +26,10 @@ from datatrawl.interfaces import RunContext
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
 from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
 from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
+from pilot_proxy.detector_contract import (
+    WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+    build_detector_contract,
+)
 from pilot_proxy.product_contract import (
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
@@ -36,6 +41,20 @@ K = 128
 CH14_HZ = 470.3125e6   # -> ATSC channel 14, CHIME freq_id 844
 CH20_HZ = 506.3125e6   # -> a clearly different ATSC channel / freq_id
 FREQ_ID14 = 844        # chime_freq_id_from_hz(CH14_HZ)
+
+
+def _current_detector_contract_json(*, detector_window_samples=K):
+    return json.dumps(
+        build_detector_contract(
+            detector_window_samples=int(detector_window_samples),
+            skipped_guard_bins=1,
+            reference_offset_bins=2,
+            num_weight_terms=3,
+            weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+            time_reverse_detector_windows_before_kernel=True,
+        ),
+        sort_keys=True,
+    )
 
 
 def _stub_kernel(k=K):
@@ -98,6 +117,7 @@ def _write_min_detector_product(
     unit_keys=(),
     event_keys=None,
     contract=None,
+    sample_rate_hz=390_625.0,
 ):
     events = [str(value) for value in (
         event_keys if event_keys is not None
@@ -109,7 +129,7 @@ def _write_min_detector_product(
     detector_contract = (
         str(contract)
         if contract is not None
-        else '{"detector_window_samples":128}'
+        else _current_detector_contract_json()
     )
     shape = (int(n_frames), 1)
     fields = dict(
@@ -152,7 +172,7 @@ def _write_min_detector_product(
         frame_in_unit=np.zeros(int(n_frames), dtype=np.int32),
         unit_keys=np.asarray(events, dtype=str),
         unit_order=np.asarray(events, dtype=str),
-        unit_delta_time=np.full(int(n_frames), 1.0 / 390_625.0),
+        unit_delta_time=np.full(int(n_frames), 1.0 / float(sample_rate_hz)),
         max_chunks_per_file=np.asarray(-1, dtype=np.int64),
         weight_bank_sha256=np.asarray("bank"),
         weight_manifest_sha256=np.asarray("manifest"),
@@ -179,6 +199,29 @@ def test_combine_rejects_mismatched_nfft(tmp_path):
     _write_min_detector_product(b, channel=20, nfft=8192)  # mismatched geometry
     with pytest.raises(ValueError, match="disagree on 'nfft'"):
         combine_detector_products([a, b], tmp_path / "out")
+
+
+def test_combine_propagates_measured_sample_rate_to_time_products(tmp_path):
+    a = tmp_path / "14.npz"
+    b = tmp_path / "20.npz"
+    sample_rate_hz = 1_000.0
+    for path, channel in ((a, 14), (b, 20)):
+        _write_min_detector_product(
+            path,
+            channel=channel,
+            nfft=128,
+            n_frames=2,
+            sample_rate_hz=sample_rate_hz,
+        )
+
+    out = tmp_path / "out"
+    combine_detector_products([a, b], out, chunk_seconds=0.1)
+    with np.load(out / "chime_spectrogram_cache.npz") as cache:
+        np.testing.assert_allclose(cache["relative_time_s"], [0.0, 0.128])
+    with np.load(out / "chime_integrated_spectra.npz") as spectra:
+        assert float(spectra["sample_rate_hz"]) == pytest.approx(sample_rate_hz)
+    with np.load(out / "chime_reductions_10s.npz") as reductions:
+        assert reductions["chunk_index"].tolist() == [0, 1]
 
 
 def test_combine_aligns_shorter_frame_grid_by_event_identity(tmp_path):
@@ -257,12 +300,34 @@ def test_combine_rejects_contract_mismatch(tmp_path):
     b = tmp_path / "20.npz"
     _write_min_detector_product(a, channel=14, nfft=16384, n_frames=2,
                                 event_keys=["baseband_e.h5", "baseband_f.h5"],
-                                contract='{"detector_window_samples": 128}')
+                                contract=_current_detector_contract_json(
+                                    detector_window_samples=128
+                                ))
     _write_min_detector_product(b, channel=20, nfft=16384, n_frames=2,
                                 event_keys=["baseband_e.h5", "baseband_f.h5"],
-                                contract='{"detector_window_samples": 64}')  # differs
+                                contract=_current_detector_contract_json(
+                                    detector_window_samples=64
+                                ))  # differs
     with pytest.raises(ValueError, match="detector_contract_json"):
         combine_detector_products([a, b], tmp_path / "out")
+
+
+def test_combine_rejects_noncurrent_contract_before_writing(tmp_path):
+    product = tmp_path / "14.npz"
+    contract = json.loads(_current_detector_contract_json())
+    contract.pop("threshold_mode")
+    _write_min_detector_product(
+        product,
+        channel=14,
+        nfft=16384,
+        contract=json.dumps(contract, sort_keys=True),
+    )
+    output = tmp_path / "out"
+
+    with pytest.raises(ValueError, match="current detector contract"):
+        combine_detector_products([product], output)
+
+    assert not output.exists()
 
 
 # #2: the FIRST file must match the requested freq_id rather than only later files.

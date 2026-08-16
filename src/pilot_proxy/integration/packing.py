@@ -8,6 +8,10 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from pilot_proxy.detector_constants import (
+    DEFAULT_DETECTOR_WINDOW_SAMPLES,
+    LOCKED_SAMPLE_BITS_PER_COMPONENT as DEFAULT_BITS_PER_COMPONENT,
+)
 from pilot_proxy.detector_geometry import (
     DetectorFrameLayout,
     apply_spectral_sense_to_detector_matrix,
@@ -26,8 +30,6 @@ from .schemas import (
 )
 from .stream_layout import quantization_metadata
 
-DEFAULT_BITS_PER_COMPONENT = 4
-DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
 DEFAULT_CLIP_SIGMA = 3.0
 DEFAULT_BLOCK_STEP_MULTIPLIER = 1
 
@@ -43,12 +45,18 @@ class PackedDetectorInput:
     flattened_streams: np.ndarray
 
 
-def _estimate_complex_scale(
+def estimate_complex_scale(
     values: np.ndarray,
     *,
     bits_per_component: int,
     clip_sigma: float,
 ) -> float:
+    """Estimate the shared complex quantization scale used by all adapters.
+
+    The detector quantizes real and imaginary components onto the same signed
+    integer grid.  Prefer the real-component spread, then fall back to the
+    imaginary and magnitude spreads for degenerate synthetic inputs.
+    """
     arr = np.asarray(values)
     sigma = float(np.std(arr.real))
     if not np.isfinite(sigma) or sigma <= 0.0:
@@ -92,7 +100,7 @@ def _resolve_scale_by_stream(
         global_scale = (
             float(scale)
             if scale is not None
-            else _estimate_complex_scale(
+            else estimate_complex_scale(
                 streams,
                 bits_per_component=bits_per_component,
                 clip_sigma=clip_sigma,
@@ -102,7 +110,7 @@ def _resolve_scale_by_stream(
     if mode == QUANTIZATION_SCALE_MODE_PER_STREAM:
         return np.asarray(
             [
-                _estimate_complex_scale(
+                estimate_complex_scale(
                     streams[index],
                     bits_per_component=bits_per_component,
                     clip_sigma=clip_sigma,
@@ -322,4 +330,8 @@ def pack_channelized_streams_for_detector(
     )
 
 
-__all__ = ["PackedDetectorInput", "pack_channelized_streams_for_detector"]
+__all__ = [
+    "PackedDetectorInput",
+    "estimate_complex_scale",
+    "pack_channelized_streams_for_detector",
+]

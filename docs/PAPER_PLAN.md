@@ -1,5 +1,10 @@
 # Paper plan
 
+> **Historical planning record.** This file preserves preregistration and
+> amendment chronology, including superseded development schema names. It is
+> not an operational or product-contract reference. Use `PRODUCT_SCHEMA.md`,
+> `METHOD_SPEC.md`, and `VALIDATION_GATES.md` for current behavior.
+
 This file maps the paper's claims to figures, tables, source products, and
 repository commands. We use it to keep the argument tied to finished
 artifacts. Procedures and acceptance tests for unfinished work are in

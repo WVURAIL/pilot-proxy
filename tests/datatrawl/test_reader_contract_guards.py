@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 from datatrawl.interfaces import RunContext
 
 from pilot_proxy.datatrawl_plugins import detector as detector_mod
@@ -119,4 +119,3 @@ def test_detector_rejects_input_stream_count_change():
     wrong_feed_count = np.zeros((NFFT, N_FEEDS + 1), dtype=np.uint8)
     with pytest.raises(ValueError, match="input-stream count"):
         analyzer.consume_file([wrong_feed_count], _first_meta())
-

@@ -10,6 +10,10 @@ __pycache__/
 *.png
 # pytest cache
 .pytest_cache/
+# Deterministic TeX facts generated from profiles and source constants.
+docs/generated/
+docs/auxil/
+docs/out/
 # PilotProxy CUDA kernel build artifacts (make build-kernel / test-kernel)
 cuda/*.o
 cuda/*.so*
@@ -21,3 +25,4 @@ cuda/.config_*.stamp
 # Jupyter checkpoints
 .ipynb_checkpoints/
 build/
+work/

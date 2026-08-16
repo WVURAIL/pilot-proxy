@@ -52,7 +52,7 @@ def test_export_runtime_weight_bundle_writes_compact_profiles(tmp_path) -> None:
     profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
     manifest = json.loads(outputs["weights_manifest"].read_text("utf-8"))
 
-    assert contract["schema_version"] == "pilotproxy_chime_detector_contract_v1"
+    assert contract["schema_version"] == "pilotproxy_detector_contract_v1"
     assert contract["per_frequency_threshold"] is False
     assert contract["weight_coordinate_system"] == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
     assert (
@@ -72,6 +72,7 @@ def test_export_runtime_weight_bundle_writes_compact_profiles(tmp_path) -> None:
     assert profiles["detector_contract_sha256"] == manifest["detector_contract_sha256"]
     assert profiles["weights_sha256"] == file_sha256(outputs["weights"])
     assert [row["physical_channel"] for row in profiles["profiles"]] == [14, 21]
+    assert all("chime_frequency_hz" not in row for row in profiles["profiles"])
     assert profiles["profiles"][0]["weight_bank_index"] == 0
     assert profiles["profiles"][0]["weight_bank_offset_bytes"] == 0
     assert profiles["profiles"][1]["weight_bank_index"] == 1
@@ -261,6 +262,50 @@ def _rewrite_profiles(outputs, profiles) -> None:
     )
 
 
+def _refresh_sha256sum(outputs, key: str) -> None:
+    path = outputs[key]
+    sums_path = outputs["sha256sums"]
+    lines = sums_path.read_text(encoding="utf-8").splitlines()
+    replacement = f"{file_sha256(path)}  {path.name}"
+    sums_path.write_text(
+        "\n".join(
+            replacement if line.endswith(f"  {path.name}") else line
+            for line in lines
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _calibrated_fine_block(anchor: int = 62) -> tuple[dict, object]:
+    from pilot_proxy.fine_decision import pack_bulk_mask
+    from pilot_proxy.fine_reduction import independent_bin_mask
+
+    half_width = 2
+    designated_window = [
+        (anchor + offset) % 256 for offset in range(-half_width, half_width + 1)
+    ]
+    bulk = independent_bin_mask(256, designated_bins=designated_window)
+    words = pack_bulk_mask(bulk)
+    return (
+        {
+            "status": "calibrated",
+            "decision_version": "fine_decision_v1",
+            "anchor_bin": anchor,
+            "designated_half_width": half_width,
+            "bulk_mask_words_hex": [f"0x{word:016x}" for word in words],
+            "cfar_rank": int(sum(bulk) // 2),
+            "cfar_multiplier_q16": int(1.5 * 65536),
+            "provenance": {
+                "epochs": ["2026Q1"],
+                "null_quantile": 0.999,
+                "source_product_sha256": ["d" * 64],
+            },
+        },
+        bulk,
+    )
+
+
 def test_exported_bundle_carries_pending_fine_calibration(tmp_path) -> None:
     output_dir, outputs = _export_reference_bundle(tmp_path)
     profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
@@ -276,28 +321,186 @@ def test_exported_bundle_carries_pending_fine_calibration(tmp_path) -> None:
     assert report["valid"] is True
 
 
-def test_calibrated_fine_block_validates_when_consistent(tmp_path) -> None:
-    from pilot_proxy.fine_decision import pack_bulk_mask
-    from pilot_proxy.fine_reduction import independent_bin_mask
-
+def test_current_bundle_rejects_missing_norm_and_fine_fields(tmp_path) -> None:
     output_dir, outputs = _export_reference_bundle(tmp_path)
     profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
-    bulk = independent_bin_mask(256, designated_bins=[62])
-    words = pack_bulk_mask(bulk)
-    profiles["profiles"][0]["fine_calibration"] = {
-        "status": "calibrated",
-        "decision_version": "fine_decision_v1",
-        "anchor_bin": 62,
-        "designated_half_width": 2,
-        "bulk_mask_words_hex": [f"0x{w:016x}" for w in words],
-        "cfar_rank": int(sum(bulk) // 2),
-        "cfar_multiplier_q16": int(1.5 * 65536),
-        "provenance": {
-            "epochs": ["2026Q1"],
-            "null_quantile": 0.999,
-            "source_product_sha256": ["deadbeef"],
-        },
-    }
+    del profiles["profiles"][0]["target_norm_sq"]
+    del profiles["profiles"][0]["fine_calibration"]
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "pilot_profiles.profile_required_fields" in checks
+    assert "pilot_profiles.fine_calibration[0]" in checks
+
+
+def test_current_bundle_rejects_wrong_detector_contract_schema(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    contract = json.loads(outputs["detector_contract"].read_text("utf-8"))
+    contract["schema_version"] = "pilotproxy_detector_contract_v0"
+    outputs["detector_contract"].write_text(json.dumps(contract), encoding="utf-8")
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "detector_contract.current_schema" in checks
+
+
+def test_malformed_detector_contract_geometry_returns_invalid_report(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    contract = json.loads(outputs["detector_contract"].read_text("utf-8"))
+    contract["num_weight_terms"] = []
+    outputs["detector_contract"].write_text(json.dumps(contract), encoding="utf-8")
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "detector_contract.current_schema" in checks
+    assert "detector_contract.num_weight_terms" in checks
+
+
+def test_bundle_binds_manifest_channel_to_profile_after_checksum_refresh(
+    tmp_path,
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    profiles["profiles"][0]["physical_channel"] = 99
+    _rewrite_profiles(outputs, profiles)
+    _refresh_sha256sum(outputs, "pilot_profiles")
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "runtime_bundle.channel_binding" in checks
+
+
+def test_bundle_binds_target_layout_to_profile_after_checksum_refresh(
+    tmp_path,
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    manifest = json.loads(outputs["weights_manifest"].read_text("utf-8"))
+    manifest["target_reference_layout"][0]["physical_channel"] = 99
+    outputs["weights_manifest"].write_text(json.dumps(manifest), encoding="utf-8")
+    _refresh_sha256sum(outputs, "weights_manifest")
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.weights.manifest.json" not in checks
+    assert "runtime_bundle.channel_binding" in checks
+
+
+def test_bundle_binds_weight_offsets_to_profile_order_after_checksum_refresh(
+    tmp_path,
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    rows = profiles["profiles"]
+    rows[0]["weight_bank_offset_bytes"], rows[1]["weight_bank_offset_bytes"] = (
+        rows[1]["weight_bank_offset_bytes"],
+        rows[0]["weight_bank_offset_bytes"],
+    )
+    norm_fields = (
+        "target_norm_sq",
+        "reference_norm_sum_sq",
+        "null_power_ratio",
+        "positive_excess_half_threshold_num",
+        "positive_excess_half_threshold_den",
+    )
+    for field in norm_fields:
+        rows[0][field], rows[1][field] = rows[1][field], rows[0][field]
+    _rewrite_profiles(outputs, profiles)
+    _refresh_sha256sum(outputs, "pilot_profiles")
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "sha256sums.pilot_profiles.json" not in checks
+    assert "pilot_profiles.weight_bank_offset_order" in checks
+
+
+@pytest.mark.parametrize(
+    "invalid_offset",
+    (
+        True,
+        0.0,
+        "0",
+        "not-an-integer",
+    ),
+)
+def test_bundle_reports_non_integer_profile_offsets(
+    tmp_path, invalid_offset
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    profiles["profiles"][0]["weight_bank_offset_bytes"] = invalid_offset
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "pilot_profiles.profile_offsets" in checks
+    assert "pilot_profiles.weight_bank_offset_order" in checks
+
+
+def test_bundle_reports_huge_json_numeric_offset_without_crashing(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    serialized = json.dumps(profiles)
+    original = '"weight_bank_offset_bytes": 0'
+    assert original in serialized
+    outputs["pilot_profiles"].write_text(
+        serialized.replace(
+            original,
+            '"weight_bank_offset_bytes": 1e999',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "pilot_profiles.profile_offsets" in checks
+    assert "pilot_profiles.weight_bank_offset_order" in checks
+
+
+def test_bundle_reports_nonfinite_manifest_profile_size_without_crashing(
+    tmp_path,
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    manifest = json.loads(outputs["weights_manifest"].read_text("utf-8"))
+    serialized = json.dumps(manifest)
+    original = (
+        f'"weight_profile_nbytes": {manifest["weight_profile_nbytes"]}'
+    )
+    assert original in serialized
+    outputs["weights_manifest"].write_text(
+        serialized.replace(
+            original,
+            '"weight_profile_nbytes": 1e999',
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    checks = {error["check"] for error in report["errors"]}
+    assert "weights_manifest.weight_profile_nbytes" in checks
+
+
+def test_calibrated_fine_block_validates_when_consistent(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    profiles["profiles"][0]["fine_calibration"] = block
     _rewrite_profiles(outputs, profiles)
     report = validate_runtime_weight_bundle(bundle_dir=output_dir)
     # only the sha256sums entry fails (profiles were rewritten in place);
@@ -336,5 +539,98 @@ def test_calibrated_fine_block_rejects_inconsistencies(tmp_path) -> None:
     assert any("cfar_rank" in c for c in checks)
     assert any("cfar_multiplier_q16" in c for c in checks)
     assert any("bulk_mask_words_hex" in c for c in checks)
+    assert any("provenance" in c for c in checks)
     assert any("status" in c for c in checks)
     assert any("decision_version" in c for c in checks)
+
+
+def test_calibrated_fine_block_requires_complete_provenance(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    block["provenance"] = {}
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    checks = {error["check"] for error in report["errors"]}
+    assert "pilot_profiles.fine_calibration[0].provenance.required_fields" in checks
+
+
+def test_calibrated_fine_block_excludes_guard_bins_from_bulk(tmp_path) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    guard_bin = int(block["anchor_bin"]) + int(block["designated_half_width"]) + 2
+    words = [int(word, 16) for word in block["bulk_mask_words_hex"]]
+    words[guard_bin >> 6] |= 1 << (guard_bin & 63)
+    block["bulk_mask_words_hex"] = [f"0x{word:016x}" for word in words]
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    errors = [
+        error
+        for error in report["errors"]
+        if error["check"]
+        == "pilot_profiles.fine_calibration[0].bulk_mask_words_hex"
+    ]
+    assert any("designated/guard bin" in error["message"] for error in errors)
+
+
+@pytest.mark.parametrize(
+    ("field_name", "invalid_value"),
+    (
+        ("anchor_bin", True),
+        ("designated_half_width", 2.0),
+        ("cfar_rank", "100"),
+        ("cfar_multiplier_q16", float("inf")),
+    ),
+)
+def test_calibrated_fine_block_rejects_non_integer_fields_without_crashing(
+    tmp_path, field_name, invalid_value
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    block[field_name] = invalid_value
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    assert any(
+        error["check"]
+        == f"pilot_profiles.fine_calibration[0].{field_name}"
+        for error in report["errors"]
+    )
+
+
+@pytest.mark.parametrize(
+    "invalid_words",
+    (
+        "0000",
+        [0, 0, 0, 0],
+    ),
+)
+def test_calibrated_fine_block_requires_a_list_of_hex_strings(
+    tmp_path, invalid_words
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    block["bulk_mask_words_hex"] = invalid_words
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    assert any(
+        error["check"]
+        == "pilot_profiles.fine_calibration[0].bulk_mask_words_hex"
+        for error in report["errors"]
+    )

@@ -70,10 +70,14 @@ def test_result_schema_object_contains_fixed_contract_and_threshold() -> None:
     assert schema["fixed_point_contract"]["power_accumulator"] == "uint64"
 
 
-def test_fixed_point_contract_states_k128_reason() -> None:
-    contract = fixed_point_contract()
+@pytest.mark.parametrize("window", [64, 128])
+def test_fixed_point_contract_describes_selected_supported_window(window) -> None:
+    contract = fixed_point_contract(detector_window_samples=window)
 
-    assert "K=128" in contract["k128_lock_reason"]
+    assert "K=128" in contract["detector_window_support_reason"]
+    assert f"selects K={window}" in contract["detector_window_support_reason"]
+    assert "k128_lock_reason" not in contract
+    assert contract["supported_detector_window_samples"] == [64, 128]
     assert contract["packed_complex_bits"] == 8
     assert contract["sample_bits_per_component"] == 4
 

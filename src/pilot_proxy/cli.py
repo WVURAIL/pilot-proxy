@@ -35,6 +35,7 @@ from pilot_proxy.integration import (
     parse_physical_channel_selection,
     write_weight_bank_from_receiver_profile,
 )
+from pilot_proxy.integration.stream_layout import validate_integration_compatibility
 from pilot_proxy.json_utils import write_json_strict
 from pilot_proxy.paths import (
     DEFAULT_LIB_PATH,
@@ -503,6 +504,7 @@ def _cmd_check_layout(args: argparse.Namespace) -> None:
         else args.num_input_streams
     )
     if stream_map is not None:
+        validate_integration_compatibility(profile=profile, stream_map=stream_map)
         num_input_streams = int(stream_map.num_streams)
     detector_window_samples = int(
         profile.detector_window_samples
@@ -540,6 +542,11 @@ def _cmd_check_profile(args: argparse.Namespace) -> None:
         else load_detector_core_profile(args.detector_core_profile)
     )
     stream_map = None if args.stream_map is None else load_stream_map(args.stream_map)
+    validate_integration_compatibility(
+        profile=profile,
+        detector_core=detector_core,
+        stream_map=stream_map,
+    )
     payload = {
         "schema_version": "fstat_profile_check_v1",
         "receiver_profile": profile.to_dict(),
@@ -1232,7 +1239,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     validate_products = _add_command(
         "validate-products",
-        "Validate a CHIME run directory's products against the v2 product "
+        "Validate a CHIME run directory's products against the current product "
         "schema.",
     )
     validate_products.add_argument("--run-dir", type=Path, required=True,

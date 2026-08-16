@@ -142,7 +142,8 @@ ATSC A/53 Part 2 specifies that the 8-VSB pilot is approximately 11.3 dB below t
 \subsection*{Features}
 \begin{itemize}
   \item Fixed-point CUDA detector for ATSC 1.0 pilot excess.
-  \item Fixed 128-sample detector rows using packed complex 4+4 bit input.
+  \item Compile-time 64- or 128-sample detector rows using packed complex
+        4+4 bit input; the shipped CHIME bank selects 128.
   \item Three matched-filter terms: target pilot bin, lower reference bin, upper reference bin.
   \item Exact \code{uint64} target/reference power readback.
   \item Time-coherent front end: \code{int32} row sums, padded fine
@@ -165,7 +166,7 @@ Package version & \ppPackageVersion \\ \hline
 Kernel core version & \ppKernelCoreVersion \\ \hline
 Primary function & Measure ATSC 1.0 pilot excess and estimate the corresponding data-shelf SNR \\ \hline
 Input data & Packed complex int4, one complex sample per \code{int8_t} \\ \hline
-Detector window & 128 packed complex samples \\ \hline
+Detector window & 64 or 128 packed complex samples; shipped CHIME bank: \ppDetectorWindowSamples \\ \hline
 Weight terms & 3: target, lower reference, upper reference \\ \hline
 Reference bins & Two total reference bins \\ \hline
 Raw statistic & \(F=2P_t/(P_{r1}+P_{r2})\) \\ \hline
@@ -382,12 +383,13 @@ sampled DFT filterbank with a rectangular (one-tap) prototype, evaluated
 only at the three needed channels through the int4 matched weights; the
 window-axis FFT is the second stage of a standard two-stage zoom
 channelization, refining the selected detector bin from \ppDetectorBinHz\ Hz
-to \ppFineBinHz\ Hz. The fine path is the deployed decision path: coherent
-window integration recovers up to \ppCoherentGainDb~dB of deflection
-sensitivity over the all-incoherent reduction, and the designated-set CFAR
-forms the per-frame mask bit, gated on a deterministic (bit-exact
-host/device) FFT implementation. The coarse path is the survey's recorded
-$F>\mu_0$ flag and the bit-exact marginal check of the fine path's inputs
+to \ppFineBinHz\ Hz. The fine path is an implemented, inactive decision
+candidate: coherent window integration recovers up to
+\ppCoherentGainDb~dB of deflection sensitivity over the all-incoherent
+reduction, and the designated-set CFAR can form a per-frame candidate mask bit
+using a deterministic (bit-exact host/device) FFT implementation. The coarse
+path supplies the current archive $F>\mu_0$ rejection flag and the bit-exact
+marginal check of the fine path's inputs
 (\code{docs/DESIGN_DECISIONS.md}).}
 \label{fig:detector_datapath}
 \end{figure}
@@ -459,7 +461,9 @@ The first index is the standalone ascending-frequency reference coordinate. The 
 
 The CUDA detector core does not interpret receiver metadata. A receiver adapter must supply the following metadata and arrays above the kernel boundary:
 \begin{itemize}
-  \item \code{DetectorCoreProfile}: locked kernel contract, including \(K=128\), \(N=3\), int4 packed input, uint64 powers, and rational half-threshold input.
+  \item \code{DetectorCoreProfile}: locked kernel contract, including the
+        selected \(K\in\{64,128\}\), \(N=3\), int4 packed input, uint64
+        powers, and rational half-threshold input.
   \item \code{ReceiverProfile}: RF band, channelizer geometry, spectral sense, baseband frame convention (\field{baseband_frame.channel_center_normalized}), frame size, input-stream count, quantization defaults, detector-bin ENBW, and pilot-capture efficiency.
   \item \code{stream_map}: stream-index metadata for feed, polarization, beam, or other receiver paths.
   \item \code{check-profile}, \code{check-layout}, \code{make-weights}, and \code{chime-run} consume the applicable profile or stream-map records. The standalone \code{detect} command selects shipped weights from its sidecar or channel flag, while \code{evaluate-snr} uses the fixed testbench geometry.
@@ -468,7 +472,7 @@ The CUDA detector core does not interpret receiver metadata. A receiver adapter 
 After this adaptation, the kernel receives only packed rows and packed weights, and it writes uint64 powers and a mask. For one selected DTV channel, the adapter constructs
 \begin{equation}
 N_{\mathrm{rows}} = N_{\mathrm{input\ streams}}\,
-\frac{\mathrm{frame\_size\_samples}}{128}.
+\frac{\mathrm{frame\_size\_samples}}{K}.
 \end{equation}
 The default combine mode is an incoherent power sum over streams. We sum the powers before forming the statistic:
 \begin{equation}
@@ -476,7 +480,7 @@ F = \frac{2\sum_r P_{t,r}}{\sum_r P_{r1,r}+\sum_r P_{r2,r}},
 \end{equation}
 where \(r\) indexes detector rows. The result schema names this rule \code{all_rows_summed_before_ratio}. Per-stream packing remains available for integration diagnostics, but the combined detection path forms one \(F\) only after summing all selected rows.
 
-The frame size is not a free detector parameter: the adapter matches the correlator's frame, and the kernel requires only that the matched value be a positive multiple of \(K=128\). The checked-in \code{chime_dtv_fengine} receiver profile uses \(2^{14}=16{,}384\) channelized samples per input stream --- the CHIME F-engine upgrade frame this integration is designed for --- and declares the frame-verified DC-centered baseband convention (\field{baseband_frame.channel_center_normalized}=0.0), validated against archived CHIME baseband; the earlier half-band bank is archived under \code{weights/legacy_halfband/} and must not be deployed. For this profile and one selected coarse channel, \(\ppChimeStreams\times\ppWindowsPerStream=\ppChimeRowsPerFrame\) detector rows form one frame. The 16,384-sample frame is the planned CHIME F-engine upgrade interface used by the repository's analysis and tests; it is not a claim about the currently deployed correlator frame. The software does not infer one universal value from HDF5 metadata: \code{chime-run} accepts an explicit per-run frame-size override, while \code{chime-scan} takes \code{nfft} from the datatrawl instrument configuration. Operators must verify and record the resolved value for each real-data product.
+The frame size is not a free detector parameter: the adapter matches the correlator's frame, and the kernel requires that value to be a positive multiple of the profile-selected \(K\). The checked-in \code{chime_dtv_fengine} receiver profile selects \(K=\ppDetectorWindowSamples\) and uses \(2^{14}=16{,}384\) channelized samples per input stream --- the CHIME F-engine upgrade frame this integration is designed for --- and declares the frame-verified DC-centered baseband convention (\field{baseband_frame.channel_center_normalized}=0.0), validated against archived CHIME baseband; the earlier half-band bank is archived under \code{weights/legacy_halfband/} and must not be deployed. For this profile and one selected coarse channel, \(\ppChimeStreams\times\ppWindowsPerStream=\ppChimeRowsPerFrame\) detector rows form one frame. The CHORD profiles instead select \(K=64\) with an 8,192-sample frame; both profile families retain 128 windows per stream for the frozen fine transform. The frame sizes are integration contracts, not claims about a universally deployed correlator frame. The software does not infer one universal value from HDF5 metadata: \code{chime-run} accepts an explicit per-run frame-size override, while \code{chime-scan} takes \code{nfft} from the datatrawl instrument configuration. Operators must verify and record the resolved value for each real-data product.
 
 \section{Result Schema and Mask Convention}
 
@@ -484,7 +488,8 @@ Detector and synthetic SNR-evaluator JSON outputs include a versioned \field{res
 
 The fixed-point contract records:
 \begin{itemize}
-  \item \field{detector_window_samples=128};
+  \item \field{detector_window_samples} equal to the profile-selected 64 or
+        128 (128 for the shipped CHIME bank);
   \item \field{reference_offset_bins=2} nominally, with \field{skipped_guard_bins=1} and adaptive placement metadata copied from the weight manifest;
   \item \field{packed_complex_bits=8};
   \item \field{sample_bits_per_component=4};
@@ -508,23 +513,22 @@ The operating point itself is carried as per-channel rational data in the
 runtime bundle (\field{positive_excess_half_threshold_num},
 \field{positive_excess_half_threshold_den}); the kernel comparison is
 threshold-agnostic, so recalibrating the recorded rule is a bundle
-regeneration alone, with no kernel or schema change. Coarse-only deployed
-operating points were nonetheless evaluated on measured ROCs and set
-aside: the $\mu_0$ point spends about half of verified-quiet time, fixed
-false-alarm points leak weak channels, and an ROC-derived point such as
-the Youden maximum assumes equal costs, which masking does not have. The
-adopted deployed decision is instead the fine designated-set CFAR
-computed in the kernel, which holds the fixed false-alarm policy on the
-fine axis (\code{docs/DESIGN_DECISIONS.md}). Because \field{coarse_power_ratio}
-and the fine spectrum are persisted per frame, previously recorded epochs
-can be re-scored offline under any such rule.
+regeneration alone, with no kernel or schema change. The active archive
+decision remains the norm-corrected coarse positive-excess comparison above.
+The implemented fine designated-set CFAR is a candidate whose calibration
+status is \code{pending_campaign}; its spectrum, threshold, and exceedances are
+diagnostic and do not set \field{reject_mask}. Because
+\field{coarse_power_ratio} and the fine spectrum are persisted per frame,
+previously recorded epochs can be re-scored offline after a separately
+versioned policy is calibrated and adopted.
 
 CHIME per-pilot archive products use
-\field{schema_version}=\texttt{\ppSchemaVThree}: the complete shared array
+\field{schema_version}=\texttt{\ppPerPilotSchema}: the complete shared array
 set plus the fine-reduction fields (fine spectrum, CFAR calibration columns,
 and the ragged any-bin detection list). \code{docs/PER_PILOT_PRODUCT_FIELDS.md}
-defines the shared arrays and \code{docs/PRODUCT_SCHEMA.md} the
-fine-reduction fields and their enforced invariants. The shipped weight bank and manifest are
+defines the shared arrays, \code{docs/FINE_REDUCTION_PRODUCTS.md} defines the
+fine-reduction fields, and \code{docs/PRODUCT_SCHEMA.md} defines their active,
+diagnostic, and candidate decision roles. The shipped weight bank and manifest are
 identified by SHA-256 prefixes \texttt{\ppWeightBankShaShort} and
 \texttt{\ppWeightManifestShaShort}.
 
@@ -537,7 +541,7 @@ The standalone testbench uses the following reference channelizer:
   \item PFB: 4 taps, 2048-point real input;
   \item usable positive-frequency channels: 1024;
   \item coarse-channel spacing: \(800\,\mathrm{MHz}/2048=390.625\,\mathrm{kHz}\);
-  \item detector-bin spacing: \(390.625\,\mathrm{kHz}/128=\ppDetectorBinHz\,\mathrm{Hz}\);
+  \item detector-bin spacing: \(\ppCoarseSpacingkHz\,\mathrm{kHz}/\ppDetectorWindowSamples=\ppDetectorBinHz\,\mathrm{Hz}\);
   \item padded fine-bin spacing: \(\ppDetectorBinHz\,\mathrm{Hz}/\ppFineNumBins=\ppFineBinHz\,\mathrm{Hz}\).
 \end{itemize}
 These values define the tested reference geometry. In particular, the default SNR conversion uses the resulting \ppDetectorBinHz\ Hz detector-bin width. A receiver with a different effective noise bandwidth must provide its own value. Throughout this document, ``detector bin'' names the \ppDetectorBinHz\ Hz resolution set by the \(K=\ppDetectorWindowSamples\) window, and ``fine bin'' names the \ppFineBinHz\ Hz resolution of the padded window-axis FFT.
@@ -552,7 +556,7 @@ We decode each nibble as two's-complement signed int4 with range \([-8,7]\). The
 
 Input matrices are row-major:
 \begin{equation}
-  \mathrm{d\_in}[m,k]=\mathrm{d\_in}[mK+k],\qquad K=128.
+  \mathrm{d\_in}[m,k]=\mathrm{d\_in}[mK+k],\qquad K\in\{64,128\}.
 \end{equation}
 For batched input:
 \begin{equation}
@@ -561,7 +565,13 @@ For batched input:
 
 \section{Fixed-Point Sizing}
 
-The int4 growth bound sets the detector window to 128 samples. We conservatively bound one real or imaginary complex-product component by 128 per tap. Therefore, 128 taps give an absolute component bound of 16,384, which fits in signed 16-bit storage. A 256-sample power-of-two window could reach 32,768 and exceed the positive signed-int16 limit. Under the same bound, one magnitude-squared term fits in \code{uint32}, and the configured block power sum fits in \code{uint64}.
+The int4 growth bound limits the supported detector windows to 64 or 128
+samples. We conservatively bound one real or imaginary complex-product
+component by 128 per tap. Therefore, the largest supported window, 128 taps,
+has an absolute component bound of 16,384 and fits in signed 16-bit storage; a
+256-sample window could reach 32,768 and exceed the positive signed-int16
+limit. Under the same bound, one magnitude-squared term fits in \code{uint32},
+and the configured block power sum fits in \code{uint64}.
 
 \section{C API Summary}
 

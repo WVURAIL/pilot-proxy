@@ -52,10 +52,11 @@ write a misleading empty stack. It leaves the completed per-pilot products under
 The `nfft=16384` value is the target frame size for the CHIME F-engine upgrade.
 It is not a statement that the currently deployed CHIME frame has this size.
 Both the datatrawl geometry and `chime_dtv_fengine.json` currently encode this
-target, and the receiver profile is marked
-`example_requires_data_product_verification`. Verify the frame size and the
-remaining receiver metadata against the data product used for each operational
-run.
+target. The receiver profile records the DC-centered baseband-frame
+verification (`profile_status = baseband_frame_verified_2026_07_29`), but that
+does not verify a planned frame size or stream layout for every data lineage.
+Verify those remaining values against the data product used for each
+operational run.
 
 ---
 

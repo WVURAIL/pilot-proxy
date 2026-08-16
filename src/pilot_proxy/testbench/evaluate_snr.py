@@ -50,11 +50,9 @@ from pilot_proxy.dtv_units import (  # noqa: E402
     DTV_BANDWIDTH_HZ,
     EFFECTIVE_BIN_BW_HZ,
     UNIT_DATA_SHELF_POWER,
-    UNIT_NORMALIZED_POWER_RATIO,
     PILOT_BELOW_DATA_DB,
     PILOT_CAPTURE_EFFICIENCY,
     composite_to_data_shelf_snr_correction_db,
-    coarse_power_ratio_to_raw_pilot_excess_db,
     power_terms_to_normalized_coarse_power_ratio_db,
     power_terms_to_raw_pilot_excess,
     normalized_pilot_excess_to_db,
@@ -100,6 +98,7 @@ from pilot_proxy.testbench.quantize import (  # noqa: E402
     LOCKED_BITS_PER_COMPONENT,
     LOCKED_DETECTOR_WINDOW_SAMPLES,
 )
+from pilot_proxy.integration.packing import estimate_complex_scale  # noqa: E402
 
 HZ_PER_MHZ = 1.0e6
 HALF_SCALE = 2.0
@@ -329,17 +328,12 @@ def estimate_quantization_scale(
     bits: int,
     clip_sigma: float,
 ) -> float:
-    """Estimate int4 quantization scale from complex stream statistics."""
-    values = np.asarray(streams)
-    sigma = float(np.std(values.real))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(values.imag))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(np.abs(values)))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        raise ValueError("Could not estimate a positive quantization scale.")
-    max_int = (1 << (int(bits) - 1)) - 1
-    return float(max_int) / (float(clip_sigma) * sigma)
+    """Compatibility wrapper around the canonical integration estimator."""
+    return estimate_complex_scale(
+        streams,
+        bits_per_component=int(bits),
+        clip_sigma=float(clip_sigma),
+    )
 
 
 def _resolve_rf_center_hz(args: argparse.Namespace) -> float:
@@ -1388,14 +1382,14 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
         dest="detector_window_samples",
         type=int,
         default=LOCKED_DETECTOR_WINDOW_SAMPLES,
-        help="Advanced: v0.1 only accepts the locked value 128.",
+        help="Advanced: select a detector window supported by the current kernel.",
     )
     parser.add_argument(
         "--experimental-bits",
         dest="bits",
         type=int,
         default=LOCKED_BITS_PER_COMPONENT,
-        help="Advanced: v0.1 only accepts the locked 4+4 bit format.",
+        help="Advanced: the current kernel requires the locked 4+4-bit format.",
     )
     parser.add_argument("--clip-sigma", type=float, default=DEFAULT_CLIP_SIGMA)
     parser.add_argument("--scale", type=float, default=None)

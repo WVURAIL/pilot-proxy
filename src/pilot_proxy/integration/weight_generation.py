@@ -14,7 +14,10 @@ from typing import Any, Sequence, cast
 
 import numpy as np
 
-from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
+from pilot_proxy.atsc_channels import (
+    parse_physical_channel_spec,
+    physical_channel_to_pilot_hz,
+)
 from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     WEIGHT_COORDINATE_RAW_INPUT,
@@ -40,6 +43,7 @@ from .receiver_profile import (
     receiver_frequency_to_channel,
     receiver_profile_hash,
 )
+from .stream_layout import validate_integration_compatibility
 
 DEFAULT_DOPPLER_TOL_HZ = math.nan
 HZ_PER_MHZ = 1.0e6
@@ -90,14 +94,7 @@ class DetectorCoreLayout:
 
 
 def _physical_channels_from_range(value: str) -> list[int]:
-    text = str(value).strip()
-    if ":" in text:
-        start, stop = [int(part.strip()) for part in text.split(":", 1)]
-        step = 1 if stop >= start else -1
-        return list(range(start, stop + step, step))
-    if "," in text:
-        return [int(part.strip()) for part in text.split(",") if part.strip()]
-    return [int(text)]
+    return parse_physical_channel_spec(value)
 
 
 def parse_physical_channel_selection(
@@ -498,10 +495,6 @@ def target_layout(
         ),
     }
 
-
-_target_layout = target_layout
-
-
 def profile_requires_window_time_reversal(
     profile: ReceiverProfile,
     weight_coordinate_system: str,
@@ -523,6 +516,7 @@ def generate_weight_table_from_receiver_profile(
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Return the weight table and manifest target-layout entries."""
+    validate_integration_compatibility(profile=profile, detector_core=core)
     # The receiver profile owns the deployed window length (K); the core
     # declares which lengths the compiled kernel family supports.
     # DetectorCoreProfile validates the selection in __post_init__.
@@ -639,6 +633,7 @@ def write_weight_bank_from_receiver_profile(
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
 ) -> dict[str, Any]:
     """Write a packed weight bank plus the adjacent manifest and return manifest."""
+    validate_integration_compatibility(profile=profile, detector_core=core)
     core = core.with_detector_window_samples(int(profile.detector_window_samples))
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
     output = Path(output_path)

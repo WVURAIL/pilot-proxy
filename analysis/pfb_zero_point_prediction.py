@@ -10,8 +10,6 @@ E[F]/null_power_ratio = g(d_t)*(l_ns+u_ns) / (l_ns*g(d_l) + u_ns*g(d_u)).
 Compare against the measured mu_hat/null_power_ratio - 1.
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

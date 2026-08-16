@@ -19,7 +19,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("h5py")
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt
 from datatrawl.instruments import load_instrument
@@ -108,6 +108,7 @@ def test_detector_analyzer_matches_runner(tmp_path):
         default_reference_receiver_profile(frame_size_samples=NFFT,
                                            num_input_streams=N_FEEDS),
         spectral_sense=SPECTRAL_SENSE_INVERTED,
+        stream_map_required=False,
     )
     profile_path = tmp_path / "receiver_profile.json"
     profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
