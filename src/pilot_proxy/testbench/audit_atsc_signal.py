@@ -209,7 +209,7 @@ def _quality_report(
     ]
     passed = sum(1 for check in checks if bool(check["passed"]))
     return {
-        "schema_version": "fstat_atsc_waveform_quality_v1",
+        "schema_version": "pilotproxy_atsc_waveform_quality_v1",
         "quality_passed": bool(passed == len(checks)),
         "quality_score": float(passed / len(checks)),
         "num_quality_checks_passed": int(passed),
@@ -325,7 +325,7 @@ def audit_atsc_iq(
     )
 
     audit = {
-        "schema_version": "fstat_atsc_waveform_audit_v1",
+        "schema_version": "pilotproxy_atsc_waveform_audit_v1",
         "input_iq": str(input_iq),
         "num_samples_used": int(iq.size),
         "sample_rate_hz": float(sample_rate_hz),

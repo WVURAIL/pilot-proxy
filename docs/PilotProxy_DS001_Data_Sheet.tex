@@ -480,7 +480,7 @@ The frame size is not a free detector parameter: the adapter matches the correla
 
 \section{Result Schema and Mask Convention}
 
-Detector and synthetic SNR-evaluator JSON outputs include a versioned \field{result_schema} object with \code{schema_version=pilot_proxy_result_v2}. This object records the statistic definitions, layout metadata, calibration constants, threshold fields, fixed-point contract, and mask convention needed to interpret those results. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas rather than this object.
+Detector and synthetic SNR-evaluator JSON outputs include a versioned \field{result_schema} object with \code{schema_version=pilotproxy_result_schema_v1}. This object records the statistic definitions, layout metadata, calibration constants, threshold fields, fixed-point contract, and mask convention needed to interpret those results. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas rather than this object.
 
 The fixed-point contract records:
 \begin{itemize}

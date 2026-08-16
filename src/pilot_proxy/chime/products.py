@@ -262,7 +262,7 @@ def write_integrated_spectra(
             masked_fraction_by_channel, dtype=np.float64),
         sample_rate_hz=np.asarray(float(sample_rate_hz), dtype=np.float64),
         nfft=np.asarray(int(nfft), dtype=np.int64),
-        schema_version=np.asarray("fstat_chime_integrated_spectra_v1"),
+        schema_version=np.asarray("pilotproxy_chime_integrated_spectra_v1"),
     )
     if freq_id is not None:
         payload["freq_id"] = np.asarray(freq_id, dtype=np.int64)
@@ -408,7 +408,7 @@ def write_input_manifest(
 ) -> Path:
     path = Path(run_dir) / "input_manifest.json"
     payload = {
-        "schema_version": "fstat_chime_input_manifest_v1",
+        "schema_version": "pilotproxy_chime_input_manifest_v1",
         "input_dir": str(input_dir),
         "absolute_time_used": False,
         "datasets": [dataset_manifest(dataset) for dataset in datasets],

@@ -285,7 +285,7 @@ def inject_directory(
         )
     manifest_path = output_dir / INJECTION_MANIFEST_FILENAME
     manifest_path.write_text(
-        json.dumps({"schema_version": "pilot_proxy_injection_v1", "files": entries},
+        json.dumps({"schema_version": "pilotproxy_injection_manifest_v1", "files": entries},
                    indent=2),
         encoding="utf-8",
     )

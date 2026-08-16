@@ -13,9 +13,9 @@ from typing import Any, Protocol, Sequence, cast
 import numpy as np
 
 from pilot_proxy.detector_contract import (
-    CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION,
-    CHIME_RUN_CONFIG_SCHEMA_VERSION,
-    CHIME_STATS_SCHEMA_VERSION,
+    CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN,
+    CHIME_RUN_CONFIG_SCHEMA_TOKEN,
+    CHIME_STATS_SCHEMA_TOKEN,
     ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
     DETECTOR_POWER_RATIO_DEFINITION,
     NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
@@ -178,14 +178,14 @@ def _validate_detector_contract(
         )
     if (
         run_contract_typed.get("schema_version")
-        != CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION
+        != CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN
     ):
         _add_error(
             errors,
             "detector_contract.schema_version",
             "detector_contract schema_version "
             f"{run_contract_typed.get('schema_version')!r} does not match "
-            f"{CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION!r}",
+            f"{CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN!r}",
         )
     required = {
         "detector_window_samples",
@@ -648,14 +648,14 @@ def validate_products(
         _check_json_schema(
             payload=run_config,
             filename="run_config.json",
-            expected=CHIME_RUN_CONFIG_SCHEMA_VERSION,
+            expected=CHIME_RUN_CONFIG_SCHEMA_TOKEN,
             errors=errors,
         )
     if stats:
         _check_json_schema(
             payload=stats,
             filename="stats.json",
-            expected=CHIME_STATS_SCHEMA_VERSION,
+            expected=CHIME_STATS_SCHEMA_TOKEN,
             errors=errors,
         )
     if run_config and stats:
@@ -699,7 +699,7 @@ def validate_products(
                     close()
 
     report = {
-        "schema_version": "fstat_chime_product_validation_v1",
+        "schema_version": "pilotproxy_chime_product_validation_v1",
         "run_dir": str(run),
         "valid": len(errors) == 0,
         "num_errors": int(len(errors)),

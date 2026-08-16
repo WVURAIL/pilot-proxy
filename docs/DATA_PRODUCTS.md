@@ -25,7 +25,7 @@ per-pilot products directly.
 This file records the run-level detector contract and provenance. Both workflows
 use:
 
-- `schema_version = fstat_chime_run_config_v2`;
+- `schema_version = pilotproxy_chime_run_config_v1`;
 - `detector_contract`;
 - `physical_channels`;
 - `mask_policy`;
@@ -43,7 +43,7 @@ byte-identical JSON.
 This file records the detector geometry and run statistics. Shared fields
 include:
 
-- `schema_version = fstat_chime_stats_v2`;
+- `schema_version = pilotproxy_chime_stats_v1`;
 - `detector_contract`;
 - `num_frames` and `num_pilots`;
 - `num_input_streams`;
@@ -152,7 +152,7 @@ valid frames; `after` includes valid frames with `reject_mask = 0`. Therefore
 
 | Array | Shape | Dtype | Units | Meaning |
 |---|---:|---|---|---|
-| `schema_version` | scalar | `str` | — | `fstat_chime_integrated_spectra_v1` |
+| `schema_version` | scalar | `str` | — | `pilotproxy_chime_integrated_spectra_v1` |
 | `physical_channel` | `(num_pilots,)` | `int32` | channel | ATSC physical channel |
 | `pilot_frequency_hz` | `(num_pilots,)` | `float64` | Hz | ATSC pilot RF frequency |
 | `chime_frequency_hz` | `(num_pilots,)` | `float64` | Hz | CHIME coarse-channel center |

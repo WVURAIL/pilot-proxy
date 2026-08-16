@@ -43,7 +43,7 @@ from .kernel import FStatKernel
 from .paths import DEFAULT_LIB_PATH, DEFAULT_WEIGHTS_PATH
 from .result_schema import (
     COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
-    RESULT_SCHEMA_VERSION,
+    RESULT_SCHEMA_TOKEN,
     result_schema_object,
 )
 
@@ -567,8 +567,8 @@ def main(argv: list[str] | None = None) -> int:
         )
 
     payload = {
-        "schema_version": "pilot_proxy_detection_v1",
-        "result_schema_version": RESULT_SCHEMA_VERSION,
+        "schema_version": "pilotproxy_detection_result_v1",
+        "result_schema_version": RESULT_SCHEMA_TOKEN,
         "input_detector_matrix": str(args.input_detector_matrix),
         "resolved_input_detector_matrix": str(resolved_input_path),
         "dtv_pilot_mhz": float(dtv_pilot_mhz),

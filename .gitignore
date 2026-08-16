@@ -20,3 +20,4 @@ cuda/.config_*.stamp
 
 # Jupyter checkpoints
 .ipynb_checkpoints/
+build/

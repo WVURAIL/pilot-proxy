@@ -6,12 +6,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from pilot_proxy.schema_identity import schema_token
+
 import numpy as np
 
 SPECTRAL_SENSE_NORMAL = "normal"
 SPECTRAL_SENSE_INVERTED = "inverted"
 SUPPORTED_SPECTRAL_SENSE = frozenset({SPECTRAL_SENSE_NORMAL, SPECTRAL_SENSE_INVERTED})
-STREAM_LAYOUT_SCHEMA_VERSION = "fstat_stream_layout_v1"
+STREAM_LAYOUT_SCHEMA_NAME = "pilotproxy_stream_layout"
+STREAM_LAYOUT_SCHEMA_REVISION = 1
+STREAM_LAYOUT_SCHEMA_TOKEN = schema_token(
+    STREAM_LAYOUT_SCHEMA_NAME, STREAM_LAYOUT_SCHEMA_REVISION
+)
 COMBINE_MODE_COMBINED_STREAMS = "incoherent_power_sum_over_streams"
 COMBINE_MODE_PER_STREAM_DIAGNOSTIC = "per_stream_diagnostic"
 SUPPORTED_COMBINE_MODES = frozenset(
@@ -97,7 +103,7 @@ class DetectorFrameLayout:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+            "schema_version": STREAM_LAYOUT_SCHEMA_TOKEN,
             "frame_size_samples": self.frame_size_samples,
             "detector_window_samples": self.detector_window_samples,
             "windows_per_stream": self.windows_per_stream,
@@ -274,7 +280,9 @@ __all__ = [
     "DetectorFrameLayout",
     "SPECTRAL_SENSE_INVERTED",
     "SPECTRAL_SENSE_NORMAL",
-    "STREAM_LAYOUT_SCHEMA_VERSION",
+    "STREAM_LAYOUT_SCHEMA_NAME",
+    "STREAM_LAYOUT_SCHEMA_REVISION",
+    "STREAM_LAYOUT_SCHEMA_TOKEN",
     "SUPPORTED_COMBINE_MODES",
     "SUPPORTED_SPECTRAL_SENSE",
     "apply_spectral_sense_to_detector_matrix",

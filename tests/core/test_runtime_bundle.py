@@ -65,8 +65,8 @@ def test_export_runtime_weight_bundle_writes_compact_profiles(tmp_path) -> None:
         ]
         is False
     )
-    assert profiles["schema_version"] == "fstat_runtime_pilot_profiles_v1"
-    assert manifest["schema_version"] == "fstat_runtime_weights_manifest_v1"
+    assert profiles["schema_version"] == "pilotproxy_runtime_pilot_profiles_v1"
+    assert manifest["schema_version"] == "pilotproxy_runtime_weights_manifest_v1"
     assert profiles["weight_coordinate_system"] == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
     assert manifest["weight_coordinate_system"] == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
     assert profiles["detector_contract_sha256"] == manifest["detector_contract_sha256"]

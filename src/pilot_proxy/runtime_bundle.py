@@ -32,10 +32,23 @@ from pilot_proxy.integration.weight_generation import (
 )
 from pilot_proxy.json_utils import write_json_strict
 from pilot_proxy.provenance import file_sha256
+from pilot_proxy.schema_identity import schema_token
 
-RUNTIME_WEIGHT_MANIFEST_SCHEMA_VERSION = "fstat_runtime_weights_manifest_v1"
-RUNTIME_PILOT_PROFILES_SCHEMA_VERSION = "fstat_runtime_pilot_profiles_v1"
-RUNTIME_BUNDLE_VALIDATION_SCHEMA_VERSION = "fstat_runtime_bundle_validation_v1"
+RUNTIME_WEIGHT_MANIFEST_SCHEMA_NAME = "pilotproxy_runtime_weights_manifest"
+RUNTIME_WEIGHT_MANIFEST_SCHEMA_REVISION = 1
+RUNTIME_WEIGHT_MANIFEST_SCHEMA_TOKEN = schema_token(
+    RUNTIME_WEIGHT_MANIFEST_SCHEMA_NAME, RUNTIME_WEIGHT_MANIFEST_SCHEMA_REVISION
+)
+RUNTIME_PILOT_PROFILES_SCHEMA_NAME = "pilotproxy_runtime_pilot_profiles"
+RUNTIME_PILOT_PROFILES_SCHEMA_REVISION = 1
+RUNTIME_PILOT_PROFILES_SCHEMA_TOKEN = schema_token(
+    RUNTIME_PILOT_PROFILES_SCHEMA_NAME, RUNTIME_PILOT_PROFILES_SCHEMA_REVISION
+)
+RUNTIME_BUNDLE_VALIDATION_SCHEMA_NAME = "pilotproxy_runtime_bundle_validation"
+RUNTIME_BUNDLE_VALIDATION_SCHEMA_REVISION = 1
+RUNTIME_BUNDLE_VALIDATION_SCHEMA_TOKEN = schema_token(
+    RUNTIME_BUNDLE_VALIDATION_SCHEMA_NAME, RUNTIME_BUNDLE_VALIDATION_SCHEMA_REVISION
+)
 DEFAULT_WEIGHTS_FILENAME = "weights.bin"
 DEFAULT_WEIGHTS_MANIFEST_FILENAME = "weights.manifest.json"
 DEFAULT_DETECTOR_CONTRACT_FILENAME = "detector_contract.json"
@@ -748,22 +761,22 @@ def validate_runtime_weight_bundle(
         errors=errors,
     )
 
-    if pilot_profiles.get("schema_version") != RUNTIME_PILOT_PROFILES_SCHEMA_VERSION:
+    if pilot_profiles.get("schema_version") != RUNTIME_PILOT_PROFILES_SCHEMA_TOKEN:
         _add_error(
             errors,
             "pilot_profiles.schema_version",
             f"schema_version {pilot_profiles.get('schema_version')!r} does not "
-            f"match {RUNTIME_PILOT_PROFILES_SCHEMA_VERSION!r}",
+            f"match {RUNTIME_PILOT_PROFILES_SCHEMA_TOKEN!r}",
         )
     if (
         weights_manifest.get("schema_version")
-        != RUNTIME_WEIGHT_MANIFEST_SCHEMA_VERSION
+        != RUNTIME_WEIGHT_MANIFEST_SCHEMA_TOKEN
     ):
         _add_error(
             errors,
             "weights_manifest.schema_version",
             f"schema_version {weights_manifest.get('schema_version')!r} does not "
-            f"match {RUNTIME_WEIGHT_MANIFEST_SCHEMA_VERSION!r}",
+            f"match {RUNTIME_WEIGHT_MANIFEST_SCHEMA_TOKEN!r}",
         )
     _validate_weight_profile_geometry(
         detector_contract=detector_contract,
@@ -840,7 +853,7 @@ def validate_runtime_weight_bundle(
     )
 
     report = {
-        "schema_version": RUNTIME_BUNDLE_VALIDATION_SCHEMA_VERSION,
+        "schema_version": RUNTIME_BUNDLE_VALIDATION_SCHEMA_TOKEN,
         "bundle_dir": str(bundle),
         "valid": len(errors) == 0,
         "num_errors": int(len(errors)),
@@ -987,7 +1000,7 @@ def export_runtime_weight_bundle(
     weights_digest = file_sha256(weights_path)
 
     weights_manifest = {
-        "schema_version": RUNTIME_WEIGHT_MANIFEST_SCHEMA_VERSION,
+        "schema_version": RUNTIME_WEIGHT_MANIFEST_SCHEMA_TOKEN,
         "weight_format": "concatenated_int8_weight_profiles_v1",
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": detector_contract["input_coordinate_system"],
@@ -1011,7 +1024,7 @@ def export_runtime_weight_bundle(
     write_json_strict(weights_manifest_path, weights_manifest, indent=2, sort_keys=True)
 
     pilot_profiles = {
-        "schema_version": RUNTIME_PILOT_PROFILES_SCHEMA_VERSION,
+        "schema_version": RUNTIME_PILOT_PROFILES_SCHEMA_TOKEN,
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": detector_contract["input_coordinate_system"],
         "input_preprocessing": detector_contract["input_preprocessing"],

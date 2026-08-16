@@ -171,7 +171,7 @@ def sweep_cleaning_tradeoff(
         operating["survey_hours"] = float(survey_hours)
         operating["recovered_mhz_hours"] = recovered_mhz_by_x[0.0] * float(survey_hours)
     return {
-        "schema_version": "pilot_proxy_cleaning_tradeoff_v1",
+        "schema_version": "pilotproxy_cleaning_tradeoff_v1",
         "run_dir": str(run_dir),
         "control_run_dir": str(control_run_dir) if control_run_dir else None,
         "control_floor_db": floor_db,

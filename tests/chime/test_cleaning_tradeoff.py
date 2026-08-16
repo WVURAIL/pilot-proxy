@@ -175,4 +175,4 @@ def test_write_outputs_produces_csv_json_and_figures(tmp_path) -> None:
     for path in written:
         assert path.exists() and path.stat().st_size > 0
     summary = json.loads((tmp_path / "out" / TRADEOFF_SUMMARY_FILENAME).read_text())
-    assert summary["schema_version"] == "pilot_proxy_cleaning_tradeoff_v1"
+    assert summary["schema_version"] == "pilotproxy_cleaning_tradeoff_v1"

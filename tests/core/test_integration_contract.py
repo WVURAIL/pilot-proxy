@@ -164,7 +164,7 @@ def test_detector_core_profile_json_roundtrip() -> None:
     assert profile.num_weight_terms == WEIGHT_TERMS
     assert profile.skipped_guard_bins == 1
     assert profile.reference_offset_bins == 2
-    assert profile.schema_version == "pilotproxy_detector_core_profile_v2"
+    assert profile.schema_version == "pilotproxy_detector_core_profile_v1"
     assert profile.host_masking_policy == "normalized_positive_excess_from_uint64_powers"
     assert profile.per_frequency_threshold is False
     assert reparsed.to_dict() == profile.to_dict()
@@ -249,7 +249,7 @@ def test_make_weights_from_receiver_profile_roundtrip(tmp_path) -> None:
     assert output.exists()
     assert output.with_suffix(output.suffix + ".manifest.json").exists()
     assert manifest["receiver_profile_hash"] == receiver_profile_hash(profile)
-    assert manifest["schema_version"] == "fstat_weight_manifest_v2"
+    assert manifest["schema_version"] == "pilotproxy_weight_manifest_v1"
     assert manifest["weight_coordinate_system"] == WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
     assert (
         manifest["input_coordinate_system"]

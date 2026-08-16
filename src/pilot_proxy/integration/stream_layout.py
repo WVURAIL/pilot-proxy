@@ -17,7 +17,7 @@ from .receiver_profile import ChannelSelection, ReceiverProfile
 from .schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
     COMBINE_MODE_PER_STREAM_DIAGNOSTIC,
-    STREAM_MAP_SCHEMA_VERSION,
+    STREAM_MAP_SCHEMA_TOKEN,
     SUPPORTED_QUANTIZATION_SCALE_MODES,
 )
 
@@ -70,7 +70,7 @@ class InputStreamMap:
     polarization_labels: dict[str, str] | None = None
 
     def __post_init__(self) -> None:
-        if self.schema_version != STREAM_MAP_SCHEMA_VERSION:
+        if self.schema_version != STREAM_MAP_SCHEMA_TOKEN:
             raise ValueError(
                 f"unsupported stream map schema_version: {self.schema_version!r}"
             )
@@ -117,7 +117,7 @@ class InputStreamMap:
                 raise ValueError("stream map entries must be objects.")
             streams.append(dict(item))
         return cls(
-            schema_version=str(raw.get("schema_version", STREAM_MAP_SCHEMA_VERSION)),
+            schema_version=str(raw.get("schema_version", STREAM_MAP_SCHEMA_TOKEN)),
             receiver_profile_id=str(raw["receiver_profile_id"]),
             stream_unit=str(raw.get("stream_unit", "input_stream")),
             num_streams=int(raw.get("num_streams", len(streams))),

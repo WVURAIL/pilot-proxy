@@ -88,7 +88,7 @@ from pilot_proxy.reference_channelizer import (  # noqa: E402
 )
 from pilot_proxy.result_schema import (  # noqa: E402
     COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
-    RESULT_SCHEMA_VERSION,
+    RESULT_SCHEMA_TOKEN,
     result_schema_object,
 )
 from pilot_proxy.testbench.quantize import (  # noqa: E402
@@ -1685,8 +1685,8 @@ def run(args: argparse.Namespace) -> int:
         "spectral_sense": str(args.spectral_sense),
     }
     summary = {
-        "schema_version": "pilot_proxy_validation_report_v1",
-        "result_schema_version": RESULT_SCHEMA_VERSION,
+        "schema_version": "pilotproxy_snr_validation_report_v1",
+        "result_schema_version": RESULT_SCHEMA_TOKEN,
         "project_identity": (
             "Standalone CUDA F-statistic DTV pilot detector and GNU Radio "
             "ATSC 1.0 testbench."

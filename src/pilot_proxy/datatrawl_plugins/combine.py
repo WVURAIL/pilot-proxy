@@ -31,8 +31,8 @@ from pilot_proxy.chime.products import (
 )
 from pilot_proxy.chime.reductions import write_reductions_npz
 from pilot_proxy.detector_contract import (
-    CHIME_RUN_CONFIG_SCHEMA_VERSION,
-    CHIME_STATS_SCHEMA_VERSION,
+    CHIME_RUN_CONFIG_SCHEMA_TOKEN,
+    CHIME_STATS_SCHEMA_TOKEN,
     normalized_positive_excess_policy,
 )
 from pilot_proxy.provenance import (
@@ -657,7 +657,7 @@ def combine_detector_products(
         common["reference_placement_summary"] = reference_placement
     common["freq_id_by_pilot"] = [int(v) for v in freq_id]
     _write_json(run_dir / "run_config.json",
-                {"schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION, **common})
+                {"schema_version": CHIME_RUN_CONFIG_SCHEMA_TOKEN, **common})
     if align_info.get("mode") == "event_keyed":
         identity_path = run_dir / "chime_frame_identity.npz"
         np.savez_compressed(
@@ -671,7 +671,7 @@ def combine_detector_products(
         if k not in ("frame_event_key", "frame_in_unit")
     }
     _write_json(run_dir / "stats.json", {
-        "schema_version": CHIME_STATS_SCHEMA_VERSION,
+        "schema_version": CHIME_STATS_SCHEMA_TOKEN,
         "num_frames": int(frame_index.size),
         "num_pilots": len(products),
         "combine_alignment": stats_alignment,

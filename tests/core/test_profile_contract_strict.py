@@ -55,7 +55,7 @@ def test_receiver_profile_rejects_flat_document() -> None:
     with pytest.raises(ValueError, match="missing required fields"):
         ReceiverProfile.from_dict(
             {
-                "schema_version": "fstat_receiver_profile_v1",
+                "schema_version": "pilotproxy_receiver_profile_v1",
                 "name": "flat_profile",
                 "sample_rate_hz": 800_000_000.0,
             }

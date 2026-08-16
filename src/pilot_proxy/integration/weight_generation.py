@@ -659,7 +659,7 @@ def write_weight_bank_from_receiver_profile(
     payload = header + weights_bytes
     output.write_bytes(payload)
     manifest = {
-        "schema_version": "fstat_weight_manifest_v2",
+        "schema_version": "pilotproxy_weight_manifest_v1",
         "weight_format_version": int(WEIGHT_VERSION),
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": input_coordinate_system_for_weight_coordinate(

@@ -60,7 +60,7 @@ def _write_point(point_dir, amplitude: float, *, seed: int,
         mask=detector["mask"],
     )
     manifest = {
-        "schema_version": "pilot_proxy_injection_v1",
+        "schema_version": "pilotproxy_injection_manifest_v1",
         "files": [{
             "amplitude_lsb": amplitude,
             "baseband_frequency_hz": -3059.0,

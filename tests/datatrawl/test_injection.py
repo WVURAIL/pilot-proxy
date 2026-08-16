@@ -121,7 +121,7 @@ def test_inject_directory_writes_manifest_with_per_file_phases(tmp_path) -> None
 
     assert [entry["phase_seed"] for entry in entries] == [11, 12]
     manifest = json.loads((out / INJECTION_MANIFEST_FILENAME).read_text())
-    assert manifest["schema_version"] == "pilot_proxy_injection_v1"
+    assert manifest["schema_version"] == "pilotproxy_injection_manifest_v1"
     assert {e["output"] for e in manifest["files"]} == {
         str(out / "event_506.h5"), str(out / "event_521.h5")
     }

@@ -34,7 +34,7 @@ from pilot_proxy.reference_channelizer import (
 from .schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
     DETECTOR_CORE_ID_PILOT_PROXY_CUDA_LOCAL_REFERENCE_POWER_RATIO,
-    RECEIVER_PROFILE_SCHEMA_VERSION,
+    RECEIVER_PROFILE_SCHEMA_TOKEN,
     SUPPORTED_QUANTIZATION_SCALE_MODES,
 )
 
@@ -271,7 +271,7 @@ class ReceiverProfile:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.schema_version != RECEIVER_PROFILE_SCHEMA_VERSION:
+        if self.schema_version != RECEIVER_PROFILE_SCHEMA_TOKEN:
             raise ValueError(
                 "unsupported receiver profile schema_version: "
                 f"{self.schema_version!r}"
@@ -761,7 +761,7 @@ def default_reference_receiver_profile(
 ) -> ReceiverProfile:
     """Return the shipped 800 MS/s, 400-800 MHz reference receiver profile."""
     return ReceiverProfile(
-        schema_version=RECEIVER_PROFILE_SCHEMA_VERSION,
+        schema_version=RECEIVER_PROFILE_SCHEMA_TOKEN,
         receiver_profile_id=REFERENCE_PROFILE_ID,
         instrument_name="reference",
         sample_rate_hz=REFERENCE_ADC_SAMPLE_RATE_HZ,

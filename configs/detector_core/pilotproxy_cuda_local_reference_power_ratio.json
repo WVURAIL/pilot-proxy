@@ -1,5 +1,5 @@
 {
-  "schema_version": "pilotproxy_detector_core_profile_v2",
+  "schema_version": "pilotproxy_detector_core_profile_v1",
   "detector_core_id": "pilotproxy_cuda_local_reference_power_ratio",
   "kernel_contract": {
     "detector_window_samples": 128,

@@ -139,10 +139,10 @@
       "lower_hz": 400000000.0,
       "upper_hz": 800000000.0
     },
-    "schema_version": "fstat_receiver_profile_v1"
+    "schema_version": "pilotproxy_receiver_profile_v1"
   },
-  "receiver_profile_hash": "c8fc7998e41aecaae1798d66a12fcb838a285ea7f9576bf537012d4c204d8dd6",
-  "schema_version": "fstat_weight_manifest_v2",
+  "receiver_profile_hash": "da047cdf453764e4b8c01514602034456e32a39256e8c5980f2c052554500e45",
+  "schema_version": "pilotproxy_weight_manifest_v1",
   "target_reference_layout": [
     {
       "adaptive_reference_placement": true,

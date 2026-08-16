@@ -193,8 +193,8 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
     assert run_config["provenance"]["receiver_profile_sha256"] == (
         stats["receiver_profile_sha256"]
     )
-    assert run_config["schema_version"] == "fstat_chime_run_config_v2"
-    assert stats["schema_version"] == "fstat_chime_stats_v2"
+    assert run_config["schema_version"] == "pilotproxy_chime_run_config_v1"
+    assert stats["schema_version"] == "pilotproxy_chime_stats_v1"
     assert run_config["detector_contract"] == stats["detector_contract"]
     assert stats["detector_contract"]["schema_version"] == (
         "pilotproxy_chime_detector_contract_v1"

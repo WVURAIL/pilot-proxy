@@ -364,7 +364,7 @@ def main(argv: list[str] | None = None) -> int:
 
     selected_freqs = channel_freqs[np.asarray(base_channels, dtype=np.int64)]
     metadata = {
-        "schema_version": "fstat_atsc_detector_input_v1",
+        "schema_version": "pilotproxy_atsc_detector_input_v1",
         "input_iq": str(args.input_iq),
         "iq_sample_rate_hz": float(args.iq_sample_rate_hz),
         "adc_sample_rate_hz": float(args.adc_sample_rate_hz),

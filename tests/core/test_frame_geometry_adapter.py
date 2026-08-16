@@ -7,7 +7,7 @@ import pytest
 from pilot_proxy.detector_reference import coarse_power_ratio_cpu_reference_packed
 from pilot_proxy.detector_geometry import (
     DetectorFrameLayout,
-    STREAM_LAYOUT_SCHEMA_VERSION,
+    STREAM_LAYOUT_SCHEMA_TOKEN,
     apply_spectral_sense_to_detector_matrix,
     block_time_stream_to_detector_matrix,
     build_stream_map,
@@ -57,7 +57,7 @@ def test_detector_frame_geometry_derived_values() -> None:
     assert geometry.detector_rows_per_frame == REFERENCE_DETECTOR_ROWS_PER_FRAME
     assert geometry.samples_per_result == REFERENCE_SAMPLES_PER_RESULT
     assert geometry.to_dict() == {
-        "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+        "schema_version": STREAM_LAYOUT_SCHEMA_TOKEN,
         "frame_size_samples": REFERENCE_FRAME_SIZE_SAMPLES,
         "detector_window_samples": REFERENCE_DETECTOR_WINDOW_SAMPLES,
         "windows_per_stream": REFERENCE_WINDOWS_PER_STREAM,
@@ -176,7 +176,7 @@ def test_multi_feed_detector_frame_layout_and_stream_map() -> None:
         num_selected_channels=1,
     ).to_dict()
     assert layout == {
-        "schema_version": STREAM_LAYOUT_SCHEMA_VERSION,
+        "schema_version": STREAM_LAYOUT_SCHEMA_TOKEN,
         "frame_size_samples": REFERENCE_FRAME_SIZE_SAMPLES,
         "detector_window_samples": REFERENCE_DETECTOR_WINDOW_SAMPLES,
         "windows_per_stream": REFERENCE_WINDOWS_PER_STREAM,

@@ -9,10 +9,24 @@ from typing import Any
 import numpy as np
 
 from pilot_proxy.json_utils import json_dumps_strict
+from pilot_proxy.schema_identity import schema_token
 
-CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION = "pilotproxy_chime_detector_contract_v1"
-CHIME_RUN_CONFIG_SCHEMA_VERSION = "fstat_chime_run_config_v2"
-CHIME_STATS_SCHEMA_VERSION = "fstat_chime_stats_v2"
+CHIME_DETECTOR_CONTRACT_SCHEMA_NAME = "pilotproxy_chime_detector_contract"
+CHIME_DETECTOR_CONTRACT_SCHEMA_REVISION = 1
+CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN = schema_token(
+    CHIME_DETECTOR_CONTRACT_SCHEMA_NAME,
+    CHIME_DETECTOR_CONTRACT_SCHEMA_REVISION,
+)
+CHIME_RUN_CONFIG_SCHEMA_NAME = "pilotproxy_chime_run_config"
+CHIME_RUN_CONFIG_SCHEMA_REVISION = 1
+CHIME_RUN_CONFIG_SCHEMA_TOKEN = schema_token(
+    CHIME_RUN_CONFIG_SCHEMA_NAME, CHIME_RUN_CONFIG_SCHEMA_REVISION
+)
+CHIME_STATS_SCHEMA_NAME = "pilotproxy_chime_stats"
+CHIME_STATS_SCHEMA_REVISION = 1
+CHIME_STATS_SCHEMA_TOKEN = schema_token(
+    CHIME_STATS_SCHEMA_NAME, CHIME_STATS_SCHEMA_REVISION
+)
 NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE = "normalized_positive_excess_decision"
 COARSE_POWER_RATIO_VALID_RULE = "p_ref_sum != 0"
 # The corrected rule compares against the H0 zero-point of F implied by the
@@ -170,7 +184,7 @@ def build_chime_detector_contract(
         else str(input_coordinate_system)
     )
     contract: dict[str, Any] = {
-        "schema_version": CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION,
+        "schema_version": CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN,
         "detector_window_samples": int(detector_window_samples),
         "skipped_guard_bins": int(skipped_guard_bins),
         "reference_offset_bins": int(reference_offset_bins),
@@ -217,9 +231,15 @@ def detector_contract_sha256(contract: dict[str, Any]) -> str:
 
 __all__ = [
     "ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION",
-    "CHIME_DETECTOR_CONTRACT_SCHEMA_VERSION",
-    "CHIME_RUN_CONFIG_SCHEMA_VERSION",
-    "CHIME_STATS_SCHEMA_VERSION",
+    "CHIME_DETECTOR_CONTRACT_SCHEMA_NAME",
+    "CHIME_DETECTOR_CONTRACT_SCHEMA_REVISION",
+    "CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN",
+    "CHIME_RUN_CONFIG_SCHEMA_NAME",
+    "CHIME_RUN_CONFIG_SCHEMA_REVISION",
+    "CHIME_RUN_CONFIG_SCHEMA_TOKEN",
+    "CHIME_STATS_SCHEMA_NAME",
+    "CHIME_STATS_SCHEMA_REVISION",
+    "CHIME_STATS_SCHEMA_TOKEN",
     "COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO",
     "DETECTOR_POWER_RATIO_DEFINITION",
     "INPUT_COORDINATE_POST_SPECTRAL_SENSE_NORMALIZED",

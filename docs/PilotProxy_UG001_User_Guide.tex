@@ -492,7 +492,7 @@ input to the batched file automatically.  If neither file exists, run
 The detector JSON includes:
 \begin{itemize}
   \item \field{selected_weight_layout}
-  \item \field{result_schema} with \code{schema_version=pilot_proxy_result_v2}
+  \item \field{result_schema} with \code{schema_version=pilotproxy_result_schema_v1}
   \item \field{layout} with \field{frame_size_samples}, \field{num_input_streams}, \field{windows_per_stream}, and \field{detector_rows_per_frame}
   \item \field{mask_rule}, \field{target_norm_sq}, \field{reference_norm_sum_sq}, and \field{null_power_ratio}
   \item per-block \field{mask} and \field{normalized_positive_excess_mask}, exact powers, \field{coarse_power_ratio}, raw \field{raw_pilot_excess}, norm-corrected \field{normalized_pilot_excess}, and estimated shelf SNR.
@@ -730,7 +730,7 @@ science products and diagnostics.
 
 JSON reports do not emit NaN or infinity; values that are not finite are serialized as \code{null}. CSV files may retain NaN text when analysis software can represent it.
 
-Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilot_proxy_result_v2}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppSchemaVThree} as defined in \code{docs/PRODUCT_SCHEMA.md}.
+Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilotproxy_result_schema_v1}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppSchemaVThree} as defined in \code{docs/PRODUCT_SCHEMA.md}.
 
 The combined-row statistic is:
 \begin{equation}

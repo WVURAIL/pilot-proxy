@@ -5,9 +5,17 @@ from __future__ import annotations
 
 from typing import Any
 
-RESULT_SCHEMA_VERSION = "pilot_proxy_result_v2"
+from pilot_proxy.schema_identity import schema_token
+
+RESULT_SCHEMA_NAME = "pilotproxy_result_schema"
+RESULT_SCHEMA_REVISION = 1
+RESULT_SCHEMA_TOKEN = schema_token(RESULT_SCHEMA_NAME, RESULT_SCHEMA_REVISION)
 COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO = "all_rows_summed_before_ratio"
-MASK_CONVENTION_VERSION = "fstat_mask_convention_v1"
+MASK_CONVENTION_SCHEMA_NAME = "pilotproxy_mask_convention"
+MASK_CONVENTION_SCHEMA_REVISION = 1
+MASK_CONVENTION_SCHEMA_TOKEN = schema_token(
+    MASK_CONVENTION_SCHEMA_NAME, MASK_CONVENTION_SCHEMA_REVISION
+)
 MASK_VALUE_EXCLUDED = 1
 MASK_VALUE_INCLUDED = 0
 LOCKED_DETECTOR_WINDOW_SAMPLES = 128
@@ -175,7 +183,7 @@ def threshold_contract(threshold: dict[str, Any] | None) -> dict[str, Any]:
 def mask_convention() -> dict[str, Any]:
     """Return the generic mask convention for before/after averages."""
     return {
-        "schema_version": MASK_CONVENTION_VERSION,
+        "schema_version": MASK_CONVENTION_SCHEMA_TOKEN,
         "mask_value_excluded": int(MASK_VALUE_EXCLUDED),
         "mask_value_included": int(MASK_VALUE_INCLUDED),
         "definition": MASKED_AVERAGE_DEFINITION,
@@ -198,7 +206,7 @@ def result_schema_object(
 ) -> dict[str, Any]:
     """Build the current public result-schema object for a run."""
     return {
-        "schema_version": RESULT_SCHEMA_VERSION,
+        "schema_version": RESULT_SCHEMA_TOKEN,
         "statistic": statistic_contract(),
         "layout": result_layout(
             frame_size_samples=int(frame_size_samples),

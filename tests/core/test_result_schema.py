@@ -10,7 +10,7 @@ from pilot_proxy.masking import masked_mean_excluding
 from pilot_proxy.result_schema import (
     COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
     MASK_VALUE_EXCLUDED,
-    RESULT_SCHEMA_VERSION,
+    RESULT_SCHEMA_TOKEN,
     fixed_point_contract,
     result_layout,
     result_schema_object,
@@ -58,7 +58,7 @@ def test_result_schema_object_contains_fixed_contract_and_threshold() -> None:
         threshold=THRESHOLD,
     )
 
-    assert schema["schema_version"] == RESULT_SCHEMA_VERSION
+    assert schema["schema_version"] == RESULT_SCHEMA_TOKEN
     assert schema["layout"]["num_input_streams"] == NUM_INPUT_STREAMS
     assert schema["calibration"]["pilot_below_data_db"] == PILOT_BELOW_DATA_DB
     assert schema["threshold"]["threshold_half_den"] == THRESHOLD[

@@ -9,8 +9,8 @@ import pytest
 pytest.importorskip("h5py")
 
 from pilot_proxy.detector_contract import (
-    CHIME_RUN_CONFIG_SCHEMA_VERSION,
-    CHIME_STATS_SCHEMA_VERSION,
+    CHIME_RUN_CONFIG_SCHEMA_TOKEN,
+    CHIME_STATS_SCHEMA_TOKEN,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_chime_detector_contract,
     normalized_positive_excess_policy,
@@ -127,20 +127,20 @@ def _write_products(
         time_reverse_detector_windows_before_kernel=True,
     )
     run_config: dict[str, object] = {
-        "schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION,
+        "schema_version": CHIME_RUN_CONFIG_SCHEMA_TOKEN,
         "detector_contract": detector_contract,
         "detector_window_samples": 256 if corrupt_detector_window_metadata else 128,
     }
     run_config["mask_policy"] = mask_policy
     (run_dir / "run_config.json").write_text(json.dumps(run_config), encoding="utf-8")
     (run_dir / "input_manifest.json").write_text(
-        json.dumps({"schema_version": "fstat_chime_input_manifest_v1"}),
+        json.dumps({"schema_version": "pilotproxy_chime_input_manifest_v1"}),
         encoding="utf-8",
     )
     (run_dir / "stats.json").write_text(
         json.dumps(
             {
-                "schema_version": CHIME_STATS_SCHEMA_VERSION,
+                "schema_version": CHIME_STATS_SCHEMA_TOKEN,
                 "num_frames": 3,
                 "num_pilots": 2,
                 "detector_window_samples": 128,

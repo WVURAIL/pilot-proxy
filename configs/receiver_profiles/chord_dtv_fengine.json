@@ -1,5 +1,5 @@
 {
-  "schema_version": "fstat_receiver_profile_v1",
+  "schema_version": "pilotproxy_receiver_profile_v1",
   "receiver_profile_id": "chord_dtv_fengine",
   "instrument_name": "CHORD",
   "rf_band": {

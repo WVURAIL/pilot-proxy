@@ -200,7 +200,7 @@ def analyze_injection_recovery(
         log_slope = float(np.polyfit(lx, ly, 1)[0])
 
     return {
-        "schema_version": "pilot_proxy_injection_recovery_v1",
+        "schema_version": "pilotproxy_injection_recovery_v1",
         "points": [
             {k: v for k, v in row.items()} for row in rows
         ],

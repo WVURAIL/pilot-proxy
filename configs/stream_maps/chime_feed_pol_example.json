@@ -1,5 +1,5 @@
 {
-  "schema_version": "fstat_stream_map_v1",
+  "schema_version": "pilotproxy_stream_map_v1",
   "receiver_profile_id": "chime_dtv_fengine",
   "stream_unit": "feed_polarization",
   "num_feed_indices_within_cylinder": 256,

@@ -11,7 +11,7 @@ from typing import Any
 
 from .schemas import (
     DETECTOR_CORE_ID_PILOT_PROXY_CUDA_LOCAL_REFERENCE_POWER_RATIO,
-    DETECTOR_CORE_PROFILE_SCHEMA_VERSION,
+    DETECTOR_CORE_PROFILE_SCHEMA_TOKEN,
 )
 
 DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
@@ -131,7 +131,7 @@ class DetectorCoreProfile:
     fixed_point_limits: dict[str, int]
 
     def __post_init__(self) -> None:
-        if self.schema_version != DETECTOR_CORE_PROFILE_SCHEMA_VERSION:
+        if self.schema_version != DETECTOR_CORE_PROFILE_SCHEMA_TOKEN:
             raise ValueError(
                 "unsupported detector core profile schema_version: "
                 f"{self.schema_version!r}"

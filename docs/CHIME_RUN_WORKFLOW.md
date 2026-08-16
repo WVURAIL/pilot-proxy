@@ -203,7 +203,7 @@ the corresponding SHA-256 fields to compare artifact contents across local,
 CANFAR, and review systems.
 
 `run_config.json` and `stats.json` use schema versions
-`fstat_chime_run_config_v2` and `fstat_chime_stats_v2`. Both carry a matching
+`pilotproxy_chime_run_config_v1` and `pilotproxy_chime_stats_v1`. Both carry a matching
 `detector_contract` object with schema
 `pilotproxy_chime_detector_contract_v1`. The contract records the `K = 128`
 geometry, the positive-excess rule, the `uint64` accumulator, and the

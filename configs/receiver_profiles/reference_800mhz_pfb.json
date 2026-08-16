@@ -1,5 +1,5 @@
 {
-  "schema_version": "fstat_receiver_profile_v1",
+  "schema_version": "pilotproxy_receiver_profile_v1",
   "receiver_profile_id": "reference_800mhz_pfb",
   "instrument_name": "reference",
   "rf_band": {

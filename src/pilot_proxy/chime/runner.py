@@ -14,8 +14,8 @@ from pilot_proxy.detect import detect_packed_detector_input
 from pilot_proxy.detector_geometry import spectral_sense_requires_time_reversal
 from pilot_proxy.detector_weights import DetectorWeightBank
 from pilot_proxy.detector_contract import (
-    CHIME_RUN_CONFIG_SCHEMA_VERSION,
-    CHIME_STATS_SCHEMA_VERSION,
+    CHIME_RUN_CONFIG_SCHEMA_TOKEN,
+    CHIME_STATS_SCHEMA_TOKEN,
     COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_chime_detector_contract,
@@ -937,7 +937,7 @@ def run_chime_analysis(
         ),
     )
     run_config_payload: dict[str, Any] = {
-        "schema_version": CHIME_RUN_CONFIG_SCHEMA_VERSION,
+        "schema_version": CHIME_RUN_CONFIG_SCHEMA_TOKEN,
         "input_dir": str(input_dir),
         "output_dir": str(output_dir),
         "receiver_profile": str(receiver_profile_path),
@@ -966,7 +966,7 @@ def run_chime_analysis(
         )
     run_config_path = write_run_config(run_dir, run_config_payload)
     stats_payload: dict[str, Any] = {
-        "schema_version": CHIME_STATS_SCHEMA_VERSION,
+        "schema_version": CHIME_STATS_SCHEMA_TOKEN,
         "absolute_time_used": False,
         "time_axis": "contiguous_file_order_frame_index",
         "num_input_streams": int(selected[0].num_input_streams),

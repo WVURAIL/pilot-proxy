@@ -20,6 +20,7 @@ from pilot_proxy.detector_contract import (
     normalize_weight_coordinate_system,
 )
 from pilot_proxy.provenance import file_sha256, git_blob_sha1
+from pilot_proxy.schema_identity import schema_token
 
 from .atsc_channels import (
     ATSC_CHANNEL_WIDTH_HZ,
@@ -41,7 +42,11 @@ CRC32_UNSIGNED_MASK = 0xFFFFFFFF
 # tolerance for decimal MHz/Hertz roundoff in command-line inputs.
 DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ = 10.0
 HZ_PER_MHZ = 1.0e6
-WEIGHT_MANIFEST_SCHEMA_VERSION = "fstat_weight_manifest_v2"
+WEIGHT_MANIFEST_SCHEMA_NAME = "pilotproxy_weight_manifest"
+WEIGHT_MANIFEST_SCHEMA_REVISION = 1
+WEIGHT_MANIFEST_SCHEMA_TOKEN = schema_token(
+    WEIGHT_MANIFEST_SCHEMA_NAME, WEIGHT_MANIFEST_SCHEMA_REVISION
+)
 _REFERENCE_FIELD_PART = "reference"
 _OLD_GAP_FIELD_PART = "guard"
 _OFFSET_FIELD_PART = "offset"
@@ -511,10 +516,10 @@ def _validate_manifest_spacing_schema(manifest: dict[str, object]) -> None:
     if not manifest:
         return
     schema_version = manifest.get("schema_version")
-    if schema_version != WEIGHT_MANIFEST_SCHEMA_VERSION:
+    if schema_version != WEIGHT_MANIFEST_SCHEMA_TOKEN:
         raise ValueError(
             "Unsupported weight manifest schema_version: "
-            f"{schema_version!r}; expected {WEIGHT_MANIFEST_SCHEMA_VERSION!r}."
+            f"{schema_version!r}; expected {WEIGHT_MANIFEST_SCHEMA_TOKEN!r}."
         )
     coordinate = manifest.get("weight_coordinate_system")
     if coordinate is None:

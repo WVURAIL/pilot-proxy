@@ -227,7 +227,7 @@ def summarize_result_json(
         _remove_discontinued_histogram(snr_histogram)
 
     summary = {
-        "schema_version": "pilot_proxy_result_summary_v1",
+        "schema_version": "pilotproxy_result_summary_v1",
         "input_json": str(input_json),
         "num_rows": int(len(rows)),
         "summary_csv": str(summary_csv),

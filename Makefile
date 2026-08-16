@@ -28,6 +28,7 @@ integration-check:
 	$(PYTHON) scripts/check_current_profile_contract.py
 	$(PYTHON) scripts/check_current_measurement_vocabulary.py
 	$(PYTHON) scripts/check_current_configuration_identity.py
+	$(PYTHON) scripts/check_current_schema_identity.py
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests/datatrawl -q -rs
 
 docs-specs:
@@ -50,6 +51,7 @@ release-check:
 	$(PYTHON) scripts/check_current_profile_contract.py
 	$(PYTHON) scripts/check_current_measurement_vocabulary.py
 	$(PYTHON) scripts/check_current_configuration_identity.py
+	$(PYTHON) scripts/check_current_schema_identity.py
 	$(PYTHON_TEST_ENV) $(PYTHON) tools/emit_fxfft_tables.py --check
 	$(PYTHON_TEST_ENV) $(PYTHON) -m compileall -q src tests
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
