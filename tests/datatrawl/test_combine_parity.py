@@ -18,13 +18,14 @@ import numpy as np
 import pytest
 
 h5py = pytest.importorskip("h5py")
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt
 from datatrawl.instruments import load_instrument
 from datatrawl.interfaces import RunContext
 
 from pilot_proxy.chime.runner import run_chime_analysis
+from pilot_proxy.chime.products import SCAN_INPUT_MANIFEST_SCHEMA_TOKEN
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED
 from pilot_proxy.detector_contract import (
     normalized_positive_excess,
@@ -112,6 +113,7 @@ def test_combine_matches_multipilot_runner(tmp_path):
         default_reference_receiver_profile(frame_size_samples=NFFT,
                                            num_input_streams=N_FEEDS),
         spectral_sense=SPECTRAL_SENSE_INVERTED,
+        stream_map_required=False,
     )
     profile_path = tmp_path / "receiver_profile.json"
     profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
@@ -178,3 +180,7 @@ def test_combine_matches_multipilot_runner(tmp_path):
     # detector products are stacked (ch14 -> 844, ch15 -> 829).
     stats = json.loads((out_dir / "stats.json").read_text(encoding="utf-8"))
     assert stats["freq_id_by_pilot"] == [FREQ_IDS[ch] for ch in sorted(CHANNELS)]
+    input_manifest = json.loads(
+        (out_dir / "input_manifest.json").read_text(encoding="utf-8")
+    )
+    assert input_manifest["schema_version"] == SCAN_INPUT_MANIFEST_SCHEMA_TOKEN

@@ -8,8 +8,6 @@ Gaussian H0 core model (amplitude-free: mean/sigma from the core window) to
 estimate how much of the kept data is contamination (excess over H0).
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

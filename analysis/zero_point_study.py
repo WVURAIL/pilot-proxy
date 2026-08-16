@@ -8,8 +8,6 @@ H0 core; channels where clipping removes most frames (signal-dominated)
 are flagged rather than trusted.
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

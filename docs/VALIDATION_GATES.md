@@ -1,8 +1,8 @@
-# Validation gates for the chime-pilots relaunch
+# Validation gates for a CHIME archive relaunch
 
-This is the complete gate set for restarting the production scan after the
-2026-07-29 baseband frame correction and the kernel 2.0.0 (v2 fine
-reduction) upgrade. Every gate has a command and a pass criterion. The scan
+This is the complete gate set for restarting a production scan after the
+2026-07-29 baseband-frame correction. Every gate has a command and a pass
+criterion. The scan
 does not relaunch until every gate in both sections has passed; the
 container-verified section records the evidence already in hand, and the
 A100 section is the remaining mandatory work on production infrastructure.
@@ -23,27 +23,25 @@ PAPER_PLAN Amendment A1).
 2. **Deployed-configuration recovery of the buried detection.** The numpy
    replica of the production configuration (2048 streams, per-stream
    3-sigma int4 quantization, spectral flip, shipped int4 weights) on the
-   event file. Pass: per-chunk v1 F far above the mistuned baseline.
+   event file. Pass: per-chunk coarse (F) far above the mistuned baseline.
    Measured: F = 12.85-13.99 over 12 chunks (mean excess +1228%), versus
    0.997 +/- 0.002 with the archived legacy bank.
 
 3. **Full test tree.**
    `PYTHONPATH=src python3 -m pytest tests -q`
-   Pass: zero failures. Measured: 204 passed, 16 skipped (GPU- and
-   datatrawl-dependent tests skip off-infrastructure by design).
+   Pass: zero failures. GPU- and datatrawl-dependent tests may skip only when
+   their optional runtime dependencies are absent.
 
-4. **CPU kernel-reference self-test (v2 semantics).**
+4. **CPU kernel-reference self-test.**
    `make -C cuda test_ref`
    Pass: builds with g++ and exits 0. Covers exact row sums against an
-   independently ordered brute force and the bit-exact all-bin v1 marginal
-   identity.
+   independently ordered brute force and the bit-exact all-bin coarse-power
+   marginal identity.
 
-5. **Legacy reproducibility.** Profiles without a declared
-   `baseband_frame` reproduce the historical generation bit-for-bit and
-   carry `baseband_frame_warning` in their manifests
-   (`tests/core/test_integration_contract.py`,
-   `tests/test_cli.py::test_make_weights_reports_adaptive_reference_on_stderr`
-   retain the legacy reference profile as a regression fixture).
+5. **Active/historical bank separation.** The active CHIME manifest resolves
+   the DC-centered profile and its binary digest. The historical half-band
+   pair remains under `weights/legacy_halfband/`; no default resource or
+   operational example resolves it. See `weights/README.md`.
 
 ## Section 2 - mandatory on the A100 before relaunch
 
@@ -52,10 +50,10 @@ failure.
 
 1. **Rebuild the kernel library.**
    `make -C cuda clean && make -C cuda`
-   Pass: builds; `FStat_GetVersion` reports 2.1.x
+   Pass: builds; `FStat_GetVersion` reports 2.3.0
    (`python3 -c "from pilot_proxy.kernel import FStatKernel; print(FStatKernel().version.as_string())"`).
 
-2. **CUDA regression + exact v2 parity.**
+2. **CUDA regression + exact fixed-point parity.**
    `make -C cuda test_cuda`
    Pass: exit 0. Includes `test_matched_filter_row_projections_exact` and
    `test_matched_filter_row_projections_batch_exact`: GPU row sums equal the CPU reference
@@ -68,8 +66,8 @@ failure.
    Pass: zero failures, zero skips. `test_matched_filter_row_projections_gpu.py` enforces the
    numpy-reference equality, the marginal identity, and the pre-registered
    ULP gate (cupy complex64 fine reduction within 5e-6 relative of the
-   float64 prototype). Note: this test *fails* rather than skips if the
-   loaded library predates 2.0.0.
+   float64 prototype). These tests fail rather than skip if the loaded library
+   lacks a required current capability.
 
 4. **Frame parity - CLOSED by census (2026-07-29).** The legacy-epoch
    integrated spectra (salvaged before the CANFAR teardown) settle the
@@ -97,7 +95,7 @@ failure.
    pass criteria, all from the produced npz:
    - `schema_version == pilotproxy_per_pilot_product_v1`;
    - `detector_version` embeds the installed `pilot-proxy/<version>`,
-     kernel 2.1.x, the library sha, and the profile hash via the weight
+     kernel 2.3.0, the library sha, and the profile hash via the weight
      bank;
    - `fine_status == enabled`, `fine_power_ratio.shape == (n_frames, 256)`;
    - no v1-marginal identity assertion fired (the run raises on
@@ -117,15 +115,16 @@ failure.
    leak, per PAPER_PLAN A1.4).
 
 7. **Combine compatibility.** `chime-combine` over two smoke products.
-   Pass: succeeds on matching v3 products; refuses a mixed v2/v3 pair
-   loudly (schema_version is a combine invariant). Note: combine currently
-   carries the v1 field set; fine products live in the per-channel npz.
+   Pass: succeeds when both products satisfy
+   `pilotproxy_per_pilot_product_v1`; refuses any missing, mismatched, or
+   non-current schema/decision identity. Fine products remain in the
+   authoritative per-channel NPZ files rather than the combined stack.
 
 ## Relaunch configuration
 
-Unchanged from the first epoch except: rebuilt bank
-(`weights/chime_dtv_weights_k128.bin`, manifest hash
-`135bb194cfa58f67...`), `--checkpoint-every 50`, `--name chime-pilots-v2`
-(new name; do not resume legacy-epoch products - the detector_version
-invariant will refuse, by design). `fine_products=auto` is the default;
+Use the rebuilt bank (`weights/chime_dtv_weights_k128.bin`, binary SHA-256
+prefix `1383c6d0ca521a26`, manifest SHA-256 prefix `d0ccc8162a350e9d`),
+`--checkpoint-every 50`, and a non-versioned operational run name such as
+`--name chime-pilots-current`. Do not resume legacy-epoch products; the
+detector-version invariant refuses them by design. `fine_products=auto` is the default;
 set `fine_products=on` to hard-fail if the library on the node is stale.

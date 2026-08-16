@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 pytest.importorskip("h5py")
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt
 from datatrawl.plugins.readers.chime_baseband import ChimeBasebandReader

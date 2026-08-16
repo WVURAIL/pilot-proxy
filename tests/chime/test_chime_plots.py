@@ -117,8 +117,11 @@ def test_chime_plots_write_expected_files_and_summary_rows(tmp_path) -> None:
         rows = list(csv.DictReader(f))
     assert [int(row["physical_channel"]) for row in rows] == [14, 30]
     assert rows[0]["num_detector_valid_frames"] == "4"
-    assert rows[0]["num_positive_excess_frames"] == "4"
-    assert "positive_excess_fraction" in rows[0]
+    assert rows[0]["num_finite_data_shelf_snr_estimates"] == "4"
+    assert "finite_data_shelf_snr_fraction_of_valid_frames" in rows[0]
+    assert "mask_fraction_total" in rows[0]
+    assert "num_positive_excess_frames" not in rows[0]
+    assert "positive_excess_fraction" not in rows[0]
     assert "mean_estimated_data_shelf_snr_db" in rows[0]
     assert "max_estimated_data_shelf_snr_db" in rows[0]
     assert "p95_estimated_data_shelf_snr_db" not in rows[0]

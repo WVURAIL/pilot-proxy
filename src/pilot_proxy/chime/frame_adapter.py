@@ -13,7 +13,10 @@ from pilot_proxy.detector_geometry import (
     apply_spectral_sense_to_detector_matrix,
     stream_time_block_to_detector_matrix,
 )
-from pilot_proxy.integration.packing import pack_channelized_streams_for_detector
+from pilot_proxy.integration.packing import (
+    estimate_complex_scale,
+    pack_channelized_streams_for_detector,
+)
 from pilot_proxy.integration.schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
     QUANTIZATION_SCALE_MODE_GLOBAL,
@@ -140,17 +143,12 @@ def estimate_global_complex_scale(
     bits_per_component: int = DEFAULT_BITS_PER_COMPONENT,
     clip_sigma: float = 3.0,
 ) -> float:
-    """Estimate a stable complex-float quantization scale for one pilot run."""
-    arr = np.asarray(values)
-    sigma = float(np.std(arr.real))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(arr.imag))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(np.abs(arr)))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        raise ValueError("could not estimate a positive quantization scale")
-    max_int = (1 << (int(bits_per_component) - 1)) - 1
-    return float(max_int) / (float(clip_sigma) * sigma)
+    """Compatibility wrapper around the canonical integration estimator."""
+    return estimate_complex_scale(
+        values,
+        bits_per_component=int(bits_per_component),
+        clip_sigma=float(clip_sigma),
+    )
 
 
 def _pack_native_quantized_block(

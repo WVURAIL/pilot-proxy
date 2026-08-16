@@ -5,8 +5,10 @@ reported ATSC pilot-to-data ratio changes with the estimator convention or
 with the sample span. We keep the two effects separate because either one can
 move the calibration number without changing the detector.
 
-Until the missing audits and stationary-span sweep are retained, T2 remains
-open and every number that depends on this calibration is provisional.
+The audit and trim reports named below are now retained. T2 remains open
+because their input IQ captures, file hashes, exact commands, and the
+stationary-span sweep bundle are not all present in this repository; numbers
+that depend on this calibration therefore remain provisional.
 
 ## Artifacts committed in this directory
 
@@ -18,6 +20,12 @@ open and every number that depends on this calibration is provisional.
   `measured_pilot_below_data_direct_db = 11.0828912346` dB.
 - `block_profile_20260718.txt` records the ten-block coherent projection that
   identifies the generator startup transient.
+- `audit_v3.json` is the default-span audit of the trimmed capture and reports
+  a direct result of 11.4969224266 dB.
+- `audit_v4.json` is the default-span audit of the stationary trimmed capture
+  and reports a direct result of 11.4044465569 dB.
+- `trim_report.json` and `trim_report_stationary.json` record the corresponding
+  pilot-amplitude adjustments.
 
 ## Recorded 2-by-2 comparison
 
@@ -34,25 +42,22 @@ full-span records, the comparison gives:
 
 For the first two bullets, each pair is ordered original/trimmed. The three
 trim-shift values are ordered default-span direct/full-span direct/projection.
-These values are the recorded decomposition; it is not yet self-contained
-because the default-span audit JSON files are not both present in this
-directory.
+These values are the recorded decomposition. The JSON results are present, but
+the decomposition is not independently reproducible from a bare clone because
+the source IQ captures and complete command/hash ledger are not committed.
 
-## Status of the remaining artifacts
+## Status of the remaining evidence
 
-- **Still to retain:** `audit_v3.json`, the default-span audit of the trimmed
-  capture with direct result 11.497 dB. The planning record places this file
-  at `~/audit_v3.json` on `cupy-gpu`; it is not in this checkout.
-- **Completed at the repository root:** `trim_report.json` has been
-  regenerated after the `gain_db` formula correction. It now records
+- **Retained here:** `trim_report.json` was regenerated after the `gain_db`
+  formula correction. It records
   amplitude factor `1.0629299002401351` and power gain
   `0.5300924787490547` dB. The earlier value 0.265 dB was a reporting-formula
   error; the trimmed capture itself was not the error.
-- **Partially completed:** `trim_report_stationary.json` is committed at the
-  repository root. The cropped capture and `audit_v4.json` are not committed,
-  and the crop -> retrim -> audit -> sweep sequence required by the G3b
-  protocol remains unfinished.
+- **Retained here:** `trim_report_stationary.json` and `audit_v4.json` document
+  the cropped/retrimmed audit result.
+- **Still external:** the original, trimmed, cropped, and stationary IQ bytes;
+  their cryptographic identities; the exact crop/retrim/audit commands; and the
+  stationary-span sweep output required by the G3b protocol.
 
-T2 closes only after the missing audit JSON files, stationary input identity,
-and stationary-span sweep are retained together with the exact commands used
-to produce them.
+T2 closes only after the input identities, exact commands, and stationary-span
+sweep are retained together.

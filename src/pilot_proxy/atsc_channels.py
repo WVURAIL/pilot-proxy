@@ -59,6 +59,22 @@ def parse_physical_channel_range(value: str) -> list[int]:
     return list(range(start, stop + step, step))
 
 
+def parse_physical_channel_spec(value: str) -> list[int]:
+    """Parse comma-separated channel numbers and inclusive ranges.
+
+    Examples are ``"14"``, ``"14:36"``, and ``"14,18:20,36"``. Every
+    channel is validated against the supported UHF range.
+    """
+    channels: list[int] = []
+    for part in str(value).split(","):
+        item = part.strip()
+        if item:
+            channels.extend(parse_physical_channel_range(item))
+    if not channels:
+        raise ValueError("physical-channel selection must not be empty")
+    return channels
+
+
 __all__ = [
     "ATSC_CHANNEL_WIDTH_HZ",
     "ATSC_CHANNEL_CENTER_OFFSET_HZ",
@@ -67,6 +83,7 @@ __all__ = [
     "ATSC_UHF_MAX_PHYSICAL_CHANNEL",
     "ATSC_UHF_MIN_PHYSICAL_CHANNEL",
     "parse_physical_channel_range",
+    "parse_physical_channel_spec",
     "physical_channel_to_center_hz",
     "physical_channel_to_lower_edge_hz",
     "physical_channel_to_pilot_hz",

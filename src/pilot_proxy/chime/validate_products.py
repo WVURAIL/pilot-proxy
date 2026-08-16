@@ -7,30 +7,33 @@ import argparse
 import csv
 import json
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, Sequence, cast
 
 import numpy as np
 
 from pilot_proxy.detector_contract import (
-    CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN,
     CHIME_RUN_CONFIG_SCHEMA_TOKEN,
     CHIME_STATS_SCHEMA_TOKEN,
-    ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
-    DETECTOR_POWER_RATIO_DEFINITION,
-    NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
-    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE,
-    COARSE_POWER_RATIO_VALID_RULE,
-    WEIGHT_COORDINATE_RAW_INPUT,
-    input_coordinate_system_for_weight_coordinate,
-    normalize_weight_coordinate_system,
+    validate_detector_contract,
 )
 from pilot_proxy.json_utils import write_json_strict
 
 from .products import (
     CHIME_DETECTOR_OUTPUTS_FILENAME,
+    CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
     CHIME_SPECTROGRAM_CACHE_FILENAME,
+    SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
+)
+from .hdf5_input import (
+    CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
+    COMPLEX_FLOAT,
+    PACKED_TWOS_COMPLEMENT_COMPLEX_INT4,
+    REAL_IMAG_LAST_AXIS,
+    STRUCTURED_COMPLEX,
+    UNKNOWN_ENCODING,
 )
 from .reductions import CHIME_REDUCTIONS_10S_FILENAME
 
@@ -122,6 +125,439 @@ def _check_json_schema(
         )
 
 
+def _validate_exact_fields(
+    payload: dict[str, Any],
+    *,
+    required: frozenset[str],
+    check: str,
+    errors: list[dict[str, str]],
+) -> bool:
+    keys = {str(key) for key in payload}
+    missing = sorted(required - keys)
+    unknown = sorted(keys - required)
+    if missing:
+        _add_error(errors, check, f"missing required fields: {missing}")
+    if unknown:
+        _add_error(errors, check, f"unknown fields: {unknown}")
+    return not missing and not unknown
+
+
+def _manifest_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _manifest_real(value: object) -> bool:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return bool(np.isfinite(float(value)))
+    except (OverflowError, TypeError, ValueError):
+        return False
+
+
+_CHIME_DATASET_FIELDS = frozenset(
+    {
+        "physical_channel",
+        "pilot_frequency_hz",
+        "coarse_channel_center_hz",
+        "freq_id",
+        "dataset_path",
+        "time_axis",
+        "stream_axis",
+        "complex_axis",
+        "sample_encoding",
+        "num_input_streams",
+        "total_time_samples",
+        "segments",
+    }
+)
+_CHIME_SEGMENT_FIELDS = frozenset(
+    {
+        "path",
+        "num_time_samples",
+        "shape",
+        "dtype",
+        "freq_id",
+        "coarse_channel_center_hz",
+        "sample_encoding",
+    }
+)
+_CHIME_SAMPLE_ENCODINGS = frozenset(
+    {
+        CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
+        PACKED_TWOS_COMPLEMENT_COMPLEX_INT4,
+        COMPLEX_FLOAT,
+        STRUCTURED_COMPLEX,
+        REAL_IMAG_LAST_AXIS,
+        UNKNOWN_ENCODING,
+    }
+)
+
+
+@dataclass(frozen=True)
+class _InputManifestIdentity:
+    physical_channels: tuple[int, ...]
+    pilot_frequency_hz: tuple[float, ...] | None = None
+    coarse_channel_center_hz: tuple[float | None, ...] | None = None
+
+
+def _validate_input_manifest(
+    payload: dict[str, Any],
+    *,
+    errors: list[dict[str, str]],
+) -> _InputManifestIdentity | None:
+    """Validate one of the two current, intentionally distinct manifests."""
+    token = payload.get("schema_version")
+    if token == CHIME_INPUT_MANIFEST_SCHEMA_TOKEN:
+        if not _validate_exact_fields(
+            payload,
+            required=frozenset(
+                {"schema_version", "input_dir", "absolute_time_used", "datasets"}
+            ),
+            check="input_manifest.fields",
+            errors=errors,
+        ):
+            return None
+        if not isinstance(payload["input_dir"], str) or not payload["input_dir"]:
+            _add_error(
+                errors,
+                "input_manifest.input_dir",
+                "input_dir must be a non-empty string",
+            )
+        if not isinstance(payload["absolute_time_used"], bool):
+            _add_error(
+                errors,
+                "input_manifest.absolute_time_used",
+                "absolute_time_used must be boolean",
+            )
+        rows = payload["datasets"]
+        if not isinstance(rows, list) or not rows:
+            _add_error(
+                errors,
+                "input_manifest.datasets",
+                "datasets must be a non-empty list",
+            )
+            return None
+        channels: list[int] = []
+        pilot_frequencies: list[float] = []
+        coarse_centers: list[float | None] = []
+        for index, row in enumerate(rows):
+            check = f"input_manifest.datasets[{index}]"
+            if not isinstance(row, dict):
+                _add_error(errors, check, "dataset entry must be an object")
+                continue
+            if not _validate_exact_fields(
+                row,
+                required=_CHIME_DATASET_FIELDS,
+                check=f"{check}.fields",
+                errors=errors,
+            ):
+                continue
+            if not _manifest_int(row["physical_channel"]):
+                _add_error(
+                    errors,
+                    f"{check}.physical_channel",
+                    "physical_channel must be an integer",
+                )
+            else:
+                channels.append(int(row["physical_channel"]))
+            if not _manifest_real(row["pilot_frequency_hz"]) or float(
+                row["pilot_frequency_hz"]
+            ) <= 0.0:
+                _add_error(
+                    errors,
+                    f"{check}.pilot_frequency_hz",
+                    "pilot_frequency_hz must be a positive finite number",
+                )
+            else:
+                pilot_frequencies.append(float(row["pilot_frequency_hz"]))
+            coarse_center = row["coarse_channel_center_hz"]
+            if coarse_center is not None and not _manifest_real(coarse_center):
+                _add_error(
+                    errors,
+                    f"{check}.coarse_channel_center_hz",
+                    "coarse_channel_center_hz must be null or a finite number",
+                )
+            else:
+                coarse_centers.append(
+                    None if coarse_center is None else float(coarse_center)
+                )
+            if row["freq_id"] is not None and not _manifest_int(row["freq_id"]):
+                _add_error(
+                    errors,
+                    f"{check}.freq_id",
+                    "freq_id must be null or an integer",
+                )
+            if not isinstance(row["dataset_path"], str) or not row["dataset_path"]:
+                _add_error(
+                    errors,
+                    f"{check}.dataset_path",
+                    "dataset_path must be a non-empty string",
+                )
+            axes: dict[str, int | None] = {}
+            for field, optional in (
+                ("time_axis", False),
+                ("stream_axis", False),
+                ("complex_axis", True),
+            ):
+                value = row[field]
+                if optional and value is None:
+                    axes[field] = None
+                elif not _manifest_int(value) or int(value) < 0:
+                    _add_error(
+                        errors,
+                        f"{check}.{field}",
+                        f"{field} must be "
+                        + ("null or " if optional else "")
+                        + "a non-negative integer",
+                    )
+                    axes[field] = None
+                else:
+                    axes[field] = int(value)
+            populated_axes = [value for value in axes.values() if value is not None]
+            if len(set(populated_axes)) != len(populated_axes):
+                _add_error(
+                    errors,
+                    f"{check}.axes",
+                    "time_axis, stream_axis, and complex_axis must be distinct",
+                )
+            if (
+                not isinstance(row["sample_encoding"], str)
+                or row["sample_encoding"] not in _CHIME_SAMPLE_ENCODINGS
+            ):
+                _add_error(
+                    errors,
+                    f"{check}.sample_encoding",
+                    "sample_encoding is not emitted by the current HDF5 reader",
+                )
+            if (
+                not _manifest_int(row["num_input_streams"])
+                or int(row["num_input_streams"]) <= 0
+            ):
+                _add_error(
+                    errors,
+                    f"{check}.num_input_streams",
+                    "num_input_streams must be a positive integer",
+                )
+            if (
+                not _manifest_int(row["total_time_samples"])
+                or int(row["total_time_samples"]) <= 0
+            ):
+                _add_error(
+                    errors,
+                    f"{check}.total_time_samples",
+                    "total_time_samples must be a positive integer",
+                )
+
+            segments = row["segments"]
+            if not isinstance(segments, list) or not segments:
+                _add_error(
+                    errors,
+                    f"{check}.segments",
+                    "segments must be a non-empty list",
+                )
+                continue
+            segment_lengths: list[int] = []
+            for segment_index, segment in enumerate(segments):
+                segment_check = f"{check}.segments[{segment_index}]"
+                if not isinstance(segment, dict):
+                    _add_error(
+                        errors,
+                        segment_check,
+                        "segment entry must be an object",
+                    )
+                    continue
+                if not _validate_exact_fields(
+                    segment,
+                    required=_CHIME_SEGMENT_FIELDS,
+                    check=f"{segment_check}.fields",
+                    errors=errors,
+                ):
+                    continue
+                if not isinstance(segment["path"], str) or not segment["path"]:
+                    _add_error(
+                        errors,
+                        f"{segment_check}.path",
+                        "path must be a non-empty string",
+                    )
+                segment_length = segment["num_time_samples"]
+                if not _manifest_int(segment_length) or int(segment_length) <= 0:
+                    _add_error(
+                        errors,
+                        f"{segment_check}.num_time_samples",
+                        "num_time_samples must be a positive integer",
+                    )
+                else:
+                    segment_lengths.append(int(segment_length))
+                shape = segment["shape"]
+                shape_values: list[int] | None
+                if (
+                    not isinstance(shape, list)
+                    or not shape
+                    or any(not _manifest_int(value) or int(value) <= 0 for value in shape)
+                ):
+                    _add_error(
+                        errors,
+                        f"{segment_check}.shape",
+                        "shape must be a non-empty list of positive integers",
+                    )
+                    shape_values = None
+                else:
+                    shape_values = [int(value) for value in shape]
+                if not isinstance(segment["dtype"], str) or not segment["dtype"]:
+                    _add_error(
+                        errors,
+                        f"{segment_check}.dtype",
+                        "dtype must be a non-empty string",
+                    )
+                if segment["freq_id"] is not None and not _manifest_int(
+                    segment["freq_id"]
+                ):
+                    _add_error(
+                        errors,
+                        f"{segment_check}.freq_id",
+                        "freq_id must be null or an integer",
+                    )
+                segment_center = segment["coarse_channel_center_hz"]
+                if segment_center is not None and not _manifest_real(segment_center):
+                    _add_error(
+                        errors,
+                        f"{segment_check}.coarse_channel_center_hz",
+                        "coarse_channel_center_hz must be null or a finite number",
+                    )
+                if (
+                    not isinstance(segment["sample_encoding"], str)
+                    or segment["sample_encoding"] not in _CHIME_SAMPLE_ENCODINGS
+                ):
+                    _add_error(
+                        errors,
+                        f"{segment_check}.sample_encoding",
+                        "sample_encoding is not emitted by the current HDF5 reader",
+                    )
+                if shape_values is not None:
+                    for field, axis in axes.items():
+                        if axis is not None and axis >= len(shape_values):
+                            _add_error(
+                                errors,
+                                f"{segment_check}.shape",
+                                f"{field}={axis} is outside shape rank "
+                                f"{len(shape_values)}",
+                            )
+                    time_axis = axes["time_axis"]
+                    if (
+                        time_axis is not None
+                        and time_axis < len(shape_values)
+                        and _manifest_int(segment_length)
+                        and shape_values[time_axis] != int(segment_length)
+                    ):
+                        _add_error(
+                            errors,
+                            f"{segment_check}.shape",
+                            "shape at time_axis does not match num_time_samples",
+                        )
+                    stream_axis = axes["stream_axis"]
+                    if (
+                        stream_axis is not None
+                        and stream_axis < len(shape_values)
+                        and _manifest_int(row["num_input_streams"])
+                        and shape_values[stream_axis]
+                        != int(row["num_input_streams"])
+                    ):
+                        _add_error(
+                            errors,
+                            f"{segment_check}.shape",
+                            "shape at stream_axis does not match num_input_streams",
+                        )
+            if (
+                len(segment_lengths) == len(segments)
+                and _manifest_int(row["total_time_samples"])
+                and sum(segment_lengths) != int(row["total_time_samples"])
+            ):
+                _add_error(
+                    errors,
+                    f"{check}.total_time_samples",
+                    "total_time_samples does not equal the sum of segment lengths",
+                )
+        if len(set(channels)) != len(channels):
+            _add_error(
+                errors,
+                "input_manifest.datasets.physical_channel",
+                "datasets contain duplicate physical channels",
+            )
+        if not (
+            len(channels)
+            == len(pilot_frequencies)
+            == len(coarse_centers)
+            == len(rows)
+        ):
+            return None
+        return _InputManifestIdentity(
+            physical_channels=tuple(channels),
+            pilot_frequency_hz=tuple(pilot_frequencies),
+            coarse_channel_center_hz=tuple(coarse_centers),
+        )
+
+    if token == SCAN_INPUT_MANIFEST_SCHEMA_TOKEN:
+        if not _validate_exact_fields(
+            payload,
+            required=frozenset(
+                {"schema_version", "source", "physical_channels", "input_files"}
+            ),
+            check="input_manifest.fields",
+            errors=errors,
+        ):
+            return None
+        if payload["source"] != "chime-scan":
+            _add_error(
+                errors,
+                "input_manifest.source",
+                "source must be 'chime-scan'",
+            )
+        channels_raw = payload["physical_channels"]
+        if (
+            not isinstance(channels_raw, list)
+            or not channels_raw
+            or any(not _manifest_int(value) for value in channels_raw)
+        ):
+            _add_error(
+                errors,
+                "input_manifest.physical_channels",
+                "physical_channels must be a non-empty integer list",
+            )
+            channels = None
+        else:
+            channels = [int(value) for value in channels_raw]
+            if len(set(channels)) != len(channels):
+                _add_error(
+                    errors,
+                    "input_manifest.physical_channels",
+                    "physical_channels contains duplicates",
+                )
+        input_files = payload["input_files"]
+        if not isinstance(input_files, list) or any(
+            not isinstance(value, str) or not value for value in input_files
+        ):
+            _add_error(
+                errors,
+                "input_manifest.input_files",
+                "input_files must be a list of non-empty strings",
+            )
+        return (
+            None
+            if channels is None
+            else _InputManifestIdentity(physical_channels=tuple(channels))
+        )
+
+    _add_error(
+        errors,
+        "input_manifest.schema_version",
+        f"schema_version {token!r} is not one of the current manifest schemas: "
+        f"{CHIME_INPUT_MANIFEST_SCHEMA_TOKEN!r}, "
+        f"{SCAN_INPUT_MANIFEST_SCHEMA_TOKEN!r}",
+    )
+    return None
+
+
 def _is_binary_array(values: np.ndarray) -> bool:
     arr = np.asarray(values)
     return bool(np.all((arr == 0) | (arr == 1)))
@@ -176,137 +612,20 @@ def _validate_detector_contract(
             "detector_contract.consistency",
             "run_config and stats detector_contract objects differ",
         )
-    if (
-        run_contract_typed.get("schema_version")
-        != CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN
+
+    for label, contract in (
+        ("run_config", run_contract_typed),
+        ("stats", stats_contract_typed),
     ):
-        _add_error(
-            errors,
-            "detector_contract.schema_version",
-            "detector_contract schema_version "
-            f"{run_contract_typed.get('schema_version')!r} does not match "
-            f"{CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN!r}",
-        )
-    required = {
-        "detector_window_samples",
-        "skipped_guard_bins",
-        "reference_offset_bins",
-        "num_weight_terms",
-        "input_format",
-        "power_accumulator",
-        "coarse_power_ratio_definition",
-        "all_rows_coarse_power_ratio_definition",
-        "combine_mode",
-        "weight_coordinate_system",
-        "input_coordinate_system",
-        "input_preprocessing",
-        "mask_source",
-        "valid_rule",
-        "mask_rule",
-        "equivalent_mask_rule",
-        "per_frequency_threshold",
-    }
-    missing: list[str] = sorted(
-        name for name in required if name not in run_contract_typed
-    )
-    if missing:
-        _add_error(
-            errors,
-            "detector_contract.required_fields",
-            "missing fields: " + ", ".join(missing),
-        )
-    for key, expected in (
-        ("coarse_power_ratio_definition", DETECTOR_POWER_RATIO_DEFINITION),
-        (
-            "all_rows_coarse_power_ratio_definition",
-            ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
-        ),
-    ):
-        if key in run_contract_typed and run_contract_typed.get(key) != expected:
-            _add_error(
-                errors,
-                f"detector_contract.{key}",
-                f"{key}={run_contract_typed.get(key)!r} does not match "
-                f"{expected!r}",
-            )
-    if (
-        "skipped_guard_bins" in run_contract_typed
-        and "reference_offset_bins" in run_contract_typed
-        and int(run_contract_typed["reference_offset_bins"])
-        != int(run_contract_typed["skipped_guard_bins"]) + 1
-    ):
-        _add_error(
-            errors,
-            "detector_contract.reference_offset_relation",
-            "reference_offset_bins must equal skipped_guard_bins + 1",
-        )
-    expected_policy = {
-        "mask_source": NORMALIZED_POSITIVE_EXCESS_MASK_SOURCE,
-        "valid_rule": COARSE_POWER_RATIO_VALID_RULE,
-        "mask_rule": NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
-        "equivalent_mask_rule": NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE,
-    }
-    for key, expected in expected_policy.items():
-        if run_contract_typed.get(key) != expected:
-            _add_error(
-                errors,
-                f"detector_contract.{key}",
-                f"{key}={run_contract_typed.get(key)!r} does not match {expected!r}",
-            )
-    if bool(run_contract_typed.get("per_frequency_threshold")):
-        _add_error(
-            errors,
-            "detector_contract.per_frequency_threshold",
-            "CHIME positive-excess products must not declare thresholds",
-        )
-    weight_coordinate = run_contract_typed.get("weight_coordinate_system")
-    if weight_coordinate is not None:
         try:
-            normalized_weight_coordinate = normalize_weight_coordinate_system(
-                weight_coordinate
-            )
-        except ValueError as exc:
+            validate_detector_contract(contract)
+        except (TypeError, ValueError) as exc:
             _add_error(
                 errors,
-                "detector_contract.weight_coordinate_system",
+                f"{label}.detector_contract.current_schema",
                 str(exc),
             )
-            normalized_weight_coordinate = None
-        if normalized_weight_coordinate is not None:
-            expected_input_coordinate = input_coordinate_system_for_weight_coordinate(
-                normalized_weight_coordinate
-            )
-            input_coordinate = run_contract_typed.get("input_coordinate_system")
-            if str(input_coordinate) != expected_input_coordinate:
-                _add_error(
-                    errors,
-                    "detector_contract.input_coordinate_system",
-                    f"input_coordinate_system {input_coordinate!r} does not "
-                    f"match {expected_input_coordinate!r}",
-                )
-    preprocessing = run_contract_typed.get("input_preprocessing")
-    if not isinstance(preprocessing, dict):
-        _add_error(
-            errors,
-            "detector_contract.input_preprocessing",
-            "input_preprocessing must be an object",
-        )
-    elif "time_reverse_detector_windows_before_kernel" not in preprocessing:
-        _add_error(
-            errors,
-            "detector_contract.input_preprocessing.time_reverse",
-            "missing time_reverse_detector_windows_before_kernel",
-        )
-    elif (
-        weight_coordinate == WEIGHT_COORDINATE_RAW_INPUT
-        and bool(preprocessing.get("time_reverse_detector_windows_before_kernel"))
-    ):
-        _add_error(
-            errors,
-            "detector_contract.input_preprocessing.time_reverse",
-            "raw input-coordinate weights must not request detector-window "
-            "time reversal before the kernel",
-        )
+
     contract_window = run_contract_typed.get("detector_window_samples")
     if contract_window is not None:
         try:
@@ -542,7 +861,11 @@ def _validate_spectrogram_cache(
             errors=errors,
         )
     for name in ["physical_channel", "pilot_frequency_hz", "chime_frequency_hz"]:
-        if not np.array_equal(np.asarray(cache[name]), np.asarray(detector[name])):
+        if not np.array_equal(
+            np.asarray(cache[name]),
+            np.asarray(detector[name]),
+            equal_nan=True,
+        ):
             _add_error(
                 errors,
                 f"spectrogram.{name}",
@@ -643,7 +966,11 @@ def validate_products(
     run_config = _load_json(run / "run_config.json", errors)
     input_manifest = _load_json(run / "input_manifest.json", errors)
     stats = _load_json(run / "stats.json", errors)
-    _ = run_config, input_manifest
+    manifest_identity = (
+        _validate_input_manifest(input_manifest, errors=errors)
+        if input_manifest
+        else None
+    )
     if run_config:
         _check_json_schema(
             payload=run_config,
@@ -677,6 +1004,57 @@ def validate_products(
                 stats=stats,
                 errors=errors,
             )
+            if shape is not None and manifest_identity is not None:
+                detector_channels = [
+                    int(value)
+                    for value in np.asarray(detector["physical_channel"]).reshape(-1)
+                ]
+                manifest_channels = list(manifest_identity.physical_channels)
+                if manifest_channels != detector_channels:
+                    _add_error(
+                        errors,
+                        "input_manifest.physical_channels",
+                        "manifest physical channels do not match detector output: "
+                        f"{manifest_channels!r} != {detector_channels!r}",
+                    )
+                if manifest_identity.pilot_frequency_hz is not None:
+                    manifest_pilots = np.asarray(
+                        manifest_identity.pilot_frequency_hz,
+                        dtype=np.float64,
+                    )
+                    detector_pilots = np.asarray(
+                        detector["pilot_frequency_hz"],
+                        dtype=np.float64,
+                    ).reshape(-1)
+                    if not np.array_equal(manifest_pilots, detector_pilots):
+                        _add_error(
+                            errors,
+                            "input_manifest.pilot_frequency_hz",
+                            "manifest pilot frequencies do not match detector output",
+                        )
+                if manifest_identity.coarse_channel_center_hz is not None:
+                    manifest_centers = np.asarray(
+                        [
+                            np.nan if value is None else value
+                            for value in manifest_identity.coarse_channel_center_hz
+                        ],
+                        dtype=np.float64,
+                    )
+                    detector_centers = np.asarray(
+                        detector["chime_frequency_hz"],
+                        dtype=np.float64,
+                    ).reshape(-1)
+                    if not np.array_equal(
+                        manifest_centers,
+                        detector_centers,
+                        equal_nan=True,
+                    ):
+                        _add_error(
+                            errors,
+                            "input_manifest.coarse_channel_center_hz",
+                            "manifest coarse-channel centers do not match detector "
+                            "output (null corresponds to detector NaN)",
+                        )
             if shape is not None and cache is not None:
                 _validate_spectrogram_cache(
                     cache,

@@ -4,11 +4,15 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from pilot_proxy.detector_contract import (
     ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
     DETECTOR_POWER_RATIO_DEFINITION,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    build_chime_detector_contract,
+    WEIGHT_COORDINATE_RAW_INPUT,
+    build_detector_contract,
+    validate_detector_contract,
 )
 from pilot_proxy.detector_weights import DetectorWeightBank
 from pilot_proxy.integration.defaults import DEFAULT_DETECTOR_CORE_PROFILE
@@ -54,7 +58,7 @@ def test_canonical_detector_core_identity_and_filename() -> None:
 
 
 def test_public_detector_contract_uses_power_ratio_keys() -> None:
-    contract = build_chime_detector_contract(
+    contract = build_detector_contract(
         detector_window_samples=128,
         skipped_guard_bins=1,
         reference_offset_bins=2,
@@ -71,6 +75,47 @@ def test_public_detector_contract_uses_power_ratio_keys() -> None:
         contract["all_rows_coarse_power_ratio_definition"]
         == ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION
     )
+
+
+def test_detector_contract_validates_optional_fine_reduction_block() -> None:
+    contract = build_detector_contract(
+        detector_window_samples=128,
+        skipped_guard_bins=1,
+        reference_offset_bins=2,
+        num_weight_terms=3,
+        weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+    )
+    contract["fine_reduction"] = {
+        "pad_factor": 2,
+        "cfar_policy": "null_bulk_median_left_side_scale",
+        "p_fa": 1.0e-3,
+        "guard_fine_bins": 1,
+        "designated_bins": [0, 1],
+        "census_excluded_bins": [0, 1, 255],
+        "v1_marginal_identity": "exact_int64_enforced_per_frame",
+    }
+    validate_detector_contract(contract)
+
+    contract["fine_reduction"]["p_fa"] = 0.0
+    with pytest.raises(ValueError, match="fine_reduction.p_fa"):
+        validate_detector_contract(contract)
+
+
+def test_detector_contract_rejects_time_reversal_for_raw_input_weights() -> None:
+    contract = build_detector_contract(
+        detector_window_samples=128,
+        skipped_guard_bins=1,
+        reference_offset_bins=2,
+        num_weight_terms=3,
+        weight_coordinate_system=WEIGHT_COORDINATE_RAW_INPUT,
+        time_reverse_detector_windows_before_kernel=False,
+    )
+    contract["input_preprocessing"][
+        "time_reverse_detector_windows_before_kernel"
+    ] = True
+
+    with pytest.raises(ValueError, match="raw input-coordinate weights"):
+        validate_detector_contract(contract)
 
 
 def test_receiver_and_stream_map_ids_are_chronology_free() -> None:

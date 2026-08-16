@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
 
@@ -64,6 +65,38 @@ def test_chime_runner_parser_does_not_expose_detector_window_samples() -> None:
     assert "--detector-window-samples" not in parser.format_help()
 
 
+def test_chime_runner_rejects_incompatible_stream_map_before_discovery(
+    tmp_path,
+) -> None:
+    configs = Path(__file__).resolve().parents[2] / "configs"
+
+    with pytest.raises(ValueError, match="receiver_profile_id"):
+        run_chime_analysis(
+            input_dir=tmp_path / "missing-input",
+            output_dir=tmp_path / "run",
+            receiver_profile_path=(
+                configs / "receiver_profiles" / "chime_dtv_fengine.json"
+            ),
+            stream_map_path=(
+                configs / "stream_maps" / "chord_dish_pol_example.json"
+            ),
+        )
+
+
+def test_chime_runner_requires_stream_map_declared_by_profile(tmp_path) -> None:
+    configs = Path(__file__).resolve().parents[2] / "configs"
+
+    with pytest.raises(ValueError, match="requires a stream map"):
+        run_chime_analysis(
+            input_dir=tmp_path / "missing-input",
+            output_dir=tmp_path / "run",
+            receiver_profile_path=(
+                configs / "receiver_profiles" / "chime_dtv_fengine.json"
+            ),
+            stream_map_path=None,
+        )
+
+
 def _fake_kernel(detector_window_samples: int):
     specs = SimpleNamespace(
         K=detector_window_samples,
@@ -118,8 +151,10 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
         frame_size_samples=SMALL_RUN_FRAME_SIZE_SAMPLES,
         num_input_streams=SMALL_RUN_NUM_INPUT_STREAMS,
     )
+    profile_data = profile.to_dict()
+    profile_data["input_streams"]["stream_map_required"] = False
     profile_path = tmp_path / "receiver_profile.json"
-    profile_path.write_text(json.dumps(profile.to_dict()), encoding="utf-8")
+    profile_path.write_text(json.dumps(profile_data), encoding="utf-8")
 
     def fake_detector(**kwargs):
         packed = kwargs["packed"]
@@ -197,7 +232,7 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
     assert stats["schema_version"] == "pilotproxy_chime_stats_v1"
     assert run_config["detector_contract"] == stats["detector_contract"]
     assert stats["detector_contract"]["schema_version"] == (
-        "pilotproxy_chime_detector_contract_v1"
+        "pilotproxy_detector_contract_v1"
     )
     assert stats["detector_contract"]["per_frequency_threshold"] is False
     assert stats["detector_contract"]["mask_source"] == "normalized_positive_excess_decision"

@@ -18,7 +18,7 @@ from pilot_proxy.detector_contract import (
     CHIME_STATS_SCHEMA_TOKEN,
     COMBINE_MODE_ALL_ROWS_SUMMED_BEFORE_RATIO,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    build_chime_detector_contract,
+    build_detector_contract,
     input_coordinate_system_for_weight_coordinate,
     null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
@@ -46,6 +46,7 @@ from pilot_proxy.integration import (
     parse_physical_channel_selection,
     receiver_frequency_to_channel,
 )
+from pilot_proxy.integration.stream_layout import validate_integration_compatibility
 from pilot_proxy.kernel import FStatKernel
 from pilot_proxy.paths import DEFAULT_LIB_PATH, DEFAULT_WEIGHTS_PATH
 from pilot_proxy.provenance import file_sha256, sidecar_manifest_path
@@ -122,7 +123,7 @@ def _mapping_int_value(mapping: Mapping[str, Any], key: str, default: int) -> in
     return _coerce_int_metadata(value, field=key)
 
 
-def _chime_detector_contract_for_run(
+def _detector_contract_for_run(
     *,
     detector_window_samples: int,
     kernel_specs: Mapping[str, Any] | None,
@@ -142,7 +143,7 @@ def _chime_detector_contract_for_run(
         "skipped_guard_bins",
         max(0, reference_offset_bins - 1),
     )
-    return build_chime_detector_contract(
+    return build_detector_contract(
         detector_window_samples=_mapping_int_value(
             kernel,
             "detector_window_samples",
@@ -416,7 +417,7 @@ def _weight_coordinate_metadata(
     declared = manifest.get("weight_coordinate_system")
     if declared is None:
         raise ValueError(
-            "Weight manifest schema v2 requires weight_coordinate_system. "
+            "The current weight manifest requires weight_coordinate_system. "
             f"Regenerate {getattr(weight_bank, 'path', '<unknown>')} with an "
             "explicit weight coordinate convention."
         )
@@ -448,7 +449,7 @@ def _weight_coordinate_metadata(
     preprocessing = manifest.get("input_preprocessing")
     if not isinstance(preprocessing, Mapping):
         raise ValueError(
-            "Weight manifest schema v2 requires input_preprocessing."
+            "The current weight manifest requires input_preprocessing."
         )
     if "time_reverse_detector_windows_before_kernel" not in preprocessing:
         raise ValueError(
@@ -696,7 +697,15 @@ def run_chime_analysis(
     ensure_run_dirs(run_dir)
 
     receiver_profile = load_receiver_profile(receiver_profile_path)
+    channelized_sample_rate_hz = float(receiver_profile.sample_rate_hz) / float(
+        receiver_profile.channelizer.fft_size
+    )
     stream_map = None if stream_map_path is None else load_stream_map(stream_map_path)
+    validate_integration_compatibility(
+        profile=receiver_profile,
+        stream_map=stream_map,
+        require_stream_map=True,
+    )
     discovered = discover_chime_pilot_datasets(
         Path(input_dir),
         dataset_path=dataset_path,
@@ -927,7 +936,7 @@ def run_chime_analysis(
         contract_weight_coordinate = str(
             weight_coordinate["expected_weight_coordinate_system"]
         )
-    detector_contract = _chime_detector_contract_for_run(
+    detector_contract = _detector_contract_for_run(
         detector_window_samples=int(detector_window_samples),
         kernel_specs=kernel_specs_dict,
         reference_placement_summary=reference_placement_summary,
@@ -1045,11 +1054,13 @@ def run_chime_analysis(
         chime_frequency_hz=chime_frequency_hz,
         frame_index=frame_index,
         frame_size_samples=int(frame_size_samples),
+        sample_rate_hz=channelized_sample_rate_hz,
     )
     reductions_10s_path = write_reductions_npz(
         run_dir,
         frame_index=frame_index,
         frame_size_samples=int(frame_size_samples),
+        sample_rate_hz=channelized_sample_rate_hz,
         chunk_seconds=10.0,
         coarse_power_ratio=coarse_power_ratio,
         normalized_coarse_power_ratio_db=normalized_coarse_power_ratio_db,

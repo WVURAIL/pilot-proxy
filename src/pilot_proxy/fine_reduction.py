@@ -44,7 +44,6 @@ gated at ULP tolerance in ``tests/kernel/test_matched_filter_row_projections_gpu
 """
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field
 from statistics import NormalDist
 from typing import Any, Sequence

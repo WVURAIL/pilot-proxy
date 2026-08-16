@@ -339,11 +339,11 @@ def _write_histogram_summary(
                 "pilot_frequency_hz",
                 "chime_frequency_hz",
                 "num_detector_valid_frames",
-                "num_positive_excess_frames",
-                "positive_excess_fraction",
+                "num_finite_data_shelf_snr_estimates",
+                "finite_data_shelf_snr_fraction_of_valid_frames",
                 "mean_estimated_data_shelf_snr_db",
                 "max_estimated_data_shelf_snr_db",
-                "mask_fraction",
+                "mask_fraction_total",
             ],
         )
         writer.writeheader()
@@ -359,8 +359,8 @@ def _write_histogram_summary(
                     "pilot_frequency_hz": float(pilot_frequency_hz[index]),
                     "chime_frequency_hz": float(chime_frequency_hz[index]),
                     "num_detector_valid_frames": detector_valid_count,
-                    "num_positive_excess_frames": positive_count,
-                    "positive_excess_fraction": (
+                    "num_finite_data_shelf_snr_estimates": positive_count,
+                    "finite_data_shelf_snr_fraction_of_valid_frames": (
                         float(positive_count / detector_valid_count)
                         if detector_valid_count
                         else float("nan")
@@ -371,7 +371,7 @@ def _write_histogram_summary(
                     "max_estimated_data_shelf_snr_db": (
                         float(np.max(finite)) if finite.size else float("nan")
                     ),
-                    "mask_fraction": float(np.mean(mask[:, index] != 0)),
+                    "mask_fraction_total": float(np.mean(mask[:, index] != 0)),
                 }
             )
 

@@ -5,7 +5,7 @@ import inspect
 
 import pytest
 
-pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from pilot_proxy.datatrawl_plugins.detector import (  # noqa: E402
     PilotProxyDetectorAnalyzer,

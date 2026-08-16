@@ -8,7 +8,6 @@ from pathlib import Path
 import numpy as np
 
 from .products import (
-    SAMPLE_RATE_HZ,
     mean_where,
     relative_time_seconds,
     valid_mask_counts,
@@ -40,7 +39,7 @@ def aggregate_frame_products(
     *,
     frame_index: np.ndarray,
     frame_size_samples: int,
-    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    sample_rate_hz: float,
     chunk_seconds: float,
     coarse_power_ratio: np.ndarray,
     normalized_coarse_power_ratio_db: np.ndarray,
@@ -172,7 +171,7 @@ def write_reductions_npz(
     *,
     frame_index: np.ndarray,
     frame_size_samples: int,
-    sample_rate_hz: float = SAMPLE_RATE_HZ,
+    sample_rate_hz: float,
     chunk_seconds: float = 10.0,
     coarse_power_ratio: np.ndarray,
     normalized_coarse_power_ratio_db: np.ndarray,

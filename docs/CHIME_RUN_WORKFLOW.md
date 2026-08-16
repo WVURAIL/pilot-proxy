@@ -113,7 +113,7 @@ Otherwise the pilot offset can be reversed twice. The runner records the
 effective convention in `run_config.json` and `stats.json` and rejects a raw
 input-coordinate manifest when time reversal is active.
 
-## Legacy staged-data workflow
+## Staged-data workflow
 
 For a local staged dataset, run the detector and then validate the products:
 
@@ -205,7 +205,7 @@ CANFAR, and review systems.
 `run_config.json` and `stats.json` use schema versions
 `pilotproxy_chime_run_config_v1` and `pilotproxy_chime_stats_v1`. Both carry a matching
 `detector_contract` object with schema
-`pilotproxy_chime_detector_contract_v1`. The contract records the `K = 128`
+`pilotproxy_detector_contract_v1`. The contract records the `K = 128`
 geometry, the positive-excess rule, the `uint64` accumulator, and the
 all-row-sum statistic.
 
@@ -283,22 +283,26 @@ upper_reference_requested_relative_to_target_hz
 DC shifts, edge wraps, or a forbidden tone in the skipped guard. In the
 current DC-centered bank, DTV 14 is the only adaptive case.
 
-The SNR-shelf table uses legacy column names that need careful interpretation:
+The SNR-shelf table uses explicit diagnostic names rather than historical
+positive-excess aliases:
 
 ```text
 num_detector_valid_frames
-num_positive_excess_frames
-positive_excess_fraction
-mask_fraction
+num_finite_data_shelf_snr_estimates
+finite_data_shelf_snr_fraction_of_valid_frames
+mask_fraction_total
 ```
 
-`num_positive_excess_frames` is currently the number of finite
-`estimated_data_shelf_snr_db` values. Because `10*log10(F - 1)` is finite only for `F > 1`,
-this count and `positive_excess_fraction` describe `F > 1`, not the
-norm-corrected mask when `null_power_ratio != 1`. The stored mask follows `F > null_power_ratio`.
-`mask_fraction` is the table's direct mean of the stored binary mask over all
-frames. Use `mask_summary_by_pilot.csv` when the valid-frame denominator must be
-explicit.
+`num_finite_data_shelf_snr_estimates` is the number of finite
+`estimated_data_shelf_snr_db` values. That estimate is formed from
+`normalized_pilot_excess = F/null_power_ratio - 1`, so the count and
+`finite_data_shelf_snr_fraction_of_valid_frames` describe how often that
+diagnostic is defined. They are not the schema's rejection-decision fields,
+even when they coincide with the current positive-excess rule.
+`mask_fraction_total` is the table's direct mean of the stored binary mask over
+all frames. Use `reject_mask` in authoritative
+per-pilot products and `mask_summary_by_pilot.csv` when the valid-frame
+denominator must be explicit.
 
 ## Injection-recovery and cleaning tradeoff
 

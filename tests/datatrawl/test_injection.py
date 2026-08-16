@@ -9,7 +9,7 @@ import numpy as np
 import pytest
 
 h5py = pytest.importorskip("h5py")
-pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt  # noqa: E402
 

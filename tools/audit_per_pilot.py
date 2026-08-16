@@ -88,7 +88,7 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
         a.check(str(scalar("weight_manifest_sha256")) == manifest_sha,
                 "weight_manifest_sha256 vs shipped manifest")
     contract = json.loads(str(scalar("detector_contract_json")))
-    a.check(contract.get("schema_version") == "pilotproxy_chime_detector_contract_v1",
+    a.check(contract.get("schema_version") == "pilotproxy_detector_contract_v1",
             "detector_contract schema")
     a.check(contract.get("fine_reduction", {}).get("pad_factor") == 2, "contract fine pad_factor")
 
@@ -185,7 +185,6 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(fui.min() >= 0 and fui.max() < U, "frame_unit_index in range")
     a.check(np.all(np.diff(fui) >= 0), "frame_unit_index nondecreasing")
     fiu = r("frame_in_unit")
-    starts = np.searchsorted(fui, np.arange(U), side="left")
     ok_fiu = all(np.array_equal(fiu[fui == u], np.arange((fui == u).sum())) for u in range(U))
     a.check(ok_fiu, "frame_in_unit == arange per unit")
     t0 = r("unit_time0_ctime").astype(np.float64)

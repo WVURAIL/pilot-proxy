@@ -17,7 +17,6 @@ quantity ``R_coarse - 1`` is retained only as an explicitly named diagnostic.
 from __future__ import annotations
 
 from fractions import Fraction
-from typing import Any
 
 import numpy as np
 

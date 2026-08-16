@@ -32,6 +32,7 @@ from pilot_proxy.reference_channelizer import (  # noqa: E402
 from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz  # noqa: E402
 from pilot_proxy.integration import QUANTIZATION_SCALE_MODE_GLOBAL  # noqa: E402
 from pilot_proxy.integration.packing import (  # noqa: E402
+    estimate_complex_scale,
     pack_channelized_streams_for_detector,
 )
 from pilot_proxy.json_utils import write_json_strict  # noqa: E402
@@ -58,24 +59,6 @@ def _read_complex64(path: Path) -> np.ndarray:
     if data.size == 0:
         raise SystemExit(f"Input IQ file is empty: {path}")
     return np.ascontiguousarray(data)
-
-
-def _estimate_complex_scale(
-    streams: np.ndarray,
-    *,
-    bits: int,
-    clip_sigma: float,
-) -> float:
-    values = np.asarray(streams)
-    sigma = float(np.std(values.real))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(values.imag))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        sigma = float(np.std(np.abs(values)))
-    if not np.isfinite(sigma) or sigma <= 0.0:
-        raise SystemExit("Could not estimate a positive quantization scale.")
-    max_int = (1 << (int(bits) - 1)) - 1
-    return float(max_int) / (float(clip_sigma) * sigma)
 
 
 def _parse_channel_indices(values: list[int] | None) -> list[int]:
@@ -198,7 +181,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="detector_window_samples",
         type=int,
         default=LOCKED_DETECTOR_WINDOW_SAMPLES,
-        help="Advanced: v0.1 only accepts the locked value 128.",
+        help="Advanced: select a detector window supported by the current kernel.",
     )
     parser.add_argument(
         "--spectral-sense",
@@ -218,7 +201,7 @@ def build_parser() -> argparse.ArgumentParser:
         dest="bits",
         type=int,
         default=LOCKED_BITS_PER_COMPONENT,
-        help="Advanced: v0.1 only accepts the locked 4+4 bit format.",
+        help="Advanced: the current kernel requires the locked 4+4-bit format.",
     )
     parser.add_argument("--scale", type=float, default=None)
     parser.add_argument("--clip-sigma", type=float, default=DEFAULT_CLIP_SIGMA)
@@ -321,15 +304,17 @@ def main(argv: list[str] | None = None) -> int:
         int(args.num_input_streams),
         axis=0,
     )
-    scale = (
-        float(args.scale)
-        if args.scale is not None
-        else _estimate_complex_scale(
-            feed_channel_streams,
-            bits=args.bits,
-            clip_sigma=args.clip_sigma,
-        )
-    )
+    if args.scale is not None:
+        scale = float(args.scale)
+    else:
+        try:
+            scale = estimate_complex_scale(
+                feed_channel_streams,
+                bits_per_component=args.bits,
+                clip_sigma=args.clip_sigma,
+            )
+        except ValueError as exc:
+            raise SystemExit(str(exc)) from exc
     packed_input = pack_channelized_streams_for_detector(
         feed_channel_streams,
         frame_size_samples=int(args.samples_per_block),

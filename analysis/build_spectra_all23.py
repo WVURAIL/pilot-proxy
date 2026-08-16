@@ -34,8 +34,6 @@ before/after difference is a prominence change under the analytic mask,
 not an absolute-amplitude change.
 """
 import csv
-import sys
-from pathlib import Path
 
 import numpy as np
 

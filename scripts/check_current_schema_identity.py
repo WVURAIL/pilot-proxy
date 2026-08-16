@@ -14,9 +14,9 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from pilot_proxy.detector_contract import (
-    CHIME_DETECTOR_CONTRACT_SCHEMA_NAME,
-    CHIME_DETECTOR_CONTRACT_SCHEMA_REVISION,
-    CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN,
+    DETECTOR_CONTRACT_SCHEMA_NAME,
+    DETECTOR_CONTRACT_SCHEMA_REVISION,
+    DETECTOR_CONTRACT_SCHEMA_TOKEN,
     CHIME_RUN_CONFIG_SCHEMA_NAME,
     CHIME_RUN_CONFIG_SCHEMA_REVISION,
     CHIME_RUN_CONFIG_SCHEMA_TOKEN,
@@ -28,6 +28,14 @@ from pilot_proxy.detector_geometry import (
     STREAM_LAYOUT_SCHEMA_NAME,
     STREAM_LAYOUT_SCHEMA_REVISION,
     STREAM_LAYOUT_SCHEMA_TOKEN,
+)
+from pilot_proxy.chime.products import (
+    CHIME_INPUT_MANIFEST_SCHEMA_NAME,
+    CHIME_INPUT_MANIFEST_SCHEMA_REVISION,
+    CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
+    SCAN_INPUT_MANIFEST_SCHEMA_NAME,
+    SCAN_INPUT_MANIFEST_SCHEMA_REVISION,
+    SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
 )
 from pilot_proxy.detector_weights import (
     WEIGHT_MANIFEST_SCHEMA_NAME,
@@ -77,9 +85,11 @@ EXPECTED = {
     "stream_layout": (STREAM_LAYOUT_SCHEMA_NAME, STREAM_LAYOUT_SCHEMA_REVISION, STREAM_LAYOUT_SCHEMA_TOKEN, "pilotproxy_stream_layout"),
     "result_schema": (RESULT_SCHEMA_NAME, RESULT_SCHEMA_REVISION, RESULT_SCHEMA_TOKEN, "pilotproxy_result_schema"),
     "mask_convention": (MASK_CONVENTION_SCHEMA_NAME, MASK_CONVENTION_SCHEMA_REVISION, MASK_CONVENTION_SCHEMA_TOKEN, "pilotproxy_mask_convention"),
-    "chime_detector_contract": (CHIME_DETECTOR_CONTRACT_SCHEMA_NAME, CHIME_DETECTOR_CONTRACT_SCHEMA_REVISION, CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN, "pilotproxy_chime_detector_contract"),
+    "detector_contract": (DETECTOR_CONTRACT_SCHEMA_NAME, DETECTOR_CONTRACT_SCHEMA_REVISION, DETECTOR_CONTRACT_SCHEMA_TOKEN, "pilotproxy_detector_contract"),
     "chime_run_config": (CHIME_RUN_CONFIG_SCHEMA_NAME, CHIME_RUN_CONFIG_SCHEMA_REVISION, CHIME_RUN_CONFIG_SCHEMA_TOKEN, "pilotproxy_chime_run_config"),
     "chime_stats": (CHIME_STATS_SCHEMA_NAME, CHIME_STATS_SCHEMA_REVISION, CHIME_STATS_SCHEMA_TOKEN, "pilotproxy_chime_stats"),
+    "chime_input_manifest": (CHIME_INPUT_MANIFEST_SCHEMA_NAME, CHIME_INPUT_MANIFEST_SCHEMA_REVISION, CHIME_INPUT_MANIFEST_SCHEMA_TOKEN, "pilotproxy_chime_input_manifest"),
+    "scan_input_manifest": (SCAN_INPUT_MANIFEST_SCHEMA_NAME, SCAN_INPUT_MANIFEST_SCHEMA_REVISION, SCAN_INPUT_MANIFEST_SCHEMA_TOKEN, "pilotproxy_scan_input_manifest"),
     "weight_manifest": (WEIGHT_MANIFEST_SCHEMA_NAME, WEIGHT_MANIFEST_SCHEMA_REVISION, WEIGHT_MANIFEST_SCHEMA_TOKEN, "pilotproxy_weight_manifest"),
     "runtime_weights": (RUNTIME_WEIGHT_MANIFEST_SCHEMA_NAME, RUNTIME_WEIGHT_MANIFEST_SCHEMA_REVISION, RUNTIME_WEIGHT_MANIFEST_SCHEMA_TOKEN, "pilotproxy_runtime_weights_manifest"),
     "runtime_pilots": (RUNTIME_PILOT_PROFILES_SCHEMA_NAME, RUNTIME_PILOT_PROFILES_SCHEMA_REVISION, RUNTIME_PILOT_PROFILES_SCHEMA_TOKEN, "pilotproxy_runtime_pilot_profiles"),
@@ -100,6 +110,8 @@ RETIRED = {
     "fstat_weight_manifest_"+"v2", "fstat_runtime_weights_manifest_"+"v1",
     "fstat_runtime_pilot_profiles_"+"v1", "fstat_runtime_bundle_validation_"+"v1",
     "pilot_proxy_injection_"+"v1", "fstat_chime_input_manifest_"+"v1",
+    "fstat_chime_scan_input_manifest_"+"v1",
+    "pilotproxy_chime_detector_contract_"+"v1",
     "fstat_chime_product_validation_"+"v1", "fstat_chime_integrated_spectra_"+"v1",
     "pilot_proxy_detection_"+"v1", "pilot_proxy_validation_report_"+"v1",
     "fstat_atsc_detector_input_"+"v1", "fstat_atsc_waveform_quality_"+"v1",
@@ -110,7 +122,9 @@ RETIRED_CONSTANTS = {
     "DETECTOR_CORE_PROFILE_SCHEMA_"+"VERSION", "RECEIVER_PROFILE_SCHEMA_"+"VERSION",
     "STREAM_MAP_SCHEMA_"+"VERSION", "STREAM_LAYOUT_SCHEMA_"+"VERSION",
     "RESULT_SCHEMA_"+"VERSION", "MASK_CONVENTION_"+"VERSION",
-    "CHIME_DETECTOR_CONTRACT_SCHEMA_"+"VERSION", "CHIME_RUN_CONFIG_SCHEMA_"+"VERSION",
+    "DETECTOR_CONTRACT_SCHEMA_"+"VERSION",
+    "CHIME_DETECTOR_CONTRACT_SCHEMA_"+"VERSION",
+    "CHIME_RUN_CONFIG_SCHEMA_"+"VERSION",
     "CHIME_STATS_SCHEMA_"+"VERSION", "WEIGHT_MANIFEST_SCHEMA_"+"VERSION",
     "RUNTIME_WEIGHT_MANIFEST_SCHEMA_"+"VERSION", "RUNTIME_PILOT_PROFILES_SCHEMA_"+"VERSION",
     "RUNTIME_BUNDLE_VALIDATION_SCHEMA_"+"VERSION",

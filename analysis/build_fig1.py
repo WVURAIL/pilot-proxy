@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
 """Fig. 1 draft: transmitter-census context for the ATSC 14-36 survey band."""
 import csv
-import sys
 from collections import defaultdict
-from pathlib import Path
 
 import numpy as np
 

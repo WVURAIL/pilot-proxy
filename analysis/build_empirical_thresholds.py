@@ -15,9 +15,7 @@ Verification: the integer masks are compared frame-for-frame against the
 float rules (F > mu_hat, F < mu_hat - 12e-3*null_power_ratio) on all perframe data.
 """
 import csv
-import sys
 from fractions import Fraction
-from pathlib import Path
 
 import numpy as np
 
@@ -104,8 +102,8 @@ for r in rows:
           f"{r['bits']:>4}")
 tot_mm = sum(r["mm_hi"] + r["mm_lo"] for r in rows)
 tot_n = sum(r["n"] for r in rows)
-print(f"\nrules: mask_hi = pt*Q > P*pr ; mask_lo = pt*Q_lo < P_lo*pr "
-      f"(trusted channels only)")
+print("\nrules: mask_hi = pt*Q > P*pr ; mask_lo = pt*Q_lo < P_lo*pr "
+      "(trusted channels only)")
 print(f"verification: {tot_mm} mask mismatches across {tot_n} frames")
 print(f"worst product width: {worst_bits} bits (u64 headroom "
       f"{64 - worst_bits} bits)")

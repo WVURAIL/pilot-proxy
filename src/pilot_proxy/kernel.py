@@ -125,6 +125,26 @@ def _has_symbol(lib: ctypes.CDLL, name: str) -> bool:
         return False
 
 
+def _last_error_from_library(lib: Any) -> str:
+    """Read the thread-local error exposed by a compatible kernel library."""
+    last_error_fn = getattr(lib, "FStat_LastError", None)
+    if last_error_fn is None:
+        return ""
+    raw = last_error_fn()
+    if not raw:
+        return ""
+    if isinstance(raw, bytes):
+        return raw.decode(errors="replace")
+    return str(raw)
+
+
+def _raise_library_error(lib: Any, operation: str) -> None:
+    """Raise when a void C API call recorded an error."""
+    message = _last_error_from_library(lib)
+    if message:
+        raise RuntimeError(f"{operation} failed: {message}")
+
+
 class FStatKernel:
     """Wrapper for the F-statistic CUDA kernel library."""
 
@@ -145,11 +165,13 @@ class FStatKernel:
         if not _has_symbol(self._lib, "FStat_GetSpecs"):
             raise RuntimeError("Kernel library does not expose FStat_GetSpecs.")
         self._lib.FStat_GetSpecs.argtypes = [ctypes.POINTER(ctypes.c_int)] * 4
+        self._lib.FStat_GetSpecs.restype = None
         self._has_features = _has_symbol(self._lib, "FStat_GetFeatures")
         if self._has_features:
             self._lib.FStat_GetFeatures.argtypes = [
                 ctypes.POINTER(ctypes.c_int)
             ] * 3
+            self._lib.FStat_GetFeatures.restype = None
         self._has_optimization_features = _has_symbol(
             self._lib, "FStat_GetOptimizationFeatures"
         )
@@ -157,9 +179,11 @@ class FStatKernel:
             self._lib.FStat_GetOptimizationFeatures.argtypes = [
                 ctypes.POINTER(ctypes.c_int)
             ] * 3
+            self._lib.FStat_GetOptimizationFeatures.restype = None
         if not _has_symbol(self._lib, "FStat_GetVersion"):
             raise RuntimeError("Kernel library does not expose FStat_GetVersion.")
         self._lib.FStat_GetVersion.argtypes = [ctypes.POINTER(ctypes.c_int)] * 3
+        self._lib.FStat_GetVersion.restype = None
         self._has_last_error = _has_symbol(self._lib, "FStat_LastError")
         if self._has_last_error:
             self._lib.FStat_LastError.argtypes = []
@@ -192,8 +216,10 @@ class FStatKernel:
             ctypes.c_void_p,  # handle
             ctypes.c_void_p,  # weights pointer
         ]
+        self._lib.FStat_Compute_DiagnosticFloat.restype = None
 
         self._lib.FStat_Destroy.argtypes = [ctypes.c_void_p]
+        self._lib.FStat_Destroy.restype = None
 
         self._has_powers = _has_symbol(self._lib, "FStat_Compute_Powers")
         if self._has_powers:
@@ -201,6 +227,7 @@ class FStatKernel:
                 ctypes.c_void_p,  # handle
                 ctypes.c_void_p,  # weights pointer
             ]
+            self._lib.FStat_Compute_Powers.restype = None
         self._has_powers_u64 = _has_symbol(self._lib, "FStat_Compute_Powers_U64")
         if self._has_powers_u64:
             self._lib.FStat_Compute_Powers_U64.argtypes = [
@@ -208,6 +235,7 @@ class FStatKernel:
                 ctypes.c_void_p,  # weights pointer
                 ctypes.c_void_p,  # uint64 device output pointer
             ]
+            self._lib.FStat_Compute_Powers_U64.restype = None
         self._has_matched_filter_row_projections_i32 = _has_symbol(
             self._lib, "FStat_Compute_RowSums_I32"
         )
@@ -217,6 +245,7 @@ class FStatKernel:
                 ctypes.c_void_p,
                 ctypes.c_void_p,
             ]
+            self._lib.FStat_Compute_RowSums_I32.restype = None
         self._has_supports_row_projections = _has_symbol(
             self._lib, "FStat_Supports_RowSums"
         )
@@ -235,6 +264,7 @@ class FStatKernel:
                 ctypes.c_int,     # batch
                 ctypes.c_void_p,  # device uint64 fine-power output pointer
             ]
+            self._lib.FStat_Compute_FinePowers_U64.restype = None
         self._has_supports_fine_powers = _has_symbol(
             self._lib, "FStat_Supports_FinePowers"
         )
@@ -252,6 +282,7 @@ class FStatKernel:
                 ctypes.c_void_p,  # device uint64 marginal-power output pointer
                 ctypes.c_void_p,  # optional device int32 row-sum tap (or NULL)
             ]
+            self._lib.FStat_Compute_FusedFine_U64.restype = None
         self._has_supports_fused_fine = _has_symbol(
             self._lib, "FStat_Supports_FusedFine"
         )
@@ -275,6 +306,7 @@ class FStatKernel:
                 ctypes.c_void_p,   # optional device uint64 marginals (or NULL)
                 ctypes.c_void_p,   # optional device int32 row-sum tap (or NULL)
             ]
+            self._lib.FStat_Compute_FusedFineMask_U64.restype = None
         self._has_supports_fused_fine_mask = _has_symbol(
             self._lib, "FStat_Supports_FusedFineMask"
         )
@@ -286,6 +318,7 @@ class FStatKernel:
             self._lib.FStat_GetFineSpecs.argtypes = [
                 ctypes.POINTER(ctypes.c_int)
             ] * 3
+            self._lib.FStat_GetFineSpecs.restype = None
 
         self._has_numden_mask_rational_half = _has_symbol(
             self._lib, "FStat_Compute_NumDen_Mask_RationalHalf"
@@ -300,6 +333,7 @@ class FStatKernel:
                 ctypes.c_void_p,
                 ctypes.c_void_p,
             ]
+            self._lib.FStat_Compute_NumDen_Mask_RationalHalf.restype = None
         self._has_numden_mask_rational_half_checked = _has_symbol(
             self._lib, "FStat_Compute_NumDen_Mask_RationalHalf_WithOverflowCount"
         )
@@ -317,6 +351,7 @@ class FStatKernel:
                 ctypes.c_void_p,
                 ctypes.c_void_p,
             ]
+            checked.restype = None
 
     def _get_specs(self) -> KernelSpecs:
         """Query compile-time kernel parameters."""
@@ -331,6 +366,7 @@ class FStatKernel:
             ctypes.byref(c_b),
             ctypes.byref(c_reference_offset_bins),
         )
+        _raise_library_error(self._lib, "FStat_GetSpecs")
 
         return KernelSpecs(
             K=c_k.value,
@@ -362,12 +398,14 @@ class FStatKernel:
             ctypes.byref(c_uint64_power),
             ctypes.byref(c_threads),
         )
+        _raise_library_error(self._lib, "FStat_GetFeatures")
         if getattr(self, "_has_optimization_features", False):
             self._lib.FStat_GetOptimizationFeatures(
                 ctypes.byref(c_constant_weight_lanes),
                 ctypes.byref(c_shared_weight_lanes),
                 ctypes.byref(c_grid_max_blocks),
             )
+            _raise_library_error(self._lib, "FStat_GetOptimizationFeatures")
         return KernelFeatures(
             use_dp4a=bool(c_dp4a.value),
             use_uint64_power_accumulation=bool(c_uint64_power.value),
@@ -388,6 +426,7 @@ class FStatKernel:
             ctypes.byref(c_minor),
             ctypes.byref(c_patch),
         )
+        _raise_library_error(self._lib, "FStat_GetVersion")
 
         return KernelVersion(
             major=int(c_major.value),
@@ -445,10 +484,11 @@ class FStatKernel:
         """Return the last CUDA/API error reported by the kernel library."""
         if not getattr(self, "_has_last_error", False):
             return ""
-        raw = self._lib.FStat_LastError()
-        if not raw:
-            return ""
-        return raw.decode(errors="replace")
+        return _last_error_from_library(self._lib)
+
+    def _check_call(self, operation: str) -> None:
+        if getattr(self, "_has_last_error", False):
+            _raise_library_error(self._lib, operation)
 
     @property
     def supports_batch(self) -> bool:
@@ -458,12 +498,14 @@ class FStatKernel:
     def compute_diagnostic_float(self, handle, weights_ptr: int):
         """Execute the diagnostic floating-point F-statistic path."""
         self._lib.FStat_Compute_DiagnosticFloat(handle, weights_ptr)
+        self._check_call("FStat_Compute_DiagnosticFloat")
 
     def compute_powers(self, handle, weights_ptr: int):
         """Execute the kernel and write per-weight power terms to d_out."""
         if not getattr(self, "_has_powers", False):
             raise RuntimeError("Kernel library does not expose FStat_Compute_Powers.")
         self._lib.FStat_Compute_Powers(handle, weights_ptr)
+        self._check_call("FStat_Compute_Powers")
 
     def compute_powers_u64(self, handle, weights_ptr: int, powers_ptr: int):
         """Execute the kernel and write exact uint64 power terms to powers_ptr."""
@@ -472,6 +514,7 @@ class FStatKernel:
                 "Kernel library does not expose FStat_Compute_Powers_U64."
             )
         self._lib.FStat_Compute_Powers_U64(handle, weights_ptr, powers_ptr)
+        self._check_call("FStat_Compute_Powers_U64")
 
     def supports_row_projections(self) -> bool:
         """Return True when the v2 exact row-sum front end is available."""
@@ -498,6 +541,7 @@ class FStatKernel:
         self._lib.FStat_Compute_RowSums_I32(
             handle, weights_ptr, row_projections_ptr
         )
+        self._check_call("FStat_Compute_RowSums_I32")
 
     def supports_fine_powers(self) -> bool:
         """Return True when the on-device fine-power stage is available."""
@@ -555,6 +599,7 @@ class FStatKernel:
             int(batch),
             fine_powers_ptr,
         )
+        self._check_call("FStat_Compute_FinePowers_U64")
 
     def supports_fused_fine(self) -> bool:
         """Return True when the fused fine kernel (core 2.2.0) is available."""
@@ -597,6 +642,7 @@ class FStatKernel:
             powers_ptr,
             row_projections_tap_ptr if row_projections_tap_ptr else None,
         )
+        self._check_call("FStat_Compute_FusedFine_U64")
 
     def supports_fused_fine_mask(self) -> bool:
         """Return True when the decision epilogue (core 2.3.0) is available."""
@@ -656,6 +702,7 @@ class FStatKernel:
             powers_ptr if powers_ptr else None,
             row_projections_tap_ptr if row_projections_tap_ptr else None,
         )
+        self._check_call("FStat_Compute_FusedFineMask_U64")
 
     def compute_numden_mask_rational_half(
         self,
@@ -686,6 +733,7 @@ class FStatKernel:
             denominator_ptr,
             mask_ptr,
         )
+        self._check_call("FStat_Compute_NumDen_Mask_RationalHalf")
 
     def compute_numden_mask_rational_half_checked(
         self,
@@ -718,10 +766,14 @@ class FStatKernel:
             mask_ptr,
             rational_overflow_count_ptr,
         )
+        self._check_call(
+            "FStat_Compute_NumDen_Mask_RationalHalf_WithOverflowCount"
+        )
 
     def destroy(self, handle):
         """Destroy a kernel handle."""
         self._lib.FStat_Destroy(handle)
+        self._check_call("FStat_Destroy")
 
 
 class _KernelHandle:
@@ -752,12 +804,7 @@ class _KernelHandle:
                 M,
             )
         if not self._handle:
-            last_error = ""
-            last_error_fn = getattr(lib, "FStat_LastError", None)
-            if last_error_fn is not None:
-                raw = last_error_fn()
-                if raw:
-                    last_error = raw.decode(errors="replace")
+            last_error = _last_error_from_library(lib)
             raise RuntimeError(
                 last_error or "F-statistic kernel handle creation failed."
             )
@@ -769,6 +816,7 @@ class _KernelHandle:
     def __exit__(self, *args):
         """Destroy the underlying handle when exiting the context."""
         self._lib.FStat_Destroy(self._handle)
+        _raise_library_error(self._lib, "FStat_Destroy")
 
 
 # =============================================================================

@@ -19,7 +19,7 @@ from pilot_proxy.detector_contract import (
     ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION,
     DETECTOR_POWER_RATIO_DEFINITION,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
-    build_chime_detector_contract,
+    build_detector_contract,
 )
 from pilot_proxy.detector_weights import DetectorWeightBank
 from pilot_proxy.integration.defaults import DEFAULT_DETECTOR_CORE_PROFILE
@@ -184,7 +184,7 @@ def main() -> int:
     except Exception as exc:
         errors.append(f"canonical detector-core profile failed to load: {exc}")
 
-    public_contract = build_chime_detector_contract(
+    public_contract = build_detector_contract(
         detector_window_samples=128,
         skipped_guard_bins=1,
         reference_offset_bins=2,

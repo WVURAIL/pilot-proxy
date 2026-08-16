@@ -8,9 +8,7 @@ Channel classes (from empirical_zero_points.csv):
   untrusted (ch24, ch30) excluded everywhere.
 """
 import csv
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 

@@ -229,13 +229,13 @@ The manifest records the selected placement. In the shipped ATSC 14--36 bank
 adaptive case: its lower reference wraps across the coarse-channel edge. No
 shipped channel collides with, or shifts around, the forbidden DC tone.
 
-## `K` baseline and candidate
+## Supported `K` family
 
-`K = 128` is the implemented and tested software baseline. It matches the
-current CUDA contract, shipped weight bank, result schema, and regression
-tests.
+`K = 64` and `K = 128` are both implemented, compiled, and regression-tested.
+The CHIME profile and bank select `K = 128`; the full and pathfinder CHORD
+profiles and bank select `K = 64`. Both geometries use 128 windows per stream
+and therefore the same frozen 256-bin padded fine transform.
 
-`K = 256` is a separate detector configuration. The proposed implementation
-uses int32 dot products, uint32 row powers, and uint64 frame sums to avoid the
-current precision limit. That path is not implemented or tested here and
-remains conditional on CANFAR cleaning evidence.
+`K = 256` is not a supported detector configuration. It would require a new
+fixed-point bound, compiled kernel geometry, weight bank, receiver contract,
+and validation campaign.

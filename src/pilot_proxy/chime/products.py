@@ -11,11 +11,24 @@ import numpy as np
 
 from pilot_proxy.detector_contract import NORMALIZED_POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.json_utils import write_json_strict
+from pilot_proxy.schema_identity import schema_token
 from .hdf5_input import ChimePilotDataset, dataset_manifest
 
 CHIME_DETECTOR_OUTPUTS_FILENAME = "chime_detector_outputs.npz"
 CHIME_SPECTROGRAM_CACHE_FILENAME = "chime_spectrogram_cache.npz"
 CHIME_INTEGRATED_SPECTRA_FILENAME = "chime_integrated_spectra.npz"
+CHIME_INPUT_MANIFEST_SCHEMA_NAME = "pilotproxy_chime_input_manifest"
+CHIME_INPUT_MANIFEST_SCHEMA_REVISION = 1
+CHIME_INPUT_MANIFEST_SCHEMA_TOKEN = schema_token(
+    CHIME_INPUT_MANIFEST_SCHEMA_NAME,
+    CHIME_INPUT_MANIFEST_SCHEMA_REVISION,
+)
+SCAN_INPUT_MANIFEST_SCHEMA_NAME = "pilotproxy_scan_input_manifest"
+SCAN_INPUT_MANIFEST_SCHEMA_REVISION = 1
+SCAN_INPUT_MANIFEST_SCHEMA_TOKEN = schema_token(
+    SCAN_INPUT_MANIFEST_SCHEMA_NAME,
+    SCAN_INPUT_MANIFEST_SCHEMA_REVISION,
+)
 SAMPLE_RATE_HZ = 390_625.0
 
 
@@ -148,10 +161,10 @@ def write_detector_outputs(
     estimated_data_shelf_snr_db: np.ndarray,
     mask: np.ndarray,
     valid: np.ndarray,
-    target_norm_sq: np.ndarray | None = None,
-    reference_norm_sum_sq: np.ndarray | None = None,
-    null_power_ratio: np.ndarray | None = None,
-    normalized_pilot_excess: np.ndarray | None = None,
+    target_norm_sq: np.ndarray,
+    reference_norm_sum_sq: np.ndarray,
+    null_power_ratio: np.ndarray,
+    normalized_pilot_excess: np.ndarray,
 ) -> Path:
     path = Path(run_dir) / CHIME_DETECTOR_OUTPUTS_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,19 +184,13 @@ def write_detector_outputs(
         estimated_data_shelf_snr_db=np.asarray(estimated_data_shelf_snr_db, dtype=np.float64),
         mask=np.asarray(mask, dtype=np.uint8),
         valid=np.asarray(valid, dtype=np.uint8),
-    )
-    # Weight-norm zero-point fields (norm-corrected mask rule). Optional so a
-    # combine of legacy per-pilot products can still write a legacy-shaped file.
-    if target_norm_sq is not None:
-        arrays["target_norm_sq"] = np.asarray(target_norm_sq, dtype=np.int64)
-    if reference_norm_sum_sq is not None:
-        arrays["reference_norm_sum_sq"] = np.asarray(reference_norm_sum_sq, dtype=np.int64)
-    if null_power_ratio is not None:
-        arrays["null_power_ratio"] = np.asarray(null_power_ratio, dtype=np.float64)
-    if normalized_pilot_excess is not None:
-        arrays["normalized_pilot_excess"] = np.asarray(
+        target_norm_sq=np.asarray(target_norm_sq, dtype=np.int64),
+        reference_norm_sum_sq=np.asarray(reference_norm_sum_sq, dtype=np.int64),
+        null_power_ratio=np.asarray(null_power_ratio, dtype=np.float64),
+        normalized_pilot_excess=np.asarray(
             normalized_pilot_excess, dtype=np.float64
-        )
+        ),
+    )
     np.savez_compressed(path, **arrays)
     return path
 
@@ -198,6 +205,7 @@ def write_spectrogram_cache(
     chime_frequency_hz: np.ndarray | None = None,
     frame_index: np.ndarray,
     frame_size_samples: int,
+    sample_rate_hz: float,
     valid: np.ndarray | None = None,
 ) -> Path:
     path = Path(run_dir) / CHIME_SPECTROGRAM_CACHE_FILENAME
@@ -219,6 +227,7 @@ def write_spectrogram_cache(
         relative_time_s=relative_time_seconds(
             np.asarray(frame_index),
             frame_size_samples=int(frame_size_samples),
+            sample_rate_hz=float(sample_rate_hz),
         ),
     )
     return path
@@ -408,7 +417,7 @@ def write_input_manifest(
 ) -> Path:
     path = Path(run_dir) / "input_manifest.json"
     payload = {
-        "schema_version": "pilotproxy_chime_input_manifest_v1",
+        "schema_version": CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
         "input_dir": str(input_dir),
         "absolute_time_used": False,
         "datasets": [dataset_manifest(dataset) for dataset in datasets],
@@ -431,6 +440,12 @@ def write_run_config(run_dir: Path, config: dict[str, Any]) -> Path:
 
 __all__ = [
     "CHIME_DETECTOR_OUTPUTS_FILENAME",
+    "CHIME_INPUT_MANIFEST_SCHEMA_NAME",
+    "CHIME_INPUT_MANIFEST_SCHEMA_REVISION",
+    "CHIME_INPUT_MANIFEST_SCHEMA_TOKEN",
+    "SCAN_INPUT_MANIFEST_SCHEMA_NAME",
+    "SCAN_INPUT_MANIFEST_SCHEMA_REVISION",
+    "SCAN_INPUT_MANIFEST_SCHEMA_TOKEN",
     "CHIME_SPECTROGRAM_CACHE_FILENAME",
     "SAMPLE_RATE_HZ",
     "ensure_run_dirs",

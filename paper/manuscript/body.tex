@@ -606,7 +606,8 @@ per-trial records are archived in the provenance bundle and committed to
 the public repository
 (\texttt{data/provenance/parity\_gpu\_20260715seed}); the weight bank
 is byte-identical between the CPU sweep and the GPU session
-(sha256 \texttt{b0dce17a\ldots}). This supports CPU$\leftrightarrow$GPU
+(sha256 \texttt{b0dce17a\ldots}; retained as the historical half-band bank
+under \texttt{weights/legacy\_halfband/}). This supports CPU$\leftrightarrow$GPU
 parity for exactly the tested configuration; the public CI suite is
 CPU-only (its CUDA test skips without a device and exercises a single
 geometry when enabled), so GPU parity across the remaining geometries

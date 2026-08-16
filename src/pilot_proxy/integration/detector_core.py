@@ -9,28 +9,28 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+from pilot_proxy.detector_constants import (
+    DEFAULT_DETECTOR_WINDOW_SAMPLES,
+    DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET,
+    LOCKED_COARSE_POWER_RATIO_DEFINITION,
+    LOCKED_HOST_MASKING_POLICY,
+    LOCKED_INPUT_FORMAT,
+    LOCKED_NUM_WEIGHT_TERMS,
+    LOCKED_PACKED_COMPLEX_BITS,
+    LOCKED_POWER_ACCUMULATOR,
+    LOCKED_RAW_PILOT_EXCESS_DEFINITION,
+    LOCKED_REFERENCE_OFFSET_BINS,
+    LOCKED_SAMPLE_BITS_PER_COMPONENT,
+    LOCKED_SKIPPED_GUARD_BINS,
+    MAG_SQUARED_ACCUMULATOR_BITS_TARGET,
+    POWER_SUM_ACCUMULATOR_BITS,
+    SUPPORTED_DETECTOR_WINDOW_SAMPLES,
+)
+
 from .schemas import (
     DETECTOR_CORE_ID_PILOT_PROXY_CUDA_LOCAL_REFERENCE_POWER_RATIO,
     DETECTOR_CORE_PROFILE_SCHEMA_TOKEN,
 )
-
-DEFAULT_DETECTOR_WINDOW_SAMPLES = 128
-SUPPORTED_DETECTOR_WINDOW_SAMPLES = frozenset({64, 128})
-LOCKED_NUM_WEIGHT_TERMS = 3
-LOCKED_SKIPPED_GUARD_BINS = 1
-LOCKED_REFERENCE_OFFSET_BINS = LOCKED_SKIPPED_GUARD_BINS + 1
-MIN_SKIPPED_GUARD_BINS = 1
-MIN_REFERENCE_OFFSET_BINS = MIN_SKIPPED_GUARD_BINS + 1
-LOCKED_PACKED_COMPLEX_BITS = 8
-LOCKED_SAMPLE_BITS_PER_COMPONENT = 4
-LOCKED_INPUT_FORMAT = "complex_int4_packed_int8"
-LOCKED_POWER_ACCUMULATOR = "uint64"
-LOCKED_COARSE_POWER_RATIO_DEFINITION = "R_coarse = 2 * P_target / (P_ref_lower + P_ref_upper)"
-LOCKED_RAW_PILOT_EXCESS_DEFINITION = "rho_raw = R_coarse - 1 (diagnostic only)"
-LOCKED_HOST_MASKING_POLICY = "normalized_positive_excess_from_uint64_powers"
-DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET = 16
-MAG_SQUARED_ACCUMULATOR_BITS_TARGET = 32
-POWER_SUM_ACCUMULATOR_BITS = 64
 
 _TOP_LEVEL_FIELDS = frozenset(
     {"schema_version", "detector_core_id", "kernel_contract", "fixed_point_limits"}
@@ -156,10 +156,11 @@ class DetectorCoreProfile:
             )
         if self.num_weight_terms != LOCKED_NUM_WEIGHT_TERMS:
             raise ValueError("num_weight_terms must be locked to 3.")
-        if self.skipped_guard_bins < MIN_SKIPPED_GUARD_BINS:
+        if self.skipped_guard_bins != LOCKED_SKIPPED_GUARD_BINS:
             raise ValueError(
-                "skipped_guard_bins must be at least "
-                f"{MIN_SKIPPED_GUARD_BINS}."
+                "skipped_guard_bins must match the compiled reference offset: "
+                f"expected {LOCKED_SKIPPED_GUARD_BINS}, got "
+                f"{self.skipped_guard_bins}."
             )
         if self.packed_complex_bits != LOCKED_PACKED_COMPLEX_BITS:
             raise ValueError("packed_complex_bits must be locked to 8.")
@@ -366,7 +367,5 @@ __all__ = [
     "LOCKED_NUM_WEIGHT_TERMS",
     "LOCKED_REFERENCE_OFFSET_BINS",
     "LOCKED_SKIPPED_GUARD_BINS",
-    "MIN_REFERENCE_OFFSET_BINS",
-    "MIN_SKIPPED_GUARD_BINS",
     "load_detector_core_profile",
 ]

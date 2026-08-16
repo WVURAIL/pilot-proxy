@@ -26,7 +26,7 @@ import pytest
 
 pytest.importorskip("h5py")
 import h5py  # noqa: E402
-datatrawl = pytest.importorskip("datatrawl")
+pytest.importorskip("datatrawl.interfaces")
 
 from datatrawl.plugins.readers import _baseband_format as fmt  # noqa: E402
 from datatrawl.instruments import load_instrument  # noqa: E402

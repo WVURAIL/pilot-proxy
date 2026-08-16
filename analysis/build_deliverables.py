@@ -3,11 +3,9 @@
 the uploaded results bundle."""
 import csv
 import json
-from pathlib import Path
 
 import numpy as np
 
-import sys
 import _paths  # noqa: F401  (repo src on sys.path + shared locations)
 from pilot_proxy.plot_style import setup_matplotlib
 

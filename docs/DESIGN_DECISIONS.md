@@ -30,16 +30,16 @@ fitting a separate operational threshold before the bounded CANFAR test.
 Products written under the earlier `F > 1` rule retain that rule in
 `mask_rule` and must be interpreted under their recorded convention.
 
-## `K = 128` is the CANFAR baseline
+## `K = 128` is the CHIME baseline; `K = 64` is the CHORD baseline
 
-We retain `K = 128` because it matches the current CUDA contract, detector
-core profile, shipped manifests, and regression tests.
+The compiled detector family and detector-core profile support `K = 64` and
+`K = 128`. CHIME retains `K = 128` because it matches the CHIME receiver
+profile, shipped CHIME manifest, and regression data. The full and pathfinder
+CHORD profiles select `K = 64`; their 8,192-sample frames still produce the
+frozen 128 windows per stream.
 
-`K = 256` remains a possible later configuration. The proposed implementation
-uses int32 dot products, uint32 row powers, and uint64 frame sums to avoid the
-current precision constraint. It is not implemented or tested here and would
-require a separate weight bank, contract, and validation set. We do not
-promote it without CANFAR cleaning evidence.
+`K = 256` is not implemented or tested and would require a separate fixed-point
+bound, weight bank, contract, and validation set.
 
 `K = 512` is outside the current candidate set.
 
@@ -104,20 +104,20 @@ pilot channel selects one weight-bank pointer
 This repository does not contain a Kotekan stage. The bundle defines the
 inputs that a later stage would consume; it is not evidence of deployment.
 
-## The deployed decision is the fine designated-set CFAR in the kernel
+## Fine designated-set CFAR is implemented but inactive
 
-The v2 front end was designed to replace the logic after the dot product:
+The fine front end was designed as a candidate replacement for the logic after the dot product:
 instead of squaring each window's dot product and summing incoherently over
 all rows, the windows are integrated coherently (the padded window-axis
 FFT, per feed) and only the feed sum remains incoherent. For W = 128
 windows this recovers up to 10 log10(sqrt(W)) ~ 10.5 dB of deflection
-sensitivity over the v1 reduction (less scalloping, bounded at 3.92 dB at
+sensitivity over the coarse reduction (less scalloping, bounded at 3.92 dB at
 the fine-span edge), and the calibrated any-bin CFAR turns the refined
 spectrum into a decision with a pre-registered false-alarm rate.
 
-Deployment decision (2026-07): the real-time Kotekan decision is the fine
-designated-set CFAR, computed on the device. Coarse-only deployment was
-evaluated first on measured ROCs and rejected: the coarse null bulk and
+Candidate-selection record (2026-07): measured ROCs motivated implementing a
+real-time fine designated-set CFAR on the device. Coarse-only operating points
+were evaluated first: the coarse null bulk and
 the weak-signal bulk overlap almost completely, so every coarse operating
 point is one of two failures. The null_power_ratio point holds Pd ~ 1.0 everywhere but
 spends 48.5% of verified-quiet time by construction, and null-calibrated
@@ -134,8 +134,8 @@ The same frames carry a fine designated-set Pd ~ 0.99 on all three
 channels at a measured Pfa of 0.091, with the crude +/-2-bin set and an
 uncalibrated CFAR multiplier. The fine axis is the only one that holds
 both ends at once --- more complete than any calibrated coarse point,
-cheaper than null_power_ratio --- which was the design intent of the v2 front end all
-along. The mask decision therefore moves into the kernel: after the exact
+cheaper than null_power_ratio --- which was the design intent of the fine front end.
+The candidate mask implementation therefore lives in the kernel: after the exact
 int32 row sums, the device computes the padded window-axis FFT, the
 incoherent feed sum, the per-frame null-bulk CFAR estimate, and the
 designated-set compare, and emits one mask bit per aligned frame. The
@@ -143,8 +143,8 @@ queue handoff design is unchanged. Status: the power stage landed in
 kernel core 2.1.0 (`FStat_Compute_FinePowers_U64` --- fxfft256 v1 on
 device plus exact uint64 feed sums, bit-gated by
 `tests/kernel/test_fine_powers_gpu.py`); the CFAR estimate and
-designated-set compare remain downstream pending the calibration
-campaign, keeping the library policy-free.
+designated-set compare remained downstream at that milestone pending the
+calibration campaign.
 
 Target form (decided 2026-08-01): one solid kernel. Block-per-stream
 fusion computes the row sums in shared memory (never materialized to
@@ -214,8 +214,11 @@ the survey products' per-bin `fine_power_ratio` suffice to compute those
 quantiles. The operating point (anchor, width, bulk mask, rank,
 multiplier) is runtime-bundle data with provenance
 (`fine_calibration` block, exported `pending_campaign` and validated
-in both states by the bundle validator); the arithmetic is code. The
-deployed contract change still lands only at a survey epoch boundary.
+in both states by the bundle validator); the arithmetic is code. Activation
+still requires calibrated bundle data, a schema/decision-contract revision,
+and a survey epoch boundary. Under the current contract,
+`fine_candidate_decision.active` is false and `reject_mask` remains the coarse
+norm-corrected positive-excess decision.
 
 Verification: threaded CPU emulation of the extracted device code
 (real barrier concurrency; mask, fine, tap, and marginal outputs
@@ -231,14 +234,14 @@ core 2.2.0.
 Measured (A100, 2026-08-05, all 19 kernel gates passing): fused
 production form 0.769 ms per 2048-stream frame (x55 margin against the
 41.9 ms cadence; composed three-launch chain 2.144 ms, so fusion saves
-1.375 ms; debug tap +5 us); deployed mask form 0.895 ms (x47 margin;
-decision epilogue +0.127 ms). The complete deployed decision costs ~2%
+1.375 ms; debug tap +5 us); candidate mask form 0.895 ms (x47 margin;
+decision epilogue +0.127 ms). The complete implemented candidate costs ~2%
 of the frame cadence.
 
 The gating requirement is a deterministic verification FFT. The project's
 validation standard is bit-exact agreement between the CUDA path and the
 Python reference; cuFFT and numpy cannot bit-match each other (different
-algorithms, operation order, FMA), so the deployed FFT must be owned by
+algorithms, operation order, FMA), so an activatable FFT must be owned by
 the project and implemented identically on both sides.
 
 Resolved (2026-07-31): the fixed-point variant is chosen and frozen as
@@ -250,24 +253,24 @@ in brief: 256-point radix-2 DIT, Q15 twiddle table frozen as source
 literals (nearest-integer, no rounding ties; +-32768 held in int32 and
 exact under the rounding rule), butterfly rounding floor((v + 2^14) /
 2^15), no stage scaling, inputs |re|,|im| <= 2^20 provably overflow-free
-in int32 (deployed row sums reach 2^14; contract-limit stress measures 28
+in int32 (production-bound row sums reach 2^14; contract-limit stress measures 28
 of 31 bits). Measured against the analyzer's complex128 pipeline:
 spectrum error <= 6.3e-4 of the spectrum peak across all golden families,
 and the end-to-end fine statistic moves by <= 5.9e-4 relative (-0.00026
 dB at a +1287 Hz detection peak) --- five orders below the 10.5 dB
 coherent gain (`tools/fxfft_report.py`). After the rounded FFT every
 downstream quantity (|X|^2, feed sums, the F2 numerators and
-denominators) is exact uint64, so the deployed fine decision is
+denominators) is exact uint64, so the candidate fine decision is
 deterministic integer arithmetic end to end. The deterministic-float32
 alternative (identical butterfly order, FMA disabled) is recorded as not
 taken: it verifies equally but ports worse and leaves the integer
 culture. Library FFTs remain cross-check oracles in tests; the CUDA
 implementation must reproduce the golden vectors bit-for-bit. The offline
 analyzer keeps its float pipeline; whether offline products switch to
-fxfft at the deployment epoch (so archive and deployment match
+fxfft at a possible activation epoch (so archive and real-time paths match
 bit-for-bit) is an open item for the epoch-boundary migration.
 
-Deployment calibration inputs are all survey-supplied. Per-channel
+Activation calibration inputs are all survey-supplied. Per-channel
 measured line anchors and designated-set widths need on-epochs only,
 which every detectable channel supplies. Per-channel CFAR threshold
 multipliers need verified nulls: the measured null is ~19x wider than the
@@ -282,7 +285,7 @@ provenance: epoch lists, quantiles, and source product hashes.
 
 The survey recording is unchanged: the null_power_ratio positive-excess flag remains
 the recorded convention mid-survey (exact, calibration-free, archive-
-comparable), and the deployed-contract change lands at a survey epoch
+comparable), and any active-decision change must land at a survey epoch
 boundary. Rate margin must be re-measured with the fine stages on
 device, though 2048 256-point FFTs per ~42 ms frame should leave the
 detector's lead over the correlator essentially intact. Measured
@@ -312,8 +315,7 @@ are recorded for whoever does:
 
 - Fixed false alarm (CFAR): measure a transmitter-off null, set the
   threshold at its (1 - P_FA) quantile, and let Pd follow. This is the
-  policy the fine path already adopts, the policy the deployed fine
-  decision holds (see the deployment section above), and the right one
+  policy the fine candidate implements (see the section above), and the right one
   when clean integration time is the scarce resource.
 - ROC-derived (Youden's J): sweep the threshold and maximize
   J = Pd - Pfa. Equal-cost by construction --- on a weak channel it will

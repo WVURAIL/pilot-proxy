@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 
 from pilot_proxy.detector_contract import (
-    CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN,
+    DETECTOR_CONTRACT_SCHEMA_TOKEN,
     CHIME_RUN_CONFIG_SCHEMA_TOKEN,
     CHIME_STATS_SCHEMA_TOKEN,
 )
@@ -41,7 +41,7 @@ def test_current_schema_tokens_are_ground_zero_revision_one() -> None:
     assert STREAM_LAYOUT_SCHEMA_TOKEN == "pilotproxy_stream_layout_v1"
     assert RESULT_SCHEMA_TOKEN == "pilotproxy_result_schema_v1"
     assert MASK_CONVENTION_SCHEMA_TOKEN == "pilotproxy_mask_convention_v1"
-    assert CHIME_DETECTOR_CONTRACT_SCHEMA_TOKEN == "pilotproxy_chime_detector_contract_v1"
+    assert DETECTOR_CONTRACT_SCHEMA_TOKEN == "pilotproxy_detector_contract_v1"
     assert CHIME_RUN_CONFIG_SCHEMA_TOKEN == "pilotproxy_chime_run_config_v1"
     assert CHIME_STATS_SCHEMA_TOKEN == "pilotproxy_chime_stats_v1"
     assert WEIGHT_MANIFEST_SCHEMA_TOKEN == "pilotproxy_weight_manifest_v1"

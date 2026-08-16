@@ -177,12 +177,6 @@ The detector compares one target power with two local reference powers. For one 
 \begin{equation}
   F=\frac{2P_t}{P_{r1}+P_{r2}},\qquad \rho=F-1.
 \end{equation}
-The quantity \(10\log_{10}F\) is the F-statistic level. It is not a physical pilot-to-noise ratio because the basic uncorrected no-excess point is \(F=1\); in that raw convention, positive excess begins at \(F>1\). The current CHIME mask uses the norm-corrected point \(F>\mu_0\) instead, as described in Section~\ref{sec:thresholds}.
-
-The one-bin pilot-excess PNR is:
-\begin{equation}
-  \mathrm{PNR}_{\mathrm{bin},dB}=10\log_{10}(F-1).
-\end{equation}
 We convert the one-bin excess to an equivalent DTV data-shelf SNR with
 \begin{equation}
   \mathrm{SNR}_{\mathrm{shelf},dB} = \mathrm{PNR}_{\mathrm{bin},dB}
@@ -368,9 +362,22 @@ pilot-proxy quantize \
   --physical-channel 14 \
   --frame-size-samples 16384
 \end{lstlisting}
-This example uses a 16,384-sample frame because that is the checked-in reference test profile. In integration, the frame size is matched to the correlator's frame rather than chosen freely --- the kernel requires only a positive multiple of 128 --- and the CHIME F-engine upgrade target this repository designs for is \(2^{14}=16384\). It is not a statement about the currently deployed CHIME correlator. The software does not infer one universal frame size from HDF5 metadata: set \code{chime-run --frame-size-samples} from verified product information, and set the datatrawl instrument \code{nfft} used by \code{chime-scan}. Record the resolved value with each real-data product.
+This example uses a 16,384-sample frame because that is the checked-in CHIME
+reference profile. In integration, the frame size is matched to the
+correlator's frame rather than chosen freely and must be a positive multiple of
+the selected detector window. The detector core supports \(K=64\) and
+\(K=128\); the CHIME profile selects \(K=128\), while the CHORD profiles select
+\(K=64\). The CHIME F-engine upgrade target this repository designs for is
+\(2^{14}=16384\), not a statement about the currently deployed CHIME
+correlator. The software does not infer one universal frame size from HDF5
+metadata: set \code{chime-run --frame-size-samples} from verified product
+information, and set the datatrawl instrument \code{nfft} used by
+\code{chime-scan}. Record the resolved value with each real-data product.
 
-The output matrix is row-major and has shape \code{(rows, 128)} or \code{(batch, rows, 128)} with dtype \code{int8}. The CUDA wrapper checks both properties before passing pointers to the kernel.
+The output matrix is row-major and has shape \code{(rows, K)} or
+\code{(batch, rows, K)} with dtype \code{int8}, where \code{K} is the selected
+compiled detector window. The CUDA wrapper checks both properties before
+passing pointers to the kernel.
 
 \section{Evaluate Shelf-SNR Response}
 
@@ -540,8 +547,8 @@ pilot-proxy make-weights \
   --output generated/weights/chime_dtv_weights_k128.bin
 \end{lstlisting}
 
-The CHIME profile has status \code{example_requires_data_product_verification}.
-Its 16,384-sample frame represents the planned Engine upgrade interface used for
+The CHIME profile has status \code{baseband_frame_verified_2026_07_29}.
+Its 16,384-sample frame represents the planned F-engine upgrade interface used for
 the repository's tests and analysis, not the current deployed correlator. The
 example stream map contains 2,048 feed-polarization entries so the layout check
 exercises the intended row-count contract. Verify both files against the actual
@@ -730,7 +737,7 @@ science products and diagnostics.
 
 JSON reports do not emit NaN or infinity; values that are not finite are serialized as \code{null}. CSV files may retain NaN text when analysis software can represent it.
 
-Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilotproxy_result_schema_v1}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppSchemaVThree} as defined in \code{docs/PRODUCT_SCHEMA.md}.
+Detector and synthetic SNR-evaluator JSON reports include \field{result_schema} with \code{schema_version=pilotproxy_result_schema_v1}. This object records the statistic definition, layout, calibration constants, threshold conversion, fixed-point contract, and mask convention needed to interpret those reports. Audit, quantization, summary, injection, and CHIME products use their own documented top-level schemas; in particular, CHIME per-pilot archive products use \field{schema_version}=\texttt{\ppPerPilotSchema} as defined in \code{docs/PRODUCT_SCHEMA.md}.
 
 The combined-row statistic is:
 \begin{equation}
@@ -780,7 +787,9 @@ Use the system GNU Radio Python, typically \code{/usr/bin/python3}. Confirm that
 Run \code{make build-kernel SM=<target>} and ensure \code{LD_LIBRARY_PATH} includes the CUDA driver path. On WSL, this is commonly \code{/usr/lib/wsl/lib}; verify the target host and prefer the staged cache copy under \code{~/.cache/pilot_proxy/}.
 
 \subsection{Wrong detector matrix shape}
-The packed detector matrix must have dtype \code{int8} and last dimension 128.  Use \code{pilot-proxy quantize} to build the expected format.
+The packed detector matrix must have dtype \code{int8} and last dimension equal
+to the selected compiled detector window (64 or 128). Use
+\code{pilot-proxy quantize} to build the expected format.
 
 \subsection{No weights for channel}
 The shipped bank covers physical channels 14-36.  Use \code{pilot-proxy list-channels} to list available targets.

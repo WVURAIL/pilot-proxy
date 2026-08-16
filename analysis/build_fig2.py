@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Fig. 2 draft: detector weight response |W(f)|^2 from the shipped K=128
 int4 bank, plus exact manifest reference-placement geometry."""
-import sys
-from pathlib import Path
 
 import numpy as np
 
