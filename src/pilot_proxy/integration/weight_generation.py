@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import operator
 import struct
 import zlib
 from dataclasses import dataclass, replace
@@ -17,6 +18,7 @@ import numpy as np
 from pilot_proxy.atsc_channels import (
     parse_physical_channel_spec,
     physical_channel_to_pilot_hz,
+    validate_uhf_physical_channel,
 )
 from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -92,6 +94,38 @@ class DetectorCoreLayout:
     skipped_guard_bins: int
     reference_offset_bins: int
 
+    def __post_init__(self) -> None:
+        values: dict[str, int] = {}
+        for field_name in (
+            "detector_window_samples",
+            "skipped_guard_bins",
+            "reference_offset_bins",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool):
+                raise TypeError(
+                    f"{field_name} must be an integer, not a boolean."
+                )
+            try:
+                values[field_name] = operator.index(value)
+            except TypeError as exc:
+                raise TypeError(f"{field_name} must be an integer.") from exc
+        if values["detector_window_samples"] <= 0:
+            raise ValueError("detector_window_samples must be positive.")
+        if values["skipped_guard_bins"] < 0:
+            raise ValueError("skipped_guard_bins must be nonnegative.")
+        if values["reference_offset_bins"] <= 0:
+            raise ValueError("reference_offset_bins must be positive.")
+        if (
+            values["reference_offset_bins"]
+            != values["skipped_guard_bins"] + 1
+        ):
+            raise ValueError(
+                "reference_offset_bins must equal skipped_guard_bins + 1."
+            )
+        for field_name, value in values.items():
+            object.__setattr__(self, field_name, value)
+
 
 def _physical_channels_from_range(value: str) -> list[int]:
     return parse_physical_channel_spec(value)
@@ -107,14 +141,17 @@ def parse_physical_channel_selection(
     if physical_channel_range is not None:
         out.extend(_physical_channels_from_range(physical_channel_range))
     if physical_channels is not None:
-        out.extend(int(channel) for channel in physical_channels)
+        out.extend(
+            validate_uhf_physical_channel(channel)
+            for channel in physical_channels
+        )
     seen: set[int] = set()
     unique: list[int] = []
     for channel in out:
-        if int(channel) in seen:
+        if channel in seen:
             continue
-        seen.add(int(channel))
-        unique.append(int(channel))
+        seen.add(channel)
+        unique.append(channel)
     if not unique:
         raise ValueError("at least one physical channel must be selected.")
     return unique
@@ -339,7 +376,8 @@ def target_layout(
                 "the core first "
                 "(DetectorCoreProfile.with_detector_window_samples)."
             )
-    pilot_hz = physical_channel_to_pilot_hz(int(physical_channel))
+    channel = validate_uhf_physical_channel(physical_channel)
+    pilot_hz = physical_channel_to_pilot_hz(channel)
     selection = receiver_frequency_to_channel(pilot_hz, profile)
     frame_center, forbidden_dc, frame_mode = _resolve_frame_convention(
         profile, int(selection.coarse_channel_index)
@@ -356,7 +394,7 @@ def target_layout(
     ):
         raise ValueError(
             "target pilot bin collides with the forbidden coarse-channel DC bin "
-            f"for physical channel {int(physical_channel)}; target bins cannot be "
+            f"for physical channel {channel}; target bins cannot be "
             "moved safely."
         )
     placement = _reference_placement(
@@ -393,11 +431,11 @@ def target_layout(
     if not (0.0 <= lower_normalized < 1.0 and 0.0 <= upper_normalized < 1.0):
         raise ValueError(
             "could not choose in-channel reference bins for physical channel "
-            f"{int(physical_channel)}."
+            f"{channel}."
         )
     min_selected_offset = min(abs(lower_offset), abs(upper_offset))
     return {
-        "physical_channel": int(physical_channel),
+        "physical_channel": channel,
         "dtv_pilot_hz": float(pilot_hz),
         "target_frequency_mhz": float(pilot_hz / HZ_PER_MHZ),
         "coarse_channel_index": int(selection.coarse_channel_index),
@@ -517,6 +555,10 @@ def generate_weight_table_from_receiver_profile(
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Return the weight table and manifest target-layout entries."""
     validate_integration_compatibility(profile=profile, detector_core=core)
+    channels = [
+        validate_uhf_physical_channel(channel)
+        for channel in physical_channels
+    ]
     # The receiver profile owns the deployed window length (K); the core
     # declares which lengths the compiled kernel family supports.
     # DetectorCoreProfile validates the selection in __post_init__.
@@ -545,9 +587,9 @@ def generate_weight_table_from_receiver_profile(
         dtype=np.int8,
     )
     layouts: list[dict[str, Any]] = []
-    for channel in physical_channels:
+    for channel in channels:
         layout = target_layout(
-            physical_channel=int(channel),
+            physical_channel=channel,
             profile=generation_profile,
             core=core,
         )
@@ -634,6 +676,10 @@ def write_weight_bank_from_receiver_profile(
 ) -> dict[str, Any]:
     """Write a packed weight bank plus the adjacent manifest and return manifest."""
     validate_integration_compatibility(profile=profile, detector_core=core)
+    channels = [
+        validate_uhf_physical_channel(channel)
+        for channel in physical_channels
+    ]
     core = core.with_detector_window_samples(int(profile.detector_window_samples))
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
     output = Path(output_path)
@@ -641,7 +687,7 @@ def write_weight_bank_from_receiver_profile(
     table, layouts = generate_weight_table_from_receiver_profile(
         profile=profile,
         core=core,
-        physical_channels=physical_channels,
+        physical_channels=channels,
         weight_coordinate_system=coordinate_system,
     )
     weights_bytes = table.tobytes(order="C")
@@ -675,7 +721,7 @@ def write_weight_bank_from_receiver_profile(
         },
         "receiver_profile_hash": receiver_profile_hash(profile),
         "receiver_profile": profile.to_dict(),
-        "physical_channels": [int(channel) for channel in physical_channels],
+        "physical_channels": channels,
         "forbidden_tone_policy": {
             "forbidden_tone": "physical_data_dc",
             "forbidden_tone_normalized": float(

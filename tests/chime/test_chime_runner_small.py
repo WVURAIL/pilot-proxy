@@ -97,6 +97,50 @@ def test_chime_runner_requires_stream_map_declared_by_profile(tmp_path) -> None:
         )
 
 
+def test_chime_runner_validates_stream_count_for_every_selected_pilot(
+    tmp_path,
+) -> None:
+    input_dir = tmp_path / "input"
+    for freq_id, centre_mhz, streams in (
+        (844, 470.3125, 2),
+        (829, 476.171875, 3),
+    ):
+        path = input_dir / str(freq_id) / "001.h5"
+        path.parent.mkdir(parents=True)
+        with h5py.File(path, "w") as h5:
+            h5.attrs["freq"] = centre_mhz
+            h5.attrs["freq_id"] = freq_id
+            ds = h5.create_dataset(
+                "baseband", data=np.zeros((256, streams), dtype=np.uint8)
+            )
+            ds.attrs["axis"] = np.asarray(["time", "input"], dtype=object)
+
+    profile = default_reference_receiver_profile(
+        frame_size_samples=256,
+        num_input_streams=2,
+    )
+    profile_data = profile.to_dict()
+    profile_data["input_streams"]["stream_map_required"] = False
+    profile_path = tmp_path / "receiver_profile.json"
+    profile_path.write_text(json.dumps(profile_data), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="physical channel 15 has 3"):
+        run_chime_analysis(
+            input_dir=input_dir,
+            output_dir=tmp_path / "run",
+            receiver_profile_path=profile_path,
+            stream_map_path=None,
+            physical_channels=[14, 15],
+            frame_size_samples=256,
+            detector_window_samples=128,
+            kernel=_fake_kernel(128),
+            weights_by_channel={
+                14: np.ones((3, 128), dtype=np.int8),
+                15: np.ones((3, 128), dtype=np.int8),
+            },
+        )
+
+
 def _fake_kernel(detector_window_samples: int):
     specs = SimpleNamespace(
         K=detector_window_samples,
@@ -166,7 +210,9 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
             "results": [
                 {
                     "block_index": index,
-                    "mask": 1,
+                    # Deliberately inconsistent: the runner must publish the
+                    # exact decision derived from powers/norms, not this bit.
+                    "mask": 0,
                     "p_target_u64": 30 + index,
                     "p_ref_sum_u64": 20,
                 }
@@ -204,6 +250,9 @@ def test_chime_runner_small_writes_expected_shapes(tmp_path) -> None:
     assert detector["p_target_u64"].shape == expected_output_shape
     assert detector["p_ref_sum_u64"].shape == expected_output_shape
     assert detector["mask"].shape == expected_output_shape
+    assert np.asarray(detector["mask"]).reshape(-1).tolist() == (
+        [1] * SMALL_RUN_NUM_FRAMES
+    )
     assert float(detector["chime_frequency_hz"][0]) == pytest.approx(470_312_500.0)
     assert cache["baseband_power_linear"].shape == expected_output_shape
     assert float(cache["chime_frequency_hz"][0]) == pytest.approx(470_312_500.0)

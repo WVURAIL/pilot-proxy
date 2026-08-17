@@ -79,9 +79,11 @@ def sidecar_manifest_path(path: Path | str | None) -> Path | None:
 # what genuinely identifies an implementation.
 #
 # The remaining tokens (kernel version, kernel binary hash, schema tag and K)
-# are geometry: they are what resume and cross-pilot stacking actually
-# depend on, alongside the separately compared weights hashes, detector
-# contract JSON, mask rule and reference placement.
+# are geometry: they are what cross-pilot stacking depends on, alongside the
+# separately compared weights hashes, detector contract JSON, mask rule and
+# reference placement. Resume is intentionally stricter and compares the full
+# detector_version, including both build tokens, so one checkpoint can never
+# append frames from two Python implementations.
 #
 # Both classes are recorded in full in every product, and combine reports the
 # distinct build strings it stacked, so relaxing the gate loses no provenance.
@@ -92,9 +94,10 @@ def detector_version_geometry(version: object) -> tuple[str, ...]:
     """Return the geometry-bearing tokens of a ``detector_version`` string.
 
     Build-identity tokens (see ``DETECTOR_VERSION_BUILD_TOKEN_PREFIXES``) are
-    dropped; everything else is preserved in order. Two products whose
-    geometries compare equal were produced by the same detector configuration
-    and may be resumed into or stacked together.
+    dropped; everything else is preserved in order. Two complete per-pilot
+    products whose geometries compare equal may be stacked together while
+    retaining their distinct build provenance. This helper does not define the
+    resume policy; resume requires an exact full-version match.
     """
     return tuple(
         token

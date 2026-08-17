@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import math
+import operator
 import os
 import struct
 import zlib
@@ -21,7 +22,6 @@ from pilot_proxy.detector_contract import (
 )
 from pilot_proxy.provenance import file_sha256
 from pilot_proxy.schema_identity import schema_token
-
 from .atsc_channels import (
     ATSC_CHANNEL_WIDTH_HZ,
     ATSC_PILOT_OFFSET_HZ,
@@ -102,13 +102,12 @@ DEPRECATED_DETECTOR_SPACING_FIELDS = frozenset(
     }
 )
 
-# The shipped weight ROM is built for the included 400-800 MHz reference band.
-REFERENCE_BAND_LOWER_MHZ = 400.0
-REFERENCE_BANDWIDTH_MHZ = 400.0
 ATSC_CHANNEL_WIDTH_MHZ = ATSC_CHANNEL_WIDTH_HZ / HZ_PER_MHZ
 ATSC_UHF_CHANNEL_14_PILOT_MHZ = (
     ATSC_UHF_CHANNEL_14_LOWER_EDGE_HZ + ATSC_PILOT_OFFSET_HZ
 ) / HZ_PER_MHZ
+FREQUENCY_ORDER_ASCENDING_RF = "ascending_rf"
+FREQUENCY_ORDER_DESCENDING_RF = "descending_rf"
 
 
 @dataclass(frozen=True)
@@ -146,6 +145,16 @@ class InvalidWeightHeaderError(ValueError):
     """Raised when a weight file lacks the expected header."""
 
 
+def _exact_integer(value: object, *, field: str) -> int:
+    """Return an integer without accepting truncation or booleans."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        return operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+
+
 def _packed_dtype_for_component_bits(component_bits: int) -> np.dtype:
     bits = int(component_bits)
     if bits == 4:
@@ -164,16 +173,25 @@ def _extract_kernel_specs(expected_kernel) -> Optional[tuple[int, int, int, int]
                 "expected_kernel must include K, N, bits, reference_offset_bins"
             )
         return (
-            int(expected_kernel[0]),
-            int(expected_kernel[1]),
-            int(expected_kernel[2]),
-            int(expected_kernel[3]),
+            _exact_integer(expected_kernel[0], field="expected_kernel.K"),
+            _exact_integer(expected_kernel[1], field="expected_kernel.N"),
+            _exact_integer(expected_kernel[2], field="expected_kernel.bits"),
+            _exact_integer(
+                expected_kernel[3],
+                field="expected_kernel.reference_offset_bins",
+            ),
         )
     return (
-        int(getattr(expected_kernel, "K")),
-        int(getattr(expected_kernel, "N")),
-        int(getattr(expected_kernel, "bits")),
-        int(getattr(expected_kernel, "reference_offset_bins")),
+        _exact_integer(getattr(expected_kernel, "K"), field="expected_kernel.K"),
+        _exact_integer(getattr(expected_kernel, "N"), field="expected_kernel.N"),
+        _exact_integer(
+            getattr(expected_kernel, "bits"),
+            field="expected_kernel.bits",
+        ),
+        _exact_integer(
+            getattr(expected_kernel, "reference_offset_bins"),
+            field="expected_kernel.reference_offset_bins",
+        ),
     )
 
 
@@ -311,13 +329,17 @@ class DetectorWeightBank:
                     "Weight ROM does not match kernel specs: "
                     f"weights={actual}, kernel={(exp_k, exp_n, exp_bits, exp_offset)}"
                 )
-        if K is not None and int(K) != self.K:
+        if K is not None and _exact_integer(K, field="K") != self.K:
             raise ValueError(f"Weight K={self.K} does not match requested K={K}")
-        if int(N) != self.N:
+        if _exact_integer(N, field="N") != self.N:
             raise ValueError(f"Weight N={self.N} does not match requested N={N}")
         if (
             reference_offset_bins is not None
-            and int(reference_offset_bins) != self.reference_offset_bins
+            and _exact_integer(
+                reference_offset_bins,
+                field="reference_offset_bins",
+            )
+            != self.reference_offset_bins
         ):
             raise ValueError(
                 f"Weight reference_offset_bins={self.reference_offset_bins} "
@@ -334,16 +356,27 @@ class DetectorWeightBank:
             flat.reshape(self.header.num_channels, self.N, self.K)
         )
 
-        channel_width_mhz = REFERENCE_BANDWIDTH_MHZ / self.header.num_channels
-        self.reference_freqs = (
-            REFERENCE_BAND_LOWER_MHZ
-            + channel_width_mhz * (np.arange(self.header.num_channels) + 1)
+        receiver_grid = _receiver_frequency_grid_from_manifest(
+            self.manifest,
+            expected_num_channels=self.header.num_channels,
         )
-        self.detector_profile = {
-            "name": "atsc_reference",
-            "num_channels": int(self.header.num_channels),
-            "bandwidth_mhz": float(REFERENCE_BANDWIDTH_MHZ),
-        }
+        if receiver_grid is None:
+            self.reference_freqs = np.empty(0, dtype=np.float64)
+            self.detector_profile = {}
+            self._receiver_band_mhz: tuple[float, float] | None = None
+            self._receiver_frequency_order: str | None = None
+            self._receiver_channel_width_mhz: float | None = None
+        else:
+            reference_freqs, detector_profile, receiver_band_mhz = receiver_grid
+            self.reference_freqs = reference_freqs
+            self.detector_profile = detector_profile
+            self._receiver_band_mhz = receiver_band_mhz
+            self._receiver_frequency_order = str(
+                detector_profile["frequency_order"]
+            )
+            self._receiver_channel_width_mhz = float(
+                detector_profile["coarse_channel_width_mhz"]
+            )
         self._known_layout = _known_layout_from_manifest(self.manifest)
         self.known_pilot_frequencies_mhz = [
             float(cast(float, row["target_frequency_mhz"]))
@@ -357,7 +390,7 @@ class DetectorWeightBank:
         }
 
     def _weights_for_channel_index(self, channel_index: int) -> tuple[np.ndarray | None, bool]:
-        idx = int(channel_index)
+        idx = _exact_integer(channel_index, field="coarse channel index")
         if idx < 0 or idx >= self.rom_table.shape[0]:
             raise ValueError(
                 f"coarse channel index must be in [0, {self.rom_table.shape[0] - 1}], "
@@ -376,7 +409,35 @@ class DetectorWeightBank:
         so the requested pilot is
         validated against the shipped weight manifest.
         """
-        chan_idx = int(np.argmin(np.abs(self.reference_freqs - float(freq_mhz))))
+        requested = _finite_frequency_mhz(freq_mhz)
+        if self._receiver_band_mhz is None or self.reference_freqs.size == 0:
+            raise ValueError(
+                "Expert frequency lookup requires an adjacent weight manifest "
+                "with an embedded receiver_profile."
+            )
+        lower_mhz, upper_mhz = self._receiver_band_mhz
+        if not lower_mhz <= requested <= upper_mhz:
+            raise ValueError(
+                "Requested frequency is outside the receiver profile: "
+                f"{requested:.6f} MHz is not in "
+                f"[{lower_mhz:.6f}, {upper_mhz:.6f}] MHz."
+            )
+        assert self._receiver_frequency_order is not None
+        assert self._receiver_channel_width_mhz is not None
+        if self._receiver_frequency_order == FREQUENCY_ORDER_DESCENDING_RF:
+            channel_coordinate = (
+                float(self.reference_freqs[0]) - requested
+            ) / self._receiver_channel_width_mhz
+        else:
+            channel_coordinate = (
+                requested - float(self.reference_freqs[0])
+            ) / self._receiver_channel_width_mhz
+        chan_idx = int(round(channel_coordinate))
+        if not 0 <= chan_idx < self.rom_table.shape[0]:
+            raise ValueError(
+                "Requested frequency is outside the receiver profile channel "
+                f"centers: {requested:.6f} MHz."
+            )
         return self._weights_for_channel_index(chan_idx)
 
     def get_weights_for_pilot_frequency(
@@ -396,8 +457,7 @@ class DetectorWeightBank:
                 "weight manifest; use get_weights() explicitly for an expert nearest-"
                 "coarse-channel lookup."
             )
-        coarse_index = int(cast(int, layout["coarse_channel_index"]))
-        return self._weights_for_channel_index(coarse_index)
+        return self._weights_for_channel_index(layout["coarse_channel_index"])
 
     def get_weights_for_physical_channel(
         self,
@@ -406,7 +466,8 @@ class DetectorWeightBank:
         tolerance_hz: float = DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ,
     ) -> tuple[np.ndarray | None, bool]:
         """Return weights for an ATSC UHF physical channel."""
-        pilot_mhz = physical_channel_to_pilot_hz(int(channel)) / HZ_PER_MHZ
+        physical_channel = _exact_integer(channel, field="physical channel")
+        pilot_mhz = physical_channel_to_pilot_hz(physical_channel) / HZ_PER_MHZ
         return self.get_weights_for_pilot_frequency(
             pilot_mhz,
             tolerance_hz=tolerance_hz,
@@ -419,13 +480,14 @@ class DetectorWeightBank:
         tolerance_hz: float = DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ,
     ) -> dict[str, object]:
         """Return the manifest target/reference layout for a known pilot."""
+        requested = _finite_frequency_mhz(freq_mhz)
+        tolerance = _finite_nonnegative_tolerance_hz(tolerance_hz)
         if not self._known_layout:
             return {}
-        requested = float(freq_mhz)
         known = np.asarray(self.known_pilot_frequencies_mhz, dtype=np.float64)
         nearest_idx = int(np.argmin(np.abs(known - requested)))
         delta_hz = abs(float(known[nearest_idx]) - requested) * HZ_PER_MHZ
-        if delta_hz > float(tolerance_hz):
+        if delta_hz > tolerance:
             raise ValueError(
                 "Requested DTV pilot frequency is not in the weight manifest: "
                 f"{requested:.6f} MHz, nearest known "
@@ -440,7 +502,8 @@ class DetectorWeightBank:
         tolerance_hz: float = DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ,
     ) -> dict[str, object]:
         """Return the manifest target/reference layout for a physical channel."""
-        pilot_mhz = physical_channel_to_pilot_hz(int(channel)) / HZ_PER_MHZ
+        physical_channel = _exact_integer(channel, field="physical channel")
+        pilot_mhz = physical_channel_to_pilot_hz(physical_channel) / HZ_PER_MHZ
         return self.layout_for_pilot_frequency(
             pilot_mhz,
             tolerance_hz=tolerance_hz,
@@ -456,6 +519,240 @@ def _read_adjacent_manifest(path: Path) -> dict[str, object]:
     if not manifest_path.exists():
         return {}
     return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+def _finite_frequency_mhz(value: object) -> float:
+    """Return one finite MHz coordinate without accepting booleans."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("freq_mhz must be a finite number, not a boolean.")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("freq_mhz must be a finite number.") from exc
+    if not math.isfinite(result):
+        raise ValueError("freq_mhz must be finite.")
+    return result
+
+
+def _finite_nonnegative_tolerance_hz(value: object) -> float:
+    """Return a finite nonnegative matching tolerance without boolean coercion."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError("tolerance_hz must be finite and nonnegative.")
+    try:
+        result = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("tolerance_hz must be finite and nonnegative.") from exc
+    if not math.isfinite(result) or result < 0.0:
+        raise ValueError("tolerance_hz must be finite and nonnegative.")
+    return result
+
+
+def _manifest_finite_number(value: object, *, field: str) -> float:
+    """Read a finite numeric receiver-profile field from JSON."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"Weight manifest {field} must be numeric.")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"Weight manifest {field} must be finite.")
+    return result
+
+
+def _receiver_frequency_grid_from_manifest(
+    manifest: dict[str, object],
+    *,
+    expected_num_channels: int,
+) -> tuple[np.ndarray, dict[str, object], tuple[float, float]] | None:
+    """Build the ROM-index RF grid from its embedded receiver profile.
+
+    Receiver profiles own channel order, center offset, RF bounds, and channel
+    count.  Reconstructing a generic ascending 400--800 MHz grid would select
+    the wrong ROM row for both the shipped CHIME and CHORD banks.
+    """
+    if not manifest:
+        return None
+    receiver_profile = manifest.get("receiver_profile")
+    if not isinstance(receiver_profile, dict):
+        raise ValueError(
+            "Current weight manifest requires an embedded receiver_profile "
+            "for frequency lookup."
+        )
+    # Keep this import local: integration.__init__ also exposes weight-generation
+    # helpers that import this loader, so a module-level import creates a cycle.
+    from pilot_proxy.integration.receiver_profile import (
+        ReceiverProfile,
+        receiver_frequency_to_channel,
+        validate_weight_manifest_profile_hash,
+    )
+
+    # The manifest hash is the cryptographic binding between ROM row order and
+    # the embedded receiver geometry.  Without this check a one-field edit to
+    # frequency_axis.order silently selects a different row for every pilot.
+    profile = ReceiverProfile.from_dict(dict(receiver_profile))
+    validate_weight_manifest_profile_hash(manifest, profile)
+    rf_band = receiver_profile.get("rf_band")
+    channelizer = receiver_profile.get("channelizer")
+    if not isinstance(rf_band, dict) or not isinstance(channelizer, dict):
+        raise ValueError(
+            "Weight manifest receiver_profile requires rf_band and channelizer "
+            "objects."
+        )
+    frequency_axis = channelizer.get("frequency_axis")
+    if not isinstance(frequency_axis, dict):
+        raise ValueError(
+            "Weight manifest receiver_profile.channelizer requires a "
+            "frequency_axis object."
+        )
+
+    num_channels = channelizer.get("num_coarse_channels")
+    if isinstance(num_channels, bool) or not isinstance(num_channels, int):
+        raise ValueError(
+            "Weight manifest receiver_profile.channelizer.num_coarse_channels "
+            "must be an integer."
+        )
+    if num_channels != int(expected_num_channels):
+        raise ValueError(
+            "Weight manifest receiver channel count does not match the ROM: "
+            f"{num_channels} != {int(expected_num_channels)}."
+        )
+
+    lower_hz = _manifest_finite_number(
+        rf_band.get("lower_hz"),
+        field="receiver_profile.rf_band.lower_hz",
+    )
+    upper_hz = _manifest_finite_number(
+        rf_band.get("upper_hz"),
+        field="receiver_profile.rf_band.upper_hz",
+    )
+    if upper_hz <= lower_hz:
+        raise ValueError(
+            "Weight manifest receiver_profile RF upper bound must exceed its "
+            "lower bound."
+        )
+    center_offset_hz = _manifest_finite_number(
+        channelizer.get("coarse_channel_center_offset_hz"),
+        field=(
+            "receiver_profile.channelizer.coarse_channel_center_offset_hz"
+        ),
+    )
+    order = frequency_axis.get("order")
+    if order not in (
+        FREQUENCY_ORDER_ASCENDING_RF,
+        FREQUENCY_ORDER_DESCENDING_RF,
+    ):
+        raise ValueError(
+            "Weight manifest receiver frequency order must be "
+            f"{FREQUENCY_ORDER_ASCENDING_RF!r} or "
+            f"{FREQUENCY_ORDER_DESCENDING_RF!r}; got {order!r}."
+        )
+
+    channel_width_hz = (upper_hz - lower_hz) / float(num_channels)
+    indices = np.arange(num_channels, dtype=np.float64)
+    if order == FREQUENCY_ORDER_DESCENDING_RF:
+        centers_hz = upper_hz - center_offset_hz - indices * channel_width_hz
+    else:
+        centers_hz = lower_hz + center_offset_hz + indices * channel_width_hz
+    if not np.all(np.isfinite(centers_hz)):
+        raise ValueError("Weight manifest receiver frequency grid is not finite.")
+    if (
+        float(np.min(centers_hz)) < lower_hz
+        or float(np.max(centers_hz)) > upper_hz
+    ):
+        raise ValueError(
+            "Weight manifest receiver frequency grid lies outside its RF band."
+        )
+
+    layout = manifest.get("target_reference_layout")
+    if not isinstance(layout, list):
+        raise ValueError(
+            "Weight manifest target_reference_layout must be a list."
+        )
+    layout_channels: list[int] = []
+    for row_index, row in enumerate(layout):
+        if not isinstance(row, dict):
+            raise ValueError(
+                "Weight manifest target_reference_layout entries must be objects."
+            )
+        physical_channel = _exact_integer(
+            row.get("physical_channel"),
+            field=f"target_reference_layout[{row_index}].physical_channel",
+        )
+        expected_pilot_hz = physical_channel_to_pilot_hz(physical_channel)
+        pilot_hz = _manifest_finite_number(
+            row.get("dtv_pilot_hz"),
+            field=f"target_reference_layout[{row_index}].dtv_pilot_hz",
+        )
+        target_mhz = _manifest_finite_number(
+            row.get("target_frequency_mhz"),
+            field=(
+                f"target_reference_layout[{row_index}].target_frequency_mhz"
+            ),
+        )
+        if pilot_hz != expected_pilot_hz or target_mhz != expected_pilot_hz / HZ_PER_MHZ:
+            raise ValueError(
+                "Weight manifest target-reference pilot identity disagrees with "
+                f"physical channel {physical_channel}."
+            )
+        selection = receiver_frequency_to_channel(expected_pilot_hz, profile)
+        coarse_index = _exact_integer(
+            row.get("coarse_channel_index"),
+            field=(
+                f"target_reference_layout[{row_index}].coarse_channel_index"
+            ),
+        )
+        if coarse_index != int(selection.coarse_channel_index):
+            raise ValueError(
+                "Weight manifest target-reference coarse index disagrees with "
+                f"the receiver profile for physical channel {physical_channel}: "
+                f"{coarse_index} != {int(selection.coarse_channel_index)}."
+            )
+        center_hz = _manifest_finite_number(
+            row.get("coarse_channel_center_hz"),
+            field=(
+                f"target_reference_layout[{row_index}].coarse_channel_center_hz"
+            ),
+        )
+        if center_hz != float(selection.coarse_channel_center_hz):
+            raise ValueError(
+                "Weight manifest target-reference coarse center disagrees with "
+                f"the receiver profile for physical channel {physical_channel}."
+            )
+        layout_channels.append(physical_channel)
+    if len(set(layout_channels)) != len(layout_channels):
+        raise ValueError(
+            "Weight manifest target_reference_layout physical channels must be unique."
+        )
+    manifest_channels = manifest.get("physical_channels")
+    if not isinstance(manifest_channels, list):
+        raise ValueError("Weight manifest physical_channels must be a list.")
+    exact_manifest_channels = [
+        _exact_integer(value, field=f"physical_channels[{index}]")
+        for index, value in enumerate(manifest_channels)
+    ]
+    if exact_manifest_channels != layout_channels:
+        raise ValueError(
+            "Weight manifest physical_channels must exactly match the ordered "
+            "target_reference_layout physical channels."
+        )
+
+    receiver_profile_id = receiver_profile.get("receiver_profile_id")
+    if not isinstance(receiver_profile_id, str) or not receiver_profile_id:
+        raise ValueError(
+            "Weight manifest receiver_profile_id must be a non-empty string."
+        )
+    detector_profile = {
+        "name": receiver_profile_id,
+        "num_channels": int(num_channels),
+        "band_lower_mhz": lower_hz / HZ_PER_MHZ,
+        "band_upper_mhz": upper_hz / HZ_PER_MHZ,
+        "bandwidth_mhz": (upper_hz - lower_hz) / HZ_PER_MHZ,
+        "coarse_channel_width_mhz": channel_width_hz / HZ_PER_MHZ,
+        "frequency_order": order,
+    }
+    return (
+        np.ascontiguousarray(centers_hz / HZ_PER_MHZ),
+        detector_profile,
+        (lower_hz / HZ_PER_MHZ, upper_hz / HZ_PER_MHZ),
+    )
 
 
 def _known_layout_from_manifest(manifest: dict[str, object]) -> list[dict[str, object]]:

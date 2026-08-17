@@ -5,16 +5,10 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from pilot_proxy.reference_channelizer import (  # noqa: E402
     REFERENCE_ADC_SAMPLE_RATE_HZ,
@@ -36,6 +30,7 @@ from pilot_proxy.integration.packing import (  # noqa: E402
     pack_channelized_streams_for_detector,
 )
 from pilot_proxy.json_utils import write_json_strict  # noqa: E402
+from pilot_proxy.paths import GENERATED_DIR, resolve_user_path  # noqa: E402
 
 GNU_RADIO_ATSC_SYMBOL_RATE_HZ = 4_500_000.0 / 286.0 * 684.0
 ATSC_CHANNEL_WIDTH_HZ = 6.0e6
@@ -106,7 +101,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "generated" / "detector_input",
+        default=GENERATED_DIR / "detector_input",
     )
     parser.add_argument(
         "--iq-sample-rate-hz",
@@ -228,6 +223,9 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    caller_cwd = Path.cwd()
+    args.input_iq = resolve_user_path(args.input_iq, relative_to=caller_cwd)
+    args.output_dir = resolve_user_path(args.output_dir, relative_to=caller_cwd)
 
     if args.bits != LOCKED_BITS_PER_COMPONENT:
         raise SystemExit("This converter is intended for the locked 4+4 bit format.")

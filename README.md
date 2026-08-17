@@ -196,7 +196,12 @@ repositories in editable mode with the CADC, survey, CHIME, and test extras,
 resolves CuPy through datatrawl's `accel` module, and checks plugin discovery.
 On a GPU node, it also requires `nvcc`, builds the CUDA kernel, and checks that
 the kernel loads. Because the script **removes and recreates** the target
-environment, do not set `VENV_DIR` to an environment you need to preserve.
+environment, do not set `VENV_DIR` to an environment you need to preserve. The
+script refuses the home directory, either checkout, overlapping directories,
+and unowned non-empty targets. On the first guarded rerun of a genuine virtual
+environment created by an older checkout, explicitly acknowledge adoption with
+`PILOT_PROXY_ADOPT_LEGACY_VENV=1`; subsequent rebuilds use the durable ownership
+record beside the environment and remain retryable after an interruption.
 
 The full procedure is in
 [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup).

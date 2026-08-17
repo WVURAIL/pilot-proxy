@@ -59,6 +59,7 @@ bundle *data*; this module and the kernel freeze only the arithmetic.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 from typing import Any, Sequence
 
 import numpy as np
@@ -75,10 +76,19 @@ MULTIPLIER_Q = 16
 MULTIPLIER_ONE = 1 << MULTIPLIER_Q
 
 
+def _exact_integer(value: object, *, field: str) -> int:
+    if isinstance(value, bool):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        return operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+
+
 def designated_bins(anchor_bin: int, half_width: int) -> np.ndarray:
     """Designated set: anchor +/- half_width, modulo 256 (survey rule)."""
-    a = int(anchor_bin)
-    w = int(half_width)
+    a = _exact_integer(anchor_bin, field="anchor_bin")
+    w = _exact_integer(half_width, field="designated_half_width")
     if not 0 <= a < FINE_BINS:
         raise ValueError("anchor_bin must be in [0, 256).")
     if not 0 <= w < FINE_BINS // 2:
@@ -91,9 +101,11 @@ def designated_bins(anchor_bin: int, half_width: int) -> np.ndarray:
 def pack_bulk_mask(mask: Sequence[bool]) -> tuple[int, int, int, int]:
     """Pack a 256-entry boolean mask into 4 uint64 words (bin b ->
     word b // 64, bit b % 64)."""
-    m = np.asarray(mask, dtype=bool)
+    m = np.asarray(mask)
     if m.shape != (FINE_BINS,):
         raise ValueError("bulk mask must have exactly 256 entries.")
+    if m.dtype != np.dtype(bool):
+        raise TypeError("bulk mask entries must be booleans.")
     words = [0, 0, 0, 0]
     for b in np.flatnonzero(m):
         words[int(b) >> 6] |= 1 << (int(b) & 63)
@@ -102,7 +114,10 @@ def pack_bulk_mask(mask: Sequence[bool]) -> tuple[int, int, int, int]:
 
 def unpack_bulk_mask(words: Sequence[int]) -> np.ndarray:
     """Inverse of :func:`pack_bulk_mask`."""
-    w = [int(x) for x in words]
+    w = [
+        _exact_integer(value, field=f"bulk_mask_words[{index}]")
+        for index, value in enumerate(words)
+    ]
     if len(w) != 4 or any(not 0 <= x < (1 << 64) for x in w):
         raise ValueError("bulk mask words must be 4 uint64 values.")
     return np.array(
@@ -146,21 +161,22 @@ def fine_mask_decision(
     S = np.asarray(fine_powers)
     if S.shape != (3, FINE_BINS):
         raise ValueError("fine_powers must have shape [3, 256].")
-    if S.dtype.kind not in "ui":
-        raise TypeError("fine_powers must be exact integers.")
-    rank = int(cfar_rank)
-    if rank < 0:
-        raise ValueError("cfar_rank must be non-negative.")
-    mult = int(multiplier_q16)
-    if mult < 0:
-        raise ValueError("multiplier_q16 must be non-negative.")
+    if S.dtype != np.dtype(np.uint64):
+        raise TypeError("fine_powers must have exact uint64 dtype.")
+    rank = _exact_integer(cfar_rank, field="cfar_rank")
+    if not 0 <= rank < FINE_BINS:
+        raise ValueError(f"cfar_rank must be in [0, {FINE_BINS - 1}].")
+    mult = _exact_integer(multiplier_q16, field="multiplier_q16")
+    if not 0 < mult < (1 << 64):
+        raise ValueError("multiplier_q16 must be in [1, 2**64 - 1].")
     designated = designated_bins(anchor_bin, designated_half_width)
 
-    mask_arr = (
-        unpack_bulk_mask(bulk_mask)
-        if len(bulk_mask) == 4
-        else np.asarray(bulk_mask, dtype=bool)
-    )
+    if len(bulk_mask) == 4:
+        mask_arr = unpack_bulk_mask(bulk_mask)
+    else:
+        mask_arr = np.asarray(bulk_mask)
+        if mask_arr.dtype != np.dtype(bool):
+            raise TypeError("bulk mask entries must be booleans.")
     if mask_arr.shape != (FINE_BINS,):
         raise ValueError("bulk mask must describe exactly 256 bins.")
 

@@ -20,8 +20,13 @@ from pilot_proxy.detector_contract import (
     validate_detector_contract,
 )
 from pilot_proxy.json_utils import write_json_strict
+from pilot_proxy.provenance import file_sha256
 
 from .products import (
+    CHIME_COMBINE_CANONICAL_RELATIVE_PATHS,
+    CHIME_COMBINE_GENERATION_MANIFEST_FILENAME,
+    CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA,
+    CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME,
     CHIME_DETECTOR_OUTPUTS_FILENAME,
     CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
     CHIME_SPECTROGRAM_CACHE_FILENAME,
@@ -955,6 +960,172 @@ def _validate_reductions(
         )
 
 
+def _entry_exists(path: Path) -> bool:
+    return path.exists() or path.is_symlink()
+
+
+def _safe_generation_file(run: Path, relative: Path) -> Path | None:
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        return None
+    root = run.absolute()
+    resolved_root = root.resolve(strict=False)
+    candidate = root
+    for part in relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            return None
+    try:
+        candidate.resolve(strict=False).relative_to(resolved_root)
+    except ValueError:
+        return None
+    return candidate
+
+
+def _read_generation_snapshot(
+    run: Path,
+    *,
+    phase: str,
+    errors: list[dict[str, str]],
+    validate_files: bool,
+) -> bytes | None:
+    marker = run / CHIME_COMBINE_GENERATION_MANIFEST_FILENAME
+    if marker.is_symlink():
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation manifest may not be a symlink",
+        )
+        return b"<symlink>"
+    try:
+        raw = marker.read_bytes()
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            f"could not read combine generation manifest: {exc}",
+        )
+        return b"<unreadable>"
+    try:
+        payload = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            f"invalid combine generation manifest JSON: {exc}",
+        )
+        return raw
+    if not isinstance(payload, dict):
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation manifest must be a JSON object",
+        )
+        return raw
+    if payload.get("schema_version") != CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA:
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation manifest has an unsupported schema",
+        )
+    generation_id = payload.get("generation_id")
+    if (
+        not isinstance(generation_id, str)
+        or len(generation_id) != 32
+        or any(character not in "0123456789abcdef" for character in generation_id)
+    ):
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation_id must be 32 lowercase hexadecimal characters",
+        )
+    if payload.get("state") not in {"committed", "recovered"}:
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation state must be 'committed' or 'recovered'",
+        )
+    files = payload.get("files")
+    if not isinstance(files, dict):
+        _add_error(
+            errors,
+            f"publish.generation_manifest.{phase}",
+            "combine generation files must be an object",
+        )
+        return raw
+
+    declared: set[str] = set()
+    for name, expected_digest in files.items():
+        if (
+            not isinstance(name, str)
+            or name not in CHIME_COMBINE_CANONICAL_RELATIVE_PATHS
+            or name == CHIME_COMBINE_GENERATION_MANIFEST_FILENAME
+        ):
+            _add_error(
+                errors,
+                f"publish.generation_manifest.{phase}",
+                f"generation manifest contains a non-canonical path: {name!r}",
+            )
+            continue
+        declared.add(name)
+        if (
+            not isinstance(expected_digest, str)
+            or len(expected_digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in expected_digest
+            )
+        ):
+            _add_error(
+                errors,
+                f"publish.generation_manifest.{phase}",
+                f"invalid SHA-256 for canonical path {name!r}",
+            )
+            continue
+        candidate = _safe_generation_file(run, Path(name))
+        if candidate is None:
+            _add_error(
+                errors,
+                f"publish.generation_manifest.{phase}",
+                f"canonical path is symlinked or escapes the run directory: {name}",
+            )
+            continue
+        if validate_files:
+            digest = file_sha256(candidate)
+            if digest != expected_digest:
+                _add_error(
+                    errors,
+                    "publish.generation_hash",
+                    f"canonical file {name!r} does not match its generation hash",
+                )
+
+    if validate_files:
+        actual: set[str] = set()
+        for name in CHIME_COMBINE_CANONICAL_RELATIVE_PATHS:
+            if name == CHIME_COMBINE_GENERATION_MANIFEST_FILENAME:
+                continue
+            candidate = _safe_generation_file(run, Path(name))
+            if candidate is None:
+                if _entry_exists(run / name):
+                    _add_error(
+                        errors,
+                        "publish.generation_manifest.before",
+                        f"canonical path is symlinked or escapes the run directory: {name}",
+                    )
+                continue
+            if candidate.is_file():
+                actual.add(name)
+        if declared != actual:
+            _add_error(
+                errors,
+                "publish.generation_manifest.before",
+                "generation manifest file inventory differs from canonical files: "
+                f"declared={sorted(declared)!r}, actual={sorted(actual)!r}",
+            )
+    return raw
+
+
 def validate_products(
     *,
     run_dir: Path,
@@ -962,6 +1133,12 @@ def validate_products(
 ) -> dict[str, Any]:
     run = Path(run_dir)
     errors: list[dict[str, str]] = []
+
+    publish_journal = run / CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+    journal_before = _entry_exists(publish_journal)
+    generation_before = _read_generation_snapshot(
+        run, phase="before", errors=errors, validate_files=True
+    )
 
     run_config = _load_json(run / "run_config.json", errors)
     input_manifest = _load_json(run / "input_manifest.json", errors)
@@ -1075,6 +1252,29 @@ def validate_products(
                 close = getattr(item, "close", None)
                 if callable(close):
                     close()
+
+    generation_after = _read_generation_snapshot(
+        run, phase="after", errors=errors, validate_files=False
+    )
+    # This must be the final filesystem observation. A publisher creates the
+    # durable journal before changing canonical bytes, so a false result here
+    # is the validator's stable linearization point; checking it before the
+    # generation marker leaves a window in which publication can begin unseen.
+    journal_after = _entry_exists(publish_journal)
+    if journal_before or journal_after:
+        _add_error(
+            errors,
+            "publish.transaction",
+            "a chime-combine publication overlapped validation or is awaiting "
+            "rollback; rerun chime-combine before consuming canonical products",
+        )
+    if generation_before != generation_after:
+        _add_error(
+            errors,
+            "publish.generation_stability",
+            "canonical generation identity changed while products were being "
+            "validated; retry validation on a stable run directory",
+        )
 
     report = {
         "schema_version": "pilotproxy_chime_product_validation_v1",

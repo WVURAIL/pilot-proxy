@@ -3,12 +3,16 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+import pytest
+
 from pilot_proxy.dtv_units import (
     DB_LINEAR_BASE,
     DB_POWER_FACTOR,
     EFFECTIVE_BIN_BW_HZ,
     SPREADING_LOSS_DB,
     power_terms_to_normalized_pilot_excess,
+    power_terms_to_normalized_coarse_power_ratio,
     power_terms_to_pilot_excess_db,
     power_terms_to_coarse_power_ratio,
     coarse_power_ratio_to_normalized_pilot_excess,
@@ -19,6 +23,7 @@ from pilot_proxy.dtv_units import (
     data_shelf_snr_db_to_half_threshold_rational,
     data_shelf_snr_db_to_pilot_excess_db,
     data_shelf_snr_threshold_fields,
+    normalized_power_ratio_threshold_to_half_rational,
 )
 
 REFERENCE_EFFECTIVE_BIN_BW_HZ = 3051.7578125
@@ -96,6 +101,75 @@ def test_snr_shelf_threshold_converts_to_kernel_half_threshold() -> None:
     assert fields["threshold_half_num"] == half_num
     assert fields["threshold_half_den"] == half_den
     assert fields["threshold_data_shelf_snr_db"] == THRESHOLD_SNR_SHELF_DB
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("target_norm_sq", 0),
+        ("target_norm_sq", 1.9),
+        ("target_norm_sq", True),
+        ("target_norm_sq", np.bool_(True)),
+        ("reference_norm_sum_sq", 0),
+        ("reference_norm_sum_sq", 2.9),
+        ("reference_norm_sum_sq", True),
+        ("max_denominator", 0),
+        ("max_denominator", 3.9),
+        ("max_denominator", True),
+    ],
+)
+def test_threshold_rational_requires_exact_positive_uint64_fields(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {
+        "target_norm_sq": 1,
+        "reference_norm_sum_sq": 2,
+        "max_denominator": 3,
+    }
+    arguments[field] = invalid
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        normalized_power_ratio_threshold_to_half_rational(
+            1.5,
+            **arguments,
+        )
+
+
+def test_threshold_rational_rejects_uint64_output_overflow() -> None:
+    with pytest.raises(ValueError, match="threshold numerator"):
+        normalized_power_ratio_threshold_to_half_rational(
+            float(1 << 64),
+            target_norm_sq=1,
+            reference_norm_sum_sq=1,
+            max_denominator=1,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("target_norm_sq", 0),
+        ("target_norm_sq", 1.9),
+        ("target_norm_sq", True),
+        ("reference_norm_sum_sq", 0),
+        ("reference_norm_sum_sq", 2.9),
+        ("reference_norm_sum_sq", True),
+    ],
+)
+def test_normalized_power_terms_require_exact_positive_norms(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {"target_norm_sq": 1, "reference_norm_sum_sq": 2}
+    arguments[field] = invalid
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        power_terms_to_normalized_coarse_power_ratio(
+            1,
+            2,
+            **arguments,
+        )
 
 
 def test_numden_zero_denominator_is_invalid_measurement() -> None:

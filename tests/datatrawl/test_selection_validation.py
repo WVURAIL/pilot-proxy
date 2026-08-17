@@ -23,10 +23,14 @@ pytest.importorskip("h5py")
 from datatrawl.instruments import load_instrument
 from datatrawl.interfaces import RunContext
 
+from pilot_proxy.datatrawl_plugins.combine import (
+    combine_detector_products,
+    report_products,
+)
 from pilot_proxy.datatrawl_plugins.detector import PilotProxyDetectorAnalyzer
 from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
-from pilot_proxy.datatrawl_plugins.combine import combine_detector_products
 from pilot_proxy.detector_contract import (
+    NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     build_detector_contract,
 )
@@ -34,6 +38,7 @@ from pilot_proxy.product_contract import (
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    SOURCE_EVENT_KEY_SCHEMA_VERSION,
     current_decision_contract_json,
 )
 
@@ -136,6 +141,9 @@ def _write_min_detector_product(
         schema_name=np.asarray(PER_PILOT_PRODUCT_SCHEMA_NAME),
         schema_revision=np.asarray(PER_PILOT_PRODUCT_SCHEMA_REVISION),
         schema_version=np.asarray(PER_PILOT_PRODUCT_SCHEMA_TOKEN),
+        source_event_key_schema_version=np.asarray(
+            SOURCE_EVENT_KEY_SCHEMA_VERSION
+        ),
         decision_contract_json=np.asarray(current_decision_contract_json()),
         detector_contract_json=np.asarray(detector_contract),
         physical_channel=np.asarray([channel], dtype=np.int32),
@@ -144,6 +152,7 @@ def _write_min_detector_product(
         chime_frequency_hz=np.asarray([470_000_000.0 + channel]),
         pilot_in_band=np.asarray([1], dtype=np.uint8),
         nfft=np.asarray(int(nfft), dtype=np.int64),
+        sample_rate_hz=np.asarray(float(sample_rate_hz), dtype=np.float64),
         detector_window_samples=np.asarray(K, dtype=np.int64),
         num_input_streams=np.asarray(4, dtype=np.int64),
         sense=np.asarray(-1, dtype=np.int64),
@@ -164,6 +173,20 @@ def _write_min_detector_product(
         integrated_spectrum_before_mask=np.zeros(int(nfft), dtype=np.float64),
         integrated_spectrum_after_mask=np.zeros(int(nfft), dtype=np.float64),
         fine_power_ratio=np.zeros((int(n_frames), 0), dtype=np.float32),
+        fine_cfar_location=np.full(shape, np.nan, dtype=np.float64),
+        fine_cfar_scale=np.full(shape, np.nan, dtype=np.float64),
+        fine_cfar_threshold=np.full(shape, np.nan, dtype=np.float64),
+        fine_cfar_mode=np.zeros(shape, dtype=np.uint8),
+        fine_threshold_exceedance_count=np.zeros(shape, dtype=np.int32),
+        fine_threshold_exceedance_frame=np.asarray([], dtype=np.int64),
+        fine_threshold_exceedance_bin=np.asarray([], dtype=np.int64),
+        fine_pad_factor=np.asarray(4, dtype=np.int64),
+        fine_num_bins=np.asarray(0, dtype=np.int64),
+        fine_p_fa=np.asarray(0.001, dtype=np.float64),
+        fine_guard_fine_bins=np.asarray(1, dtype=np.int64),
+        fine_designated_bins=np.asarray([0], dtype=np.int64),
+        fine_census_excluded_bins=np.asarray([], dtype=np.int64),
+        fine_status=np.asarray("disabled"),
         fine_null_bulk_exceedance_fraction=np.full(
             shape, np.nan, dtype=np.float64
         ),
@@ -172,12 +195,16 @@ def _write_min_detector_product(
         frame_in_unit=np.zeros(int(n_frames), dtype=np.int32),
         unit_keys=np.asarray(events, dtype=str),
         unit_order=np.asarray(events, dtype=str),
+        unit_time0_ctime=np.full(int(n_frames), np.nan, dtype=np.float64),
+        unit_time0_fpga=np.zeros(int(n_frames), dtype=np.uint64),
+        unit_event_id=np.full(int(n_frames), -1, dtype=np.int64),
         unit_delta_time=np.full(int(n_frames), 1.0 / float(sample_rate_hz)),
+        archive_version=np.asarray([""] * int(n_frames), dtype=str),
         max_chunks_per_file=np.asarray(-1, dtype=np.int64),
         weight_bank_sha256=np.asarray("bank"),
         weight_manifest_sha256=np.asarray("manifest"),
         weights_hash=np.asarray("weights"),
-        mask_rule=np.asarray("normalized_positive_excess"),
+        mask_rule=np.asarray(NORMALIZED_POSITIVE_EXCESS_MASK_RULE),
         detector_version=np.asarray(
             "pilot-proxy/1.0.0 source=test kernel=2.3.0 "
             "kernel_sha256=test pilotproxy_per_pilot_product_v1 K=128"
@@ -199,6 +226,190 @@ def test_combine_rejects_mismatched_nfft(tmp_path):
     _write_min_detector_product(b, channel=20, nfft=8192)  # mismatched geometry
     with pytest.raises(ValueError, match="disagree on 'nfft'"):
         combine_detector_products([a, b], tmp_path / "out")
+
+
+def test_combine_rejects_legacy_product_without_namespaced_event_schema(
+    tmp_path,
+) -> None:
+    product_path = tmp_path / "14.npz"
+    _write_min_detector_product(product_path, channel=14, nfft=16384)
+    with np.load(product_path, allow_pickle=False) as archive:
+        legacy = {
+            name: archive[name]
+            for name in archive.files
+            if name != "source_event_key_schema_version"
+        }
+    np.savez(product_path, **legacy)
+
+    with pytest.raises(
+        ValueError, match="missing required field 'source_event_key_schema_version'"
+    ):
+        combine_detector_products([product_path], tmp_path / "out")
+
+
+def test_combine_and_report_recompute_namespaced_event_keys(tmp_path) -> None:
+    product_path = tmp_path / "14.npz"
+    _write_min_detector_product(
+        product_path, channel=14, nfft=16384, n_frames=1
+    )
+    with np.load(product_path, allow_pickle=False) as archive:
+        forged = {name: archive[name] for name in archive.files}
+    # The current marker is present, but the event key intentionally drops the
+    # campaign namespace that remains available in unit_order.
+    forged["unit_keys"] = np.asarray(
+        ["/campaign-a/baseband_100_786.h5"], dtype=str
+    )
+    forged["unit_order"] = np.asarray(
+        ["/campaign-a/baseband_100_786.h5"], dtype=str
+    )
+    forged["source_event_keys"] = np.asarray(["baseband_100.h5"], dtype=str)
+    np.savez(product_path, **forged)
+
+    with pytest.raises(ValueError, match="namespaced derivation"):
+        combine_detector_products([product_path], tmp_path / "out")
+    with pytest.raises(ValueError, match="namespaced derivation"):
+        report_products([product_path])
+
+
+def test_authoritative_unit_keys_cannot_be_hidden_by_basename_unit_order(
+    tmp_path,
+) -> None:
+    product_path = tmp_path / "14.npz"
+    _write_min_detector_product(
+        product_path, channel=14, nfft=16384, n_frames=1
+    )
+    with np.load(product_path, allow_pickle=False) as archive:
+        forged = {name: archive[name] for name in archive.files}
+    forged["unit_keys"] = np.asarray(
+        ["/campaign-a/baseband_100_786.h5"], dtype=str
+    )
+    forged["unit_order"] = np.asarray(["baseband_100_786.h5"], dtype=str)
+    forged["source_event_keys"] = np.asarray(["baseband_100.h5"], dtype=str)
+    np.savez(product_path, **forged)
+
+    with pytest.raises(ValueError, match="exact same unit identities"):
+        combine_detector_products([product_path], tmp_path / "out")
+    with pytest.raises(ValueError, match="exact same unit identities"):
+        report_products([product_path])
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    [
+        "fractional_schema_revision",
+        "fractional_freq_id",
+        "boolean_freq_id",
+        "fractional_physical_channel",
+        "fractional_p_target",
+        "negative_p_target",
+        "extra_p_target_row",
+        "missing_unit_keys",
+        "missing_acquisition_time",
+        "fractional_frame_unit_index",
+        "negative_frame_in_unit",
+        "fractional_event_id",
+        "fractional_fpga_count",
+        "zero_sample_rate",
+        "forged_mask_rule",
+        "forged_reject_mask",
+        "unused_unit",
+    ],
+)
+def test_report_and_combine_fail_closed_on_malformed_current_product(
+    tmp_path, malformation: str
+) -> None:
+    product_path = tmp_path / f"{malformation}.npz"
+    _write_min_detector_product(
+        product_path, channel=14, nfft=128, n_frames=2
+    )
+    with np.load(product_path, allow_pickle=False) as archive:
+        malformed = {name: archive[name] for name in archive.files}
+
+    replacements = {
+        "fractional_schema_revision": (
+            "schema_revision",
+            np.asarray(1.9, dtype=np.float64),
+        ),
+        "fractional_freq_id": (
+            "freq_id",
+            np.asarray([786.9], dtype=np.float64),
+        ),
+        "boolean_freq_id": ("freq_id", np.asarray([True], dtype=np.bool_)),
+        "fractional_physical_channel": (
+            "physical_channel",
+            np.asarray([14.9], dtype=np.float64),
+        ),
+        "fractional_p_target": (
+            "p_target_u64",
+            np.ones((2, 1), dtype=np.float64),
+        ),
+        "negative_p_target": (
+            "p_target_u64",
+            -np.ones((2, 1), dtype=np.int64),
+        ),
+        "extra_p_target_row": (
+            "p_target_u64",
+            np.ones((3, 1), dtype=np.uint64),
+        ),
+        "fractional_frame_unit_index": (
+            "frame_unit_index",
+            np.asarray([0.1, 1.9], dtype=np.float64),
+        ),
+        "negative_frame_in_unit": (
+            "frame_in_unit",
+            np.asarray([0, -1], dtype=np.int32),
+        ),
+        "fractional_event_id": (
+            "unit_event_id",
+            np.asarray([123.1, 123.9], dtype=np.float64),
+        ),
+        "fractional_fpga_count": (
+            "unit_time0_fpga",
+            np.asarray([123.1, 123.9], dtype=np.float64),
+        ),
+        "zero_sample_rate": (
+            "sample_rate_hz",
+            np.asarray(0.0, dtype=np.float64),
+        ),
+        "forged_mask_rule": ("mask_rule", np.asarray("forged-policy")),
+        "forged_reject_mask": (
+            "reject_mask",
+            np.ones((2, 1), dtype=np.uint8),
+        ),
+    }
+    if malformation == "missing_unit_keys":
+        malformed.pop("unit_keys")
+    elif malformation == "missing_acquisition_time":
+        malformed.pop("unit_time0_fpga")
+    elif malformation == "unused_unit":
+        malformed["unit_keys"] = np.asarray(
+            ["event-0", "event-1", "unused"], dtype=str
+        )
+        malformed["unit_order"] = np.asarray(
+            ["event-0", "event-1", "unused"], dtype=str
+        )
+        malformed["source_event_keys"] = np.asarray(
+            ["event-0", "event-1", "unused"], dtype=str
+        )
+        malformed["archive_version"] = np.asarray(["", "", ""], dtype=str)
+        malformed["unit_time0_ctime"] = np.asarray(
+            [np.nan, np.nan, np.nan], dtype=np.float64
+        )
+        malformed["unit_time0_fpga"] = np.asarray([0, 0, 0], dtype=np.uint64)
+        malformed["unit_event_id"] = np.asarray([-1, -1, -1], dtype=np.int64)
+        malformed["unit_delta_time"] = np.full(
+            3, 1.0 / 390_625.0, dtype=np.float64
+        )
+    else:
+        field, value = replacements[malformation]
+        malformed[field] = value
+    np.savez(product_path, **malformed)
+
+    with pytest.raises(ValueError):
+        report_products([product_path])
+    with pytest.raises(ValueError):
+        combine_detector_products([product_path], tmp_path / "out")
+    assert not (tmp_path / "out").exists()
 
 
 def test_combine_propagates_measured_sample_rate_to_time_products(tmp_path):

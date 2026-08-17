@@ -228,3 +228,98 @@ def test_input_validation():
             S, anchor_bin=0, designated_half_width=0, bulk_mask=mask,
             cfar_rank=-1, multiplier_q16=MULTIPLIER_ONE,
         )
+    with pytest.raises(ValueError, match="cfar_rank"):
+        fine_mask_decision(
+            S, anchor_bin=0, designated_half_width=0, bulk_mask=mask,
+            cfar_rank=FINE_BINS, multiplier_q16=MULTIPLIER_ONE,
+        )
+
+
+@pytest.mark.parametrize(
+    "powers",
+    [
+        np.zeros((3, FINE_BINS), dtype=np.int64),
+        -np.ones((3, FINE_BINS), dtype=np.int64),
+        np.zeros((3, FINE_BINS), dtype=np.uint32),
+        np.zeros((3, FINE_BINS), dtype=np.float64),
+    ],
+)
+def test_fine_powers_require_exact_uint64_dtype(powers: np.ndarray) -> None:
+    with pytest.raises(TypeError, match="fine_powers.*uint64"):
+        fine_mask_decision(
+            powers,
+            anchor_bin=0,
+            designated_half_width=0,
+            bulk_mask=np.ones(FINE_BINS, dtype=bool),
+            cfar_rank=0,
+            multiplier_q16=MULTIPLIER_ONE,
+        )
+
+
+@pytest.mark.parametrize(
+    "mask",
+    [
+        np.ones(FINE_BINS, dtype=np.uint8),
+        np.ones(FINE_BINS, dtype=np.float64),
+        np.full(FINE_BINS, np.nan, dtype=np.float64),
+        np.full(FINE_BINS, "true", dtype="U4"),
+    ],
+)
+def test_bulk_mask_requires_exact_boolean_dtype(mask: np.ndarray) -> None:
+    from pilot_proxy.fine_decision import pack_bulk_mask
+
+    with pytest.raises(TypeError, match="bulk mask entries must be booleans"):
+        pack_bulk_mask(mask)
+
+    with pytest.raises(TypeError, match="bulk mask entries must be booleans"):
+        fine_mask_decision(
+            np.ones((3, FINE_BINS), dtype=np.uint64),
+            anchor_bin=0,
+            designated_half_width=0,
+            bulk_mask=mask,
+            cfar_rank=0,
+            multiplier_q16=MULTIPLIER_ONE,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("anchor_bin", True),
+        ("anchor_bin", np.bool_(True)),
+        ("designated_half_width", 1.0),
+        ("cfar_rank", "0"),
+        ("multiplier_q16", 1.0),
+    ],
+)
+def test_scalar_decision_fields_must_be_exact_integers(
+    field: str,
+    invalid: object,
+) -> None:
+    S = np.ones((3, FINE_BINS), dtype=np.uint64)
+    arguments = {
+        "anchor_bin": 0,
+        "designated_half_width": 0,
+        "bulk_mask": np.ones(FINE_BINS, dtype=bool),
+        "cfar_rank": 0,
+        "multiplier_q16": MULTIPLIER_ONE,
+    }
+    arguments[field] = invalid
+
+    with pytest.raises(TypeError, match=field):
+        fine_mask_decision(S, **arguments)
+
+
+@pytest.mark.parametrize("invalid", [0, -1, 1 << 64])
+def test_multiplier_domain_matches_runtime_and_kernel(invalid: int) -> None:
+    S = np.ones((3, FINE_BINS), dtype=np.uint64)
+
+    with pytest.raises(ValueError, match="multiplier_q16"):
+        fine_mask_decision(
+            S,
+            anchor_bin=0,
+            designated_half_width=0,
+            bulk_mask=np.ones(FINE_BINS, dtype=bool),
+            cfar_rank=0,
+            multiplier_q16=invalid,
+        )

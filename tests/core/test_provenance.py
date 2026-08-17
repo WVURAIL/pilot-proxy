@@ -71,7 +71,8 @@ def test_geometry_drops_build_tokens_and_keeps_the_rest() -> None:
 def test_release_version_bump_is_geometry_identical() -> None:
     """The 0.3.0.dev0 -> 1.0.0 release bump changes the version label and, via
     the edit to __init__.py, the source tree hash. Neither is geometry: a
-    survey part-way through must resume and stack across the bump."""
+    survey's separately completed pilot products may stack across the bump.
+    Resume itself requires the exact full build identity."""
     before = _ver(version="0.3.0.dev0", source="02066f1d6337")
     after = _ver(version="1.0.0", source="0c66af82f98b")
     assert before != after

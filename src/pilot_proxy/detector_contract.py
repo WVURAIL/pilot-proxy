@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import hashlib
+import operator
 from collections.abc import Mapping
 from typing import Any
 
@@ -54,6 +55,7 @@ NORMALIZED_POSITIVE_EXCESS_EQUIVALENT_RULE = (
     "R_coarse > R_null; R_null = "
     "2*target_norm_sq/reference_norm_sum_sq"
 )
+UINT64_MAX = (1 << 64) - 1
 DETECTOR_POWER_RATIO_DEFINITION = "R_coarse = 2 * P_target / (P_ref_lower + P_ref_upper)"
 ALL_ROWS_DETECTOR_POWER_RATIO_DEFINITION = (
     "R_coarse = 2 * sum(P_target) / (sum(P_ref_lower) + sum(P_ref_upper))"
@@ -138,6 +140,21 @@ def _contract_int(contract: Mapping[str, Any], field: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise ValueError(f"detector contract {field} must be an integer.")
     return value
+
+
+def _exact_uint64(value: object, *, field: str, positive: bool = False) -> int:
+    """Validate exact detector power/norm integers without coercion."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+    minimum = 1 if positive else 0
+    if not minimum <= result <= UINT64_MAX:
+        interval = "[1, 2**64 - 1]" if positive else "[0, 2**64 - 1]"
+        raise ValueError(f"{field} must be in {interval}.")
+    return result
 
 
 def _validate_fine_reduction(value: object) -> None:
@@ -342,10 +359,17 @@ def weight_term_norms_sq(
 
 def null_power_ratio_from_weight_norms(target_norm_sq: int, reference_norm_sum_sq: int) -> float:
     """Return null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq, the flat-floor E[F]."""
-    nrs = int(reference_norm_sum_sq)
-    if nrs <= 0:
-        raise ValueError("reference_norm_sum_sq must be positive.")
-    return 2.0 * int(target_norm_sq) / nrs
+    target_norm = _exact_uint64(
+        target_norm_sq,
+        field="target_norm_sq",
+        positive=True,
+    )
+    reference_norm = _exact_uint64(
+        reference_norm_sum_sq,
+        field="reference_norm_sum_sq",
+        positive=True,
+    )
+    return 2.0 * target_norm / reference_norm
 
 
 def normalized_positive_excess(
@@ -362,11 +386,21 @@ def normalized_positive_excess(
     ``F > null_power_ratio``. With ``target_norm_sq : reference_norm_sum_sq = 1 : 2`` this
     reduces to the legacy ``2*p_target > p_ref_sum`` rule.
     """
-    num = int(p_target)
-    den = int(p_ref_sum)
+    num = _exact_uint64(p_target, field="p_target")
+    den = _exact_uint64(p_ref_sum, field="p_ref_sum")
+    target_norm = _exact_uint64(
+        target_norm_sq,
+        field="target_norm_sq",
+        positive=True,
+    )
+    reference_norm = _exact_uint64(
+        reference_norm_sum_sq,
+        field="reference_norm_sum_sq",
+        positive=True,
+    )
     if den == 0:
         return 0
-    return int(num * int(reference_norm_sum_sq) > int(target_norm_sq) * den)
+    return int(num * reference_norm > target_norm * den)
 
 
 def build_detector_contract(

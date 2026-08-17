@@ -41,14 +41,17 @@ from pilot_proxy.paths import (
     DEFAULT_LIB_PATH,
     DEFAULT_WEIGHTS_PATH,
     GENERATED_DIR,
+    SOURCE_CHECKOUT_ROOT,
+    resolve_user_path,
 )
 from pilot_proxy.runtime_bundle import (
     export_runtime_weight_bundle,
     validate_runtime_weight_bundle,
 )
-
-REPO_ROOT = Path(__file__).resolve().parents[2]
-SRC_ROOT = REPO_ROOT / "src"
+from pilot_proxy.secondary_python import (
+    package_only_pythonpath,
+    prepend_pythonpath,
+)
 
 # GNU Radio is typically installed into the system Python on Linux/WSL, while
 # CUDA/CuPy lives in the active detector environment.
@@ -72,29 +75,34 @@ def _run_module(
     python: str | None = None,
     env_updates: dict[str, str] | None = None,
 ) -> None:
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        str(SRC_ROOT)
-        if not existing_pythonpath
-        else str(SRC_ROOT) + os.pathsep + existing_pythonpath
-    )
-    if env_updates:
-        env.update(env_updates)
+    with package_only_pythonpath(python) as package_bridge:
+        env = os.environ.copy()
+        if package_bridge is not None:
+            prepend_pythonpath(env, package_bridge)
+        elif SOURCE_CHECKOUT_ROOT is not None:
+            # Same-interpreter source runs still need the checkout import root
+            # when invoked outside an editable installation.
+            prepend_pythonpath(env, SOURCE_CHECKOUT_ROOT / "src")
+        if env_updates:
+            env.update(env_updates)
 
-    cmd = [str(python or sys.executable), "-m", module_name, *args]
-    print(f"[run] {' '.join(cmd)}", flush=True)
-    result = subprocess.run(cmd, cwd=REPO_ROOT, env=env)
+        cmd = [str(python or sys.executable), "-m", module_name, *args]
+        print(f"[run] {' '.join(cmd)}", flush=True)
+        result = subprocess.run(cmd, cwd=Path.cwd(), env=env)
     if result.returncode != 0:
         raise SystemExit(f"Command failed with exit={result.returncode}: {cmd}")
+
+
+def _caller_absolute_path(value: str | os.PathLike[str]) -> str:
+    return str(resolve_user_path(value))
 
 
 def _cmd_generate_atsc(args: argparse.Namespace) -> None:
     argv = [
         "--output-iq",
-        args.output_iq,
+        _caller_absolute_path(args.output_iq),
         "--output-ts",
-        args.output_ts,
+        _caller_absolute_path(args.output_ts),
         "--num-iq-samples",
         str(args.num_iq_samples),
         "--num-ts-packets",
@@ -140,9 +148,9 @@ def _cmd_audit_atsc(args: argparse.Namespace) -> None:
 def _cmd_atsc_detector_input(args: argparse.Namespace) -> None:
     argv = [
         "--input-iq",
-        args.input_iq,
+        _caller_absolute_path(args.input_iq),
         "--output-dir",
-        args.output_dir,
+        _caller_absolute_path(args.output_dir),
         "--frame-size-samples",
         str(args.samples_per_block),
         "--num-input-streams",
@@ -472,6 +480,7 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
         source_glob=args.source_glob,
         source_freq_id_regex=args.source_freq_id_regex,
         analyzer_options=analyzer_options,
+        allow_partial=args.allow_partial,
     )
 
 
@@ -1301,9 +1310,32 @@ def build_parser() -> argparse.ArgumentParser:
                                  "inventory to derive the scope from. For the "
                                  "DTV 14-36 pilot set, see README.md or INTEGRATION.md.")
     chime_scan.add_argument("--instrument", default="chime")
-    chime_scan.add_argument("--max-files", type=int, default=None,
-                            help="Cap files processed per pilot (smoke tests).")
-    chime_scan.add_argument("--max-chunks-per-file", type=int, default=None)
+    chime_scan.add_argument(
+        "--max-files",
+        type=int,
+        default=None,
+        help=(
+            "Cap files processed per pilot (smoke tests). If the cap leaves "
+            "enumerated units incomplete, also pass --allow-partial."
+        ),
+    )
+    chime_scan.add_argument(
+        "--max-chunks-per-file",
+        type=int,
+        default=None,
+        help=(
+            "Cap chunks processed per file (smoke tests). If the cap leaves "
+            "coverage incomplete, also pass --allow-partial."
+        ),
+    )
+    chime_scan.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help=(
+            "Permit products with unmatched, failed, or quarantined input units; "
+            "completeness remains recorded."
+        ),
+    )
     chime_scan.add_argument("--checkpoint-every", type=int, default=None,
                             help="Write the per-pilot product every N files "
                                  "(default 50); resume reloads the last checkpoint. "

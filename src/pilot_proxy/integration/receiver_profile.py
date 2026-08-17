@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import operator
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -57,6 +58,35 @@ FREQUENCY_ORDER_DESCENDING_RF = "descending_rf"
 SUPPORTED_FREQUENCY_ORDER = frozenset(
     {FREQUENCY_ORDER_ASCENDING_RF, FREQUENCY_ORDER_DESCENDING_RF}
 )
+
+
+def _exact_coarse_channel_index(value: object, *, num_channels: int) -> int:
+    """Validate one receiver-grid index without truncation or booleans."""
+    if isinstance(value, bool):
+        raise TypeError("coarse channel index must be an integer, not a boolean.")
+    try:
+        index = operator.index(value)
+    except TypeError as exc:
+        raise TypeError("coarse channel index must be an integer.") from exc
+    if not 0 <= index < num_channels:
+        raise ValueError(
+            "coarse channel index out of range: "
+            f"{index}, valid 0-{num_channels - 1}"
+        )
+    return index
+
+
+def _exact_positive_integer(value: object, *, field: str) -> int:
+    """Validate one positive programmatic geometry integer."""
+    if isinstance(value, bool):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+    if result < 1:
+        raise ValueError(f"{field} must be positive.")
+    return result
 
 _TOP_LEVEL_REQUIRED = frozenset(
     {
@@ -411,30 +441,44 @@ class ReceiverProfile:
         return float(self.coarse_channel_center_offset_hz)
 
     def frame_center_normalized(self, coarse_channel_index: int | None = None) -> float:
+        index = (
+            None
+            if coarse_channel_index is None
+            else _exact_coarse_channel_index(
+                coarse_channel_index,
+                num_channels=self.num_coarse_channels,
+            )
+        )
         if (
             self.channel_center_normalized_odd is not None
-            and coarse_channel_index is not None
-            and int(coarse_channel_index) % 2 == 1
+            and index is not None
+            and index % 2 == 1
         ):
             return float(self.channel_center_normalized_odd)
         return float(self.channel_center_normalized)
 
     def forbidden_dc_normalized(self, coarse_channel_index: int | None = None) -> float:
+        index = (
+            None
+            if coarse_channel_index is None
+            else _exact_coarse_channel_index(
+                coarse_channel_index,
+                num_channels=self.num_coarse_channels,
+            )
+        )
         if (
             self.physical_dc_normalized_odd is not None
-            and coarse_channel_index is not None
-            and int(coarse_channel_index) % 2 == 1
+            and index is not None
+            and index % 2 == 1
         ):
             return float(self.physical_dc_normalized_odd)
         return float(self.physical_dc_normalized)
 
     def coarse_channel_center_hz(self, index: int) -> float:
-        idx = int(index)
-        if idx < 0 or idx >= int(self.num_coarse_channels):
-            raise ValueError(
-                "coarse channel index out of range: "
-                f"{idx}, valid 0-{int(self.num_coarse_channels) - 1}"
-            )
+        idx = _exact_coarse_channel_index(
+            index,
+            num_channels=self.num_coarse_channels,
+        )
         if self.frequency_order == FREQUENCY_ORDER_DESCENDING_RF:
             return float(
                 self.band_upper_hz
@@ -762,6 +806,14 @@ def default_reference_receiver_profile(
     num_input_streams: int = DEFAULT_NUM_INPUT_STREAMS,
 ) -> ReceiverProfile:
     """Return the shipped 800 MS/s, 400-800 MHz reference receiver profile."""
+    frame_size = _exact_positive_integer(
+        frame_size_samples,
+        field="frame_size_samples",
+    )
+    stream_count = _exact_positive_integer(
+        num_input_streams,
+        field="num_input_streams",
+    )
     return ReceiverProfile(
         schema_version=RECEIVER_PROFILE_SCHEMA_TOKEN,
         receiver_profile_id=REFERENCE_PROFILE_ID,
@@ -773,10 +825,10 @@ def default_reference_receiver_profile(
         coarse_channel_center_offset_hz=(
             REFERENCE_BANDWIDTH_HZ / float(REFERENCE_NUM_CHANNELS)
         ),
-        frame_size_samples=int(frame_size_samples),
-        num_input_streams=int(num_input_streams),
+        frame_size_samples=frame_size,
+        num_input_streams=stream_count,
         input_stream_unit="input_stream",
-        stream_map_required=bool(int(num_input_streams) > 1),
+        stream_map_required=stream_count > 1,
         combine_default=COMBINE_MODE_COMBINED_STREAMS,
         spectral_sense=SPECTRAL_SENSE_NORMAL,
         frequency_order=FREQUENCY_ORDER_ASCENDING_RF,
@@ -832,7 +884,12 @@ def receiver_frequency_to_channel(
     profile: ReceiverProfile,
 ) -> ChannelSelection:
     """Map an RF frequency to the nearest receiver coarse channel."""
-    rf = float(rf_hz)
+    rf = _require_float(rf_hz, "rf_hz")
+    if not profile.band_lower_hz <= rf <= profile.band_upper_hz:
+        raise ValueError(
+            f"rf_hz={rf:.3f} is outside receiver profile RF band "
+            f"[{profile.band_lower_hz:.3f}, {profile.band_upper_hz:.3f}]."
+        )
     if profile.frequency_order == FREQUENCY_ORDER_DESCENDING_RF:
         first_center = profile.band_upper_hz - profile.center_offset_hz
         idx = int(round((first_center - rf) / profile.coarse_channel_width_hz))

@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import argparse
 import math
+import os
 import sys
+from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
 from pilot_proxy.dtv_units import DB_POWER_FACTOR
+from pilot_proxy.paths import PACKAGE_ROOT
+import pilot_proxy.testbench.evaluate_snr as evaluate_snr
 # noinspection PyProtectedMember
 from pilot_proxy.testbench.evaluate_snr import (
     DEFAULT_SNR_SWEEP_MAX_DB,
@@ -209,6 +214,95 @@ def test_gnuradio_awgn_helper_hits_requested_band_snr(tmp_path) -> None:
     assert math.isclose(noise_power, BANDWIDTH_NOISE_POWER, rel_tol=1e-6)
     assert metadata["gnuradio_block"] == "analog.noise_source_c"
     assert math.isclose(realized_snr_db, ZERO_SNR_DB, abs_tol=GNURADIO_SNR_TOLERANCE_DB)
+
+
+def test_gnuradio_helper_resolves_caller_paths_and_uses_package_only_bridge(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    signal = np.ones(32, dtype=np.complex64)
+    monkeypatch.chdir(tmp_path)
+    signal.tofile("relative-clean.cfile")
+    monkeypatch.setenv("PYTHONPATH", "secondary-caller-path")
+    observed: dict[str, object] = {}
+
+    def fake_run(cmd, *, cwd, env, capture_output, text):
+        input_path = Path(cmd[cmd.index("--input-iq") + 1])
+        output_path = Path(cmd[cmd.index("--output-iq") + 1])
+        metadata_path = Path(cmd[cmd.index("--metadata-json") + 1])
+        bridge = Path(env["PYTHONPATH"].split(os.pathsep)[0])
+        observed.update(
+            {
+                "cwd": cwd,
+                "input_path": input_path,
+                "output_path": output_path,
+                "bridge": bridge,
+                "bridge_entries": sorted(path.name for path in bridge.iterdir()),
+                "package_target": (bridge / "pilot_proxy").resolve(),
+                "pythonpath_tail": env["PYTHONPATH"].split(os.pathsep)[1:],
+            }
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        signal.tofile(output_path)
+        metadata_path.write_text('{"helper": "fake"}\n', encoding="utf-8")
+        return SimpleNamespace(returncode=0, stderr="", stdout="")
+
+    monkeypatch.setattr(evaluate_snr.subprocess, "run", fake_run)
+
+    noisy, _, _, metadata = add_gnuradio_awgn_for_snr(
+        signal,
+        input_iq_path=Path("relative-clean.cfile"),
+        output_iq_path=Path("relative-output/noisy.cfile"),
+        snr_db=ZERO_SNR_DB,
+        seed=RNG_SEED,
+        gnuradio_python="/custom/secondary-python",
+        sample_rate_hz=FULL_SAMPLE_RATE_HZ,
+        snr_bandwidth_hz=HALF_BANDWIDTH_HZ,
+    )
+
+    np.testing.assert_array_equal(noisy, signal)
+    assert metadata == {"helper": "fake"}
+    assert observed["cwd"] == tmp_path
+    assert observed["input_path"] == (tmp_path / "relative-clean.cfile").resolve()
+    assert observed["output_path"] == (
+        tmp_path / "relative-output" / "noisy.cfile"
+    ).resolve()
+    assert observed["bridge_entries"] == ["pilot_proxy"]
+    assert observed["package_target"] == PACKAGE_ROOT
+    assert observed["pythonpath_tail"] == ["secondary-caller-path"]
+    assert not Path(observed["bridge"]).exists()
+
+
+def test_evaluator_resolves_all_user_paths_before_execution(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    args = evaluate_snr.build_parser().parse_args(
+        [
+            "--input-iq",
+            "relative-input.cfile",
+            "--output-dir",
+            "relative-output",
+            "--waveform-audit-json",
+            "relative-audit.json",
+            "--lib-path",
+            "relative-kernel.so",
+            "--weights-path",
+            "relative-weights.bin",
+            "--experimental-bits",
+            "8",
+        ]
+    )
+
+    with pytest.raises(SystemExit, match=r"locked 4\+4 bit"):
+        evaluate_snr.run(args)
+
+    assert args.input_iq == (tmp_path / "relative-input.cfile").resolve()
+    assert args.output_dir == (tmp_path / "relative-output").resolve()
+    assert args.waveform_audit_json == (tmp_path / "relative-audit.json").resolve()
+    assert args.lib_path == (tmp_path / "relative-kernel.so").resolve()
+    assert args.weights_path == (tmp_path / "relative-weights.bin").resolve()
 
 
 def test_wilson_interval_closed_form() -> None:

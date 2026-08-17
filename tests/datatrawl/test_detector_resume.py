@@ -190,6 +190,49 @@ def test_analyzer_resume_absent_product_is_fresh(tmp_path):
     assert a.processed_keys() == set()
 
 
+def test_consume_file_rolls_back_all_frames_when_later_chunk_fails(tmp_path):
+    files = _make_files(tmp_path / "data", n_events=1)
+    path = files[("evt0", FREQ_ID)]
+    reader = ChimeBasebandPackedReader()
+    weights = np.ones((3, K), dtype=np.int8)
+    calls = 0
+
+    def fail_second_chunk(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("second chunk failed")
+        return _cpu_ref_detector_fn(**kwargs)
+
+    ctx = RunContext(
+        instrument=load_instrument("chime"),
+        selection=[FREQ_ID],
+        options={
+            "detector_fn": fail_second_chunk,
+            "kernel": _stub_kernel(K),
+            "weights": weights,
+        },
+    )
+    meta = dict(reader.probe(str(path)))
+    meta["unit_key"] = "synth:transaction"
+    analyzer = PilotProxyDetectorAnalyzer()
+    analyzer.begin(ctx, meta)
+
+    with pytest.raises(RuntimeError, match="second chunk failed"):
+        analyzer.consume_file(reader.iter_arrays(str(path), ctx), meta)
+
+    assert analyzer._n_frames == 0
+    assert analyzer._p_target == []
+    assert analyzer._fine_power_ratio == []
+    assert analyzer._frame_unit_index == []
+    assert analyzer._unit_order == []
+    assert analyzer.processed_keys() == set()
+    before = getattr(analyzer._spec_before, "get", lambda: analyzer._spec_before)()
+    after = getattr(analyzer._spec_after, "get", lambda: analyzer._spec_after)()
+    assert np.count_nonzero(np.asarray(before)) == 0
+    assert np.count_nonzero(np.asarray(after)) == 0
+
+
 @pytest.mark.parametrize("missing_field", ["unit_order", "nfft"])
 def test_analyzer_resume_requires_current_checkpoint_fields(
     tmp_path, missing_field
@@ -365,16 +408,8 @@ def test_analyzer_resume_rejects_changed_sample_rate(tmp_path):
         resumed.begin(changed_ctx, next_meta)
 
 
-def test_analyzer_resume_allows_release_version_bump(tmp_path, monkeypatch, capsys):
-    """A release cut mid-survey must not strand the checkpoints.
-
-    Bumping __version__ (0.3.0.dev0 -> 1.0.0) edits a file inside the package,
-    so BOTH build-identity tokens of detector_version move at once: the label
-    and the source tree hash. Every token that constrains the numbers (kernel
-    hash, K, schema, and the separately compared weights hashes, contract,
-    mask rule and reference placement) is unchanged, so the resume must
-    continue and say so.
-    """
+def test_analyzer_resume_rejects_changed_python_source(tmp_path, monkeypatch):
+    """One checkpoint may never contain frames from two source builds."""
     import pilot_proxy
     from pilot_proxy.datatrawl_plugins import detector as detector_mod
 
@@ -405,12 +440,8 @@ def test_analyzer_resume_allows_release_version_bump(tmp_path, monkeypatch, caps
     monkeypatch.setattr(detector_mod, "package_source_sha256", lambda *a, **k: "0c66af82" * 8)
     resumed = PilotProxyDetectorAnalyzer()
     assert resumed.resume(str(checkpoint), ctx)
-    resumed.begin(ctx, meta)  # must not raise
-
-    note = capsys.readouterr().out
-    assert "[resume] provenance: build changed" in note
-    assert "0.3.0.dev0@02066f1d0206 -> 1.0.0@0c66af820c66" in note
-    assert resumed.processed_keys() == first.processed_keys()
+    with pytest.raises(SystemExit, match="detector_version.*source="):
+        resumed.begin(ctx, meta)
 
 
 # -- scan level: relaunch through the real entry point ------------------------
@@ -447,7 +478,7 @@ def test_scan_resume_and_noop_relaunch(tmp_path, monkeypatch):
     assert ref["frame_index"].shape[0] == 3 * N_FRAMES
 
     resumed = tmp_path / "resumed"
-    _scan(resumed, max_files=2)                                   # process 2 of 3
+    _scan(resumed, max_files=2, allow_partial=True)               # process 2 of 3
     partial = np.load(resumed / "_per_pilot" / f"{FREQ_ID}.npz")
     assert partial["frame_index"].shape[0] == 2 * N_FRAMES        # checkpoint at 2
     _scan(resumed)                                                # resume -> 3rd file
@@ -471,18 +502,45 @@ def test_scan_refuses_incompatible_cap(tmp_path, monkeypatch):
     inject = {"detector_fn": _cpu_ref_detector_fn, "kernel": _stub_kernel(K),
               "weights": weights}
     out = tmp_path / "capped"
-    run_chime_scan(output_dir=out, source="cadc-datatrail", inventory=inv,
-                   analyzer="pilot-proxy-detector", select=str(FREQ_ID),
-                   analyzer_options=inject, verbose=False, max_chunks_per_file=1)
-    # The same cap is compatible and should be a no-op on a complete product.
-    run_chime_scan(output_dir=out, source="cadc-datatrail", inventory=inv,
-                   analyzer="pilot-proxy-detector", select=str(FREQ_ID),
-                   analyzer_options=inject, verbose=False, max_chunks_per_file=1)
+    capped_args = {
+        "output_dir": out,
+        "source": "cadc-datatrail",
+        "inventory": inv,
+        "analyzer": "pilot-proxy-detector",
+        "select": str(FREQ_ID),
+        "analyzer_options": inject,
+        "verbose": False,
+        "max_chunks_per_file": 1,
+    }
+    # A finite chunk cap is conservatively partial: a persisted frame does not
+    # prove that its multi-frame source unit was fully consumed, so publication
+    # requires the caller's explicit acknowledgement.
+    with pytest.raises(SystemExit, match="--allow-partial"):
+        run_chime_scan(**capped_args)
+    assert not (out / "chime_detector_outputs.npz").exists()
+    scope = json.loads((out / "scan_scope.json").read_text())
+    pilot = scope["pilots"][0]
+    assert scope["complete"] is False
+    assert pilot["status"] == "capped"
+    assert pilot["completed"] == 0
+    assert pilot["capped"] == 2
+    assert pilot["unprocessed"] == 0
+
+    # The same cap is resume-compatible and becomes a no-op, but the output is
+    # still published only with explicit partial acceptance.
+    run_chime_scan(**capped_args, allow_partial=True)
+    assert (out / "chime_detector_outputs.npz").exists()
     # relaunch WITHOUT the cap must refuse rather than complete the capped product
     with pytest.raises(SystemExit, match="capped product cannot be completed"):
         run_chime_scan(output_dir=out, source="cadc-datatrail", inventory=inv,
                        analyzer="pilot-proxy-detector", select=str(FREQ_ID),
                        analyzer_options=inject, verbose=False)
+    incompatible_scope = json.loads((out / "scan_scope.json").read_text())
+    incompatible_pilot = incompatible_scope["pilots"][0]
+    assert incompatible_scope["complete"] is False
+    assert incompatible_pilot["status"] == "aborted"
+    assert incompatible_pilot["completed"] == 0
+    assert incompatible_pilot["capped"] == 2
 
 
 # -- v3 fine-width invariants across resume -----------------------------------

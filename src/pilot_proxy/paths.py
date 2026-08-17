@@ -5,32 +5,53 @@ from __future__ import annotations
 
 import os
 import re
-import sysconfig
+from importlib import resources
 from pathlib import Path
 
-SRC_ROOT = Path(__file__).resolve().parents[1]
-REPO_ROOT = SRC_ROOT.parent
-_SOURCE_DATA_ROOT = REPO_ROOT
-_INSTALLED_DATA_ROOT = Path(sysconfig.get_path("data")) / "share" / "pilot-proxy"
+PACKAGE_ROOT = Path(__file__).resolve().parent
+SRC_ROOT = PACKAGE_ROOT.parent
+_REPO_CANDIDATE = SRC_ROOT.parent
+SOURCE_CHECKOUT_ROOT = (
+    _REPO_CANDIDATE
+    if (_REPO_CANDIDATE / "pyproject.toml").is_file()
+    and (_REPO_CANDIDATE / "src" / "pilot_proxy").resolve() == PACKAGE_ROOT
+    else None
+)
+REPO_ROOT = SOURCE_CHECKOUT_ROOT or PACKAGE_ROOT
+_SOURCE_DATA_ROOT = SOURCE_CHECKOUT_ROOT
+
+
+def _package_data_root() -> Path:
+    """Return package-local data as a normal Path for installed wheels."""
+    return Path(str(resources.files("pilot_proxy").joinpath("_resources")))
 
 
 def _data_root() -> Path:
-    source_weight = _SOURCE_DATA_ROOT / "weights" / "chime_dtv_weights_k128.bin"
-    if source_weight.is_file():
-        return _SOURCE_DATA_ROOT
-    if _INSTALLED_DATA_ROOT.is_dir():
-        return _INSTALLED_DATA_ROOT
-    # Preserve actionable source-tree paths when neither location is populated.
-    return _SOURCE_DATA_ROOT
+    if _SOURCE_DATA_ROOT is not None:
+        source_weight = _SOURCE_DATA_ROOT / "weights" / "chime_dtv_weights_k128.bin"
+        if source_weight.is_file():
+            return _SOURCE_DATA_ROOT
+    # Wheels install uncompressed package files, so importlib.resources returns
+    # a filesystem-backed Traversable that remains usable as a pathlib.Path.
+    return _package_data_root()
 
 
 DATA_ROOT = _data_root()
-CUDA_DIR = REPO_ROOT / "cuda"
+CUDA_DIR = (
+    SOURCE_CHECKOUT_ROOT / "cuda"
+    if SOURCE_CHECKOUT_ROOT is not None
+    else PACKAGE_ROOT / "cuda"
+)
 CONFIGS_DIR = DATA_ROOT / "configs"
-GENERATED_DIR = REPO_ROOT / "generated"
+GENERATED_DIR = (
+    SOURCE_CHECKOUT_ROOT / "generated"
+    if SOURCE_CHECKOUT_ROOT is not None
+    else Path.cwd() / "generated"
+)
 WEIGHTS_DIR = DATA_ROOT / "weights"
 
 DEFAULT_WEIGHTS_PATH = WEIGHTS_DIR / "chime_dtv_weights_k128.bin"
+DEFAULT_CHORD_WEIGHTS_PATH = WEIGHTS_DIR / "chord_dtv_weights_k64.bin"
 DEFAULT_CONFIG_H = CUDA_DIR / "config.h"
 
 
@@ -73,16 +94,33 @@ def normalize_user_path(value: str | os.PathLike[str]) -> Path:
     return Path(raw)
 
 
+def resolve_user_path(
+    value: str | os.PathLike[str],
+    *,
+    relative_to: str | os.PathLike[str] | None = None,
+) -> Path:
+    """Resolve a user path against the caller's directory, not package files."""
+    path = normalize_user_path(value).expanduser()
+    if not path.is_absolute():
+        base = Path.cwd() if relative_to is None else Path(relative_to)
+        path = base / path
+    return path.resolve(strict=False)
+
+
 __all__ = [
     "CUDA_DIR",
     "CONFIGS_DIR",
     "DATA_ROOT",
     "DEFAULT_CONFIG_H",
+    "DEFAULT_CHORD_WEIGHTS_PATH",
     "DEFAULT_LIB_PATH",
     "DEFAULT_WEIGHTS_PATH",
     "GENERATED_DIR",
+    "PACKAGE_ROOT",
     "REPO_ROOT",
+    "SOURCE_CHECKOUT_ROOT",
     "SRC_ROOT",
     "WEIGHTS_DIR",
     "normalize_user_path",
+    "resolve_user_path",
 ]

@@ -29,6 +29,7 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import operator
 import warnings
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -51,7 +52,7 @@ from pilot_proxy.chime.hdf5_input import (
     nearest_atsc_physical_channel,
 )
 from pilot_proxy.chime.frame_adapter import pack_chime_block_for_detector
-from pilot_proxy.chime.products import SAMPLE_RATE_HZ
+from pilot_proxy.chime.products import SAMPLE_RATE_HZ, atomic_savez_compressed
 from pilot_proxy.detector_contract import (
     NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -59,6 +60,7 @@ from pilot_proxy.detector_contract import (
     build_detector_contract,
     null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
+    normalized_positive_excess,
     weight_term_norms_sq,
 )
 from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED, SPECTRAL_SENSE_NORMAL
@@ -88,13 +90,12 @@ from pilot_proxy.product_contract import (
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    SOURCE_EVENT_KEY_SCHEMA_VERSION,
     current_decision_contract,
     current_decision_contract_json,
     validate_current_product_identity,
 )
 from pilot_proxy.provenance import (
-    detector_version_build_id,
-    detector_version_geometry,
     file_sha256,
     package_source_sha256,
     sidecar_manifest_path,
@@ -109,6 +110,27 @@ _FINE_MODE_CODES = {
     CFAR_MODE_QUANTILE_FALLBACK: 2,
 }
 _FINE_MODE_NAMES = {code: name for name, code in _FINE_MODE_CODES.items()}
+
+
+def _exact_backend_u64(value: object, *, field: str) -> int:
+    """Accept an exact backend integer without float/bool truncation or wrap."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(
+            f"detector analyzer: backend field {field!r} must be an exact "
+            "unsigned integer, not a boolean"
+        )
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise ValueError(
+            f"detector analyzer: backend field {field!r} must be an exact "
+            "unsigned integer"
+        ) from exc
+    if not 0 <= result < (1 << 64):
+        raise ValueError(
+            f"detector analyzer: backend field {field!r} is outside uint64"
+        )
+    return int(result)
 
 # The public product contract starts at schema revision 1 and records
 # active, diagnostic, and candidate decisions explicitly. Resume accepts only
@@ -220,6 +242,7 @@ _RESUME_REQUIRED_FIELDS = frozenset(
         "reference_placement_json",
         "sample_rate_hz",
         "sense",
+        "source_event_key_schema_version",
         "unit_delta_time",
         "unit_event_id",
         "unit_keys",
@@ -235,19 +258,19 @@ _RESUME_REQUIRED_FIELDS = frozenset(
 
 def _validate_resume_product(data: Mapping[str, Any], path: str) -> None:
     """Require a complete current product before restoring mutable state."""
-    try:
-        validate_current_product_identity(data)
-    except CurrentProductContractError as exc:
-        raise SystemExit(
-            f"pilot-proxy-detector: product {path} is not a complete current "
-            f"per-pilot product ({exc}). Remove it to rebuild."
-        ) from exc
     missing = sorted(_RESUME_REQUIRED_FIELDS.difference(data))
     if missing:
         raise SystemExit(
             "pilot-proxy-detector: existing product lacks resume-critical fields "
             f"{missing}; remove it and rebuild with the current version."
         )
+    try:
+        validate_current_product_identity(data, allow_empty_checkpoint=True)
+    except CurrentProductContractError as exc:
+        raise SystemExit(
+            f"pilot-proxy-detector: product {path} has invalid current "
+            f"per-pilot data ({exc}); remove it and rebuild."
+        ) from exc
 
 
 def _validated_resume_axes(
@@ -819,7 +842,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     f"match new input ({self._num_input_streams} != {meta_count})."
                 )
             self._num_input_streams = meta_count
-        physical_channel = nearest_atsc_physical_channel(f_center_hz)
+        # The detector also emits explicit invalid rows for selected receiver
+        # channels whose nearest ATSC pilot lies outside this coarse bin.  Its
+        # 3-MHz lookup is label-only; HDF5 discovery uses the strict half-bin
+        # default and therefore never groups neighboring freq_ids.
+        physical_channel = nearest_atsc_physical_channel(
+            f_center_hz, tolerance_hz=3.0e6
+        )
         if physical_channel is None:
             raise ValueError(
                 f"detector analyzer: coarse center {f_center_hz:.0f} Hz is not near "
@@ -1164,23 +1193,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             key for key in current
             if saved.get(key) != current.get(key)
         ]
-        # detector_version gets token-aware treatment: its `pilot-proxy/<version>`
-        # and `source=` tokens are build provenance (a release version bump, or
-        # patches applied mid-survey, change them without touching detector
-        # math); the kernel hash, K, and schema tokens are what resume
-        # correctness needs. Single source of truth in pilot_proxy.provenance,
-        # shared with combine's _check_invariants.
-        if "detector_version" in mismatches:
-            sv, cv = saved.get("detector_version"), current.get("detector_version")
-            if detector_version_geometry(sv) == detector_version_geometry(cv):
-                mismatches.remove("detector_version")
-                print(
-                    "[resume] provenance: build changed "
-                    f"({detector_version_build_id(sv)} -> "
-                    f"{detector_version_build_id(cv)}); detector geometry "
-                    "identical, continuing.",
-                    flush=True,
-                )
+        # Resume is stricter than cross-pilot combine: appending frames mutates
+        # one product, so it requires the exact Python implementation identity
+        # (the source= tree hash embedded in detector_version).  Allowing a
+        # geometry-equivalent source change here would mix implementations and
+        # then relabel every prior frame with only the newest build stamp.
         if mismatches:
             details = "; ".join(
                 f"{key}: saved={saved.get(key)!r} current={current.get(key)!r}"
@@ -1229,6 +1246,65 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             )
 
     def consume_file(self, arrays: Iterable, meta: Mapping[str, Any]) -> int:
+        """Consume one unit atomically, rolling back every accumulator on error."""
+        list_fields = (
+            "_p_target",
+            "_p_ref_sum",
+            "_coarse_power_ratio",
+            "_fine_power_ratio",
+            "_fine_loc",
+            "_fine_scale",
+            "_fine_thr",
+            "_fine_null_bulk_exceedance_fraction",
+            "_fine_mode_code",
+            "_fine_threshold_exceedance_count",
+            "_fine_threshold_exceedance_frames",
+            "_fine_threshold_exceedance_bins",
+            "_normalized_coarse_power_ratio_db",
+            "_pilot_excess_db",
+            "_estimated_data_shelf_snr_db",
+            "_normalized_pilot_excess",
+            "_reject_mask",
+            "_valid",
+            "_baseband_power",
+            "_frame_unit_index",
+            "_frame_in_unit",
+            "_unit_order",
+            "_unit_time0_ctime",
+            "_unit_time0_fpga",
+            "_unit_event_id",
+            "_unit_delta_time",
+            "_unit_archive_version",
+        )
+        lengths = {name: len(getattr(self, name)) for name in list_fields}
+        scalar_state = {
+            "_num_input_streams": self._num_input_streams,
+            "_overflow": self._overflow,
+            "_n_frames": self._n_frames,
+            "_fine_bins": self._fine_bins,
+            "_fine_supported": self._fine_supported,
+            "_fine_status": self._fine_status,
+        }
+        keys = set(self._keys)
+        spec_before = (
+            None if self._spec_before is None else self._spec_before.copy()
+        )
+        spec_after = None if self._spec_after is None else self._spec_after.copy()
+        try:
+            return self._consume_file_unchecked(arrays, meta)
+        except BaseException:
+            for name, length in lengths.items():
+                del getattr(self, name)[length:]
+            for name, value in scalar_state.items():
+                setattr(self, name, value)
+            self._keys = keys
+            self._spec_before = spec_before
+            self._spec_after = spec_after
+            raise
+
+    def _consume_file_unchecked(
+        self, arrays: Iterable, meta: Mapping[str, Any]
+    ) -> int:
         if self._weights is None or self._detector_fn is None:
             raise RuntimeError("detector analyzer: begin() was not called")
         self._check_file_meta(meta)
@@ -1348,7 +1424,16 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     weights=self._weights,
                     kernel=self._kernel,
                 )
-            self._overflow += int(detection.get("rational_overflow_count", 0))
+            overflow = _exact_backend_u64(
+                detection.get("rational_overflow_count", 0),
+                field="rational_overflow_count",
+            )
+            if self._overflow + overflow >= (1 << 64):
+                raise ValueError(
+                    "detector analyzer: accumulated rational_overflow_count "
+                    "exceeds uint64"
+                )
+            self._overflow += overflow
             baseband_power = np.asarray(packed.baseband_power_linear, dtype=np.float64)
             results = detection["results"]
             # The integrated spectrum (one FFT per nfft chunk) and the absolute-time
@@ -1365,10 +1450,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             matched_filter_row_projections = detection.get("matched_filter_row_projections") if emit_fine else None
             if matched_filter_row_projections is not None:
                 first = results[0]
-                fine_powers = (
-                    int(first.get("p_target_u64", 0)),
-                    int(first.get("p_ref_lower_u64", 0)),
-                    int(first.get("p_ref_upper_u64", 0)),
+                fine_powers = tuple(
+                    _exact_backend_u64(first.get(field, 0), field=field)
+                    for field in (
+                        "p_target_u64",
+                        "p_ref_lower_u64",
+                        "p_ref_upper_u64",
+                    )
                 )
                 rs0 = matched_filter_row_projections[0]
                 xp_mod = np
@@ -1419,8 +1507,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._fine_mode_code.append(0)
                 self._fine_threshold_exceedance_count.append(0)
             for local_index, row in enumerate(results):
-                num = int(row.get("p_target_u64", 0))
-                den = int(row.get("p_ref_sum_u64", 0))
+                num = _exact_backend_u64(
+                    row.get("p_target_u64", 0), field="p_target_u64"
+                )
+                den = _exact_backend_u64(
+                    row.get("p_ref_sum_u64", 0), field="p_ref_sum_u64"
+                )
                 self._p_target.append(num)
                 self._p_ref_sum.append(den)
                 self._coarse_power_ratio.append(
@@ -1458,7 +1550,18 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     ))
                 )
                 self._normalized_pilot_excess.append(normalized_excess)
-                self._reject_mask.append(int(row.get("mask", 0)))
+                # The backend mask is not authoritative product identity.
+                # Reconstruct the declared host-exact policy from the stored
+                # uint64 marginals and weight norms; this same bit controls the
+                # after-mask integrated spectrum below.
+                self._reject_mask.append(
+                    normalized_positive_excess(
+                        num,
+                        den,
+                        target_norm_sq=self._target_norm_sq,
+                        reference_norm_sum_sq=self._reference_norm_sum_sq,
+                    )
+                )
                 self._valid.append(1 if den > 0 else 0)
                 bp = (
                     float(baseband_power[local_index])
@@ -1483,6 +1586,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 if not self._reject_mask[-1]:
                     self._spec_after += psd
             chunk_in_unit += 1
+        if n == 0:
+            raise ValueError(
+                "detector analyzer: unit yielded zero complete nfft frames; "
+                "refusing to mark an empty or shorter-than-nfft HDF file complete"
+            )
         self._n_frames += n
         key = meta.get("unit_key")
         if key is not None:
@@ -1505,13 +1613,15 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         frame_index = np.arange(n, dtype=np.int64)
         col_f = lambda lst: np.asarray(lst, dtype=np.float64).reshape(n, 1)
         col_u = lambda lst, dt: np.asarray(lst, dtype=dt).reshape(n, 1)
-        tmp = str(path) + ".tmp.npz"
         Path(path).parent.mkdir(parents=True, exist_ok=True)
-        np.savez_compressed(
-            tmp,
+        atomic_savez_compressed(
+            Path(path),
             # --- chime_detector_outputs schema (single pilot) ---
             schema_name=np.asarray(PER_PILOT_PRODUCT_SCHEMA_NAME),
             schema_revision=np.asarray(PER_PILOT_PRODUCT_SCHEMA_REVISION, dtype=np.int64),
+            source_event_key_schema_version=np.asarray(
+                SOURCE_EVENT_KEY_SCHEMA_VERSION
+            ),
             decision_contract_json=np.asarray(current_decision_contract_json()),
             physical_channel=np.asarray([self._physical_channel], dtype=np.int32),
             freq_id=np.asarray([self._freq_id], dtype=np.int64),
@@ -1590,10 +1700,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 -1 if self._spectral_sense == SPECTRAL_SENSE_INVERTED else 1,
                 dtype=np.int64,
             ),
-            unit_keys=np.asarray(sorted(str(k) for k in self._keys)),
-            unit_order=np.asarray([str(k) for k in self._unit_order]),
+            unit_keys=np.asarray(sorted(str(k) for k in self._keys), dtype=str),
+            unit_order=np.asarray(
+                [str(k) for k in self._unit_order], dtype=str
+            ),
             source_event_keys=np.asarray(
-                [source_event_key(k, self._freq_id) for k in self._unit_order]
+                [source_event_key(k, self._freq_id) for k in self._unit_order],
+                dtype=str,
             ),
             # --- per-unit absolute-time axis (aligned to unit_order) -----------
             # per-frame time = unit_time0_ctime[u] + frame_in_unit[f]*nfft
@@ -1602,7 +1715,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             unit_time0_fpga=np.asarray(self._unit_time0_fpga, dtype=np.uint64),
             unit_event_id=np.asarray(self._unit_event_id, dtype=np.int64),
             unit_delta_time=np.asarray(self._unit_delta_time, dtype=np.float64),
-            archive_version=np.asarray([str(s) for s in self._unit_archive_version]),
+            archive_version=np.asarray(
+                [str(s) for s in self._unit_archive_version], dtype=str
+            ),
             max_chunks_per_file=np.asarray(
                 -1 if self._max_chunks_per_file is None
                 else int(self._max_chunks_per_file),
@@ -1630,7 +1745,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             detector_version=np.asarray(self._detector_version),
             mask_rule=np.asarray(NORMALIZED_POSITIVE_EXCESS_MASK_RULE),
         )
-        Path(tmp).replace(path)
 
     def summary(self) -> Mapping[str, Any]:
         masked = int(sum(self._reject_mask)) if self._reject_mask else 0

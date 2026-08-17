@@ -428,6 +428,18 @@ def _resolve_pilot_request(
     with no flags the pilot comes from the sidecar; an explicit flag must agree
     with it (a mismatched channel would run the detector against the wrong
     weight row); with neither a sidecar nor a flag, refuse rather than guess."""
+    try:
+        tolerance = float(tolerance_hz)
+    except (TypeError, ValueError) as exc:
+        raise SystemExit(
+            "detect: --pilot-frequency-tolerance-hz must be finite and "
+            "nonnegative"
+        ) from exc
+    if not math.isfinite(tolerance) or tolerance < 0.0:
+        raise SystemExit(
+            "detect: --pilot-frequency-tolerance-hz must be finite and "
+            "nonnegative"
+        )
     if physical_channel is not None and dtv_pilot_mhz is not None:
         raise SystemExit("Use either --physical-channel or --dtv-pilot-mhz, not both.")
     sidecar_hz, sidecar_path = _sidecar_pilot_hz(input_path)
@@ -445,11 +457,11 @@ def _resolve_pilot_request(
         return None, sidecar_hz / HZ_PER_MHZ
     if sidecar_hz is not None:
         requested_hz = (
-            physical_channel_to_pilot_hz(int(physical_channel))
+            physical_channel_to_pilot_hz(physical_channel)
             if physical_channel is not None
             else float(dtv_pilot_mhz) * HZ_PER_MHZ
         )
-        if abs(requested_hz - sidecar_hz) > float(tolerance_hz):
+        if abs(requested_hz - sidecar_hz) > tolerance:
             raise SystemExit(
                 f"detect: requested pilot {requested_hz / HZ_PER_MHZ:.6f} MHz "
                 f"disagrees with the matrix sidecar {sidecar_path} "
@@ -520,7 +532,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.physical_channel is not None:
         dtv_pilot_mhz = (
-            physical_channel_to_pilot_hz(int(args.physical_channel)) / HZ_PER_MHZ
+            physical_channel_to_pilot_hz(args.physical_channel) / HZ_PER_MHZ
         )
         selected_weight_layout = weights_bank.layout_for_physical_channel(
             int(args.physical_channel),

@@ -1,0 +1,6 @@
+include setup.py
+recursive-include configs *.json
+include weights/chime_dtv_weights_k128.bin
+include weights/chime_dtv_weights_k128.bin.manifest.json
+include weights/chord_dtv_weights_k64.bin
+include weights/chord_dtv_weights_k64.bin.manifest.json

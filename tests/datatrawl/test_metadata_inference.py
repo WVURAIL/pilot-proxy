@@ -263,3 +263,22 @@ def test_detect_rejects_both_flags(tmp_path):
     matrix = _matrix_with_sidecar(tmp_path)
     with pytest.raises(SystemExit, match="not both"):
         _resolve_pilot_request(14, 470.309441, matrix, tolerance_hz=1.0)
+
+
+@pytest.mark.parametrize(
+    "invalid_tolerance",
+    [float("nan"), float("inf"), -float("inf"), -1.0, "bad"],
+)
+def test_detect_rejects_invalid_pilot_tolerance(
+    tmp_path,
+    invalid_tolerance: object,
+) -> None:
+    matrix = _matrix_with_sidecar(tmp_path)
+
+    with pytest.raises(SystemExit, match="must be finite and nonnegative"):
+        _resolve_pilot_request(
+            14,
+            None,
+            matrix,
+            tolerance_hz=invalid_tolerance,
+        )

@@ -94,6 +94,9 @@ failure.
    analyzer:
    pass criteria, all from the produced npz:
    - `schema_version == pilotproxy_per_pilot_product_v1`;
+   - `source_event_key_schema_version ==
+     pilotproxy_namespaced_source_event_key_v1`, so basename-only development
+     products cannot align across archive or campaign namespaces;
    - `detector_version` embeds the installed `pilot-proxy/<version>`,
      kernel 2.3.0, the library sha, and the profile hash via the weight
      bank;
@@ -116,9 +119,10 @@ failure.
 
 7. **Combine compatibility.** `chime-combine` over two smoke products.
    Pass: succeeds when both products satisfy
-   `pilotproxy_per_pilot_product_v1`; refuses any missing, mismatched, or
-   non-current schema/decision identity. Fine products remain in the
-   authoritative per-channel NPZ files rather than the combined stack.
+   `pilotproxy_per_pilot_product_v1` and the required namespaced source-event
+   identity version; refuses any missing, mismatched, or non-current
+   schema/decision identity. Fine products remain in the authoritative
+   per-channel NPZ files rather than the combined stack.
 
 ## Relaunch configuration
 

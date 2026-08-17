@@ -91,6 +91,65 @@ def test_normalized_rule_exact_boundary() -> None:
     ) == 0
 
 
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("p_target", -1),
+        ("p_target", 1 << 64),
+        ("p_target", 1.0),
+        ("p_target", True),
+        ("p_ref_sum", -1),
+        ("p_ref_sum", 1 << 64),
+        ("p_ref_sum", 1.0),
+        ("p_ref_sum", True),
+        ("target_norm_sq", 0),
+        ("target_norm_sq", -1),
+        ("target_norm_sq", 1.0),
+        ("target_norm_sq", True),
+        ("reference_norm_sum_sq", 0),
+        ("reference_norm_sum_sq", -1),
+        ("reference_norm_sum_sq", 1.0),
+        ("reference_norm_sum_sq", True),
+    ],
+)
+def test_normalized_rule_requires_exact_uint64_domains(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {
+        "p_target": 1,
+        "p_ref_sum": 1,
+        "target_norm_sq": 1,
+        "reference_norm_sum_sq": 1,
+    }
+    arguments[field] = invalid
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        normalized_positive_excess(**arguments)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("target_norm_sq", 0),
+        ("target_norm_sq", 1.0),
+        ("target_norm_sq", True),
+        ("reference_norm_sum_sq", 0),
+        ("reference_norm_sum_sq", 1.0),
+        ("reference_norm_sum_sq", True),
+    ],
+)
+def test_null_power_ratio_requires_exact_positive_norms(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {"target_norm_sq": 1, "reference_norm_sum_sq": 2}
+    arguments[field] = invalid
+
+    with pytest.raises((TypeError, ValueError), match=field):
+        null_power_ratio_from_weight_norms(**arguments)
+
+
 def test_normalized_mask_rule_string_is_current_and_stable() -> None:
     assert NORMALIZED_POSITIVE_EXCESS_MASK_RULE == (
         "valid && (p_target * reference_norm_sum_sq > "
