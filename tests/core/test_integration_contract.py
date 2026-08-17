@@ -127,8 +127,10 @@ def test_receiver_profile_programmatic_roundtrip() -> None:
     [
         ("frame_size_samples", 16_384.9),
         ("frame_size_samples", True),
+        ("frame_size_samples", np.bool_(True)),
         ("num_input_streams", 2.9),
         ("num_input_streams", True),
+        ("num_input_streams", np.bool_(True)),
     ],
 )
 def test_reference_profile_factory_requires_exact_positive_geometry(

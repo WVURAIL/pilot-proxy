@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import operator
 
+import numpy as np
+
 # ATSC 1.0 UHF physical channels are 6 MHz wide. The pilot is offset by
 # 309.441 kHz above the lower channel edge for the 8-VSB RF channel.
 ATSC_CHANNEL_WIDTH_HZ = 6.0e6
@@ -18,7 +20,7 @@ ATSC_CHANNEL_CENTER_OFFSET_HZ = ATSC_CHANNEL_WIDTH_HZ / 2.0
 
 def validate_uhf_physical_channel(channel: int) -> int:
     """Validate and return an ATSC UHF physical channel number."""
-    if isinstance(channel, bool):
+    if isinstance(channel, (bool, np.bool_)):
         raise TypeError("physical channel must be an integer, not a boolean.")
     try:
         value = operator.index(channel)

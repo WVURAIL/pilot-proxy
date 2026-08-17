@@ -10,6 +10,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from pilot_proxy.detector_constants import (
     DEFAULT_DETECTOR_WINDOW_SAMPLES,
     DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET,
@@ -107,7 +109,7 @@ def _require_int(value: Any, field_name: str) -> int:
 
 def _exact_integer(value: object, *, field: str) -> int:
     """Validate programmatic core geometry without truncation."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{field} must be an integer, not a boolean.")
     try:
         return operator.index(value)

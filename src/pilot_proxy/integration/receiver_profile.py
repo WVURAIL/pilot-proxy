@@ -12,6 +12,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from pilot_proxy.detector_constants import (
     DEFAULT_DETECTOR_WINDOW_SAMPLES,
     LOCKED_INPUT_FORMAT as DEFAULT_ADAPTER_OUTPUT_FORMAT,
@@ -62,7 +64,7 @@ SUPPORTED_FREQUENCY_ORDER = frozenset(
 
 def _exact_coarse_channel_index(value: object, *, num_channels: int) -> int:
     """Validate one receiver-grid index without truncation or booleans."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError("coarse channel index must be an integer, not a boolean.")
     try:
         index = operator.index(value)
@@ -78,7 +80,7 @@ def _exact_coarse_channel_index(value: object, *, num_channels: int) -> int:
 
 def _exact_positive_integer(value: object, *, field: str) -> int:
     """Validate one positive programmatic geometry integer."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{field} must be an integer, not a boolean.")
     try:
         result = operator.index(value)

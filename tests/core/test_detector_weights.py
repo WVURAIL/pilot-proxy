@@ -48,7 +48,9 @@ def _core(*, k: int = 128, reference_offset_bins: int = 2) -> DetectorCoreLayout
     [
         ("detector_window_samples", 128.9),
         ("detector_window_samples", True),
+        ("detector_window_samples", np.bool_(True)),
         ("skipped_guard_bins", 1.9),
+        ("skipped_guard_bins", np.bool_(True)),
         ("reference_offset_bins", 2.9),
     ],
 )

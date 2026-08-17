@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from pilot_proxy.integration.detector_core import (
@@ -114,7 +115,7 @@ def test_explicit_frame_and_preprocessing_semantics_are_pinned() -> None:
         assert profile.time_reverse_detector_windows_before_kernel is True
 
 
-@pytest.mark.parametrize("invalid_index", [843.9, True, "843"])
+@pytest.mark.parametrize("invalid_index", [843.9, True, np.bool_(True), "843"])
 @pytest.mark.parametrize(
     "method",
     [
@@ -146,7 +147,7 @@ def test_detector_core_document_is_exact_and_canonical() -> None:
 
 @pytest.mark.parametrize(
     "invalid_window",
-    [64.9, True, "64"],
+    [64.9, True, np.bool_(True), "64"],
 )
 def test_detector_core_programmatic_window_requires_exact_integer(
     invalid_window: object,

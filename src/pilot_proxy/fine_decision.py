@@ -77,7 +77,7 @@ MULTIPLIER_ONE = 1 << MULTIPLIER_Q
 
 
 def _exact_integer(value: object, *, field: str) -> int:
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{field} must be an integer, not a boolean.")
     try:
         return operator.index(value)

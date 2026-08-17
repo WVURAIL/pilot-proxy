@@ -102,7 +102,7 @@ class DetectorCoreLayout:
             "reference_offset_bins",
         ):
             value = getattr(self, field_name)
-            if isinstance(value, bool):
+            if isinstance(value, (bool, np.bool_)):
                 raise TypeError(
                     f"{field_name} must be an integer, not a boolean."
                 )

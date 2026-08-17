@@ -9,6 +9,8 @@ import os
 import re
 from typing import Any, Optional
 
+import numpy as np
+
 from .paths import DEFAULT_CONFIG_H, DEFAULT_LIB_PATH
 
 FINE_WINDOWS_PER_STREAM = 128
@@ -150,7 +152,7 @@ def _raise_library_error(lib: Any, operation: str) -> None:
 
 def _checked_uint64(value: object, *, field: str, positive: bool = False) -> int:
     """Validate one exact integer before crossing the ctypes boundary."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{field} must be an integer, not a boolean.")
     try:
         result = operator.index(value)
@@ -171,7 +173,7 @@ def _checked_c_int(
     maximum: int | None = None,
 ) -> int:
     """Validate an exact integer and its semantic range before ctypes casts it."""
-    if isinstance(value, bool):
+    if isinstance(value, (bool, np.bool_)):
         raise TypeError(f"{field} must be an integer, not a boolean.")
     try:
         result = operator.index(value)
