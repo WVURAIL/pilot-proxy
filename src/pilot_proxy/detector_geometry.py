@@ -46,6 +46,56 @@ def spectral_sense_requires_time_reversal(value: Any | None) -> bool:
     return normalize_spectral_sense(value) == SPECTRAL_SENSE_INVERTED
 
 
+# Half-width of the default designated window in padded fine bins. The
+# predicted line position is exact up to the station's own carrier offset;
+# the survey measured offsets up to ~340 Hz (ch35), so +/-30 bins of
+# 11.92 Hz (+/-358 Hz) covers the observed population with margin.
+DEFAULT_FINE_DESIGNATED_HALF_WIDTH_BINS = 30
+
+
+def predicted_pilot_fine_bin(
+    *,
+    pilot_rf_hz: float,
+    coarse_center_hz: float,
+    sample_rate_hz: float,
+    detector_window_samples: int,
+    nfft: int,
+    spectral_sense: Any | None,
+    pad_factor: int = 2,
+) -> int:
+    """Fine (envelope) bin where the pilot line is predicted to land.
+
+    The weights target the coarse detector bin nearest the pilot, so the
+    carrier appears in the window-axis (envelope) spectrum at the grid
+    quantization residual -- not at zero envelope offset. Designating fine
+    bin 0 therefore watches an empty bin and leaves the actual line inside
+    the CFAR null bulk; this predicts the bin from the channel geometry
+    alone. The inverted-sense mapping is survey-verified: all six strong
+    2018--2026 carriers land within ~30 bins of the prediction, the
+    difference being each station's own carrier offset, which the
+    designated window's half-width absorbs.
+    """
+    windows = int(nfft) // int(detector_window_samples)
+    fine_bins = int(pad_factor) * windows
+    coarse_bin_hz = float(sample_rate_hz) / float(detector_window_samples)
+    fine_bin_hz = coarse_bin_hz / float(fine_bins)
+    sense_sign = (-1.0 if spectral_sense_requires_time_reversal(spectral_sense)
+                  else 1.0)
+    eff_hz = sense_sign * (float(pilot_rf_hz) - float(coarse_center_hz))
+    resid_hz = eff_hz - round(eff_hz / coarse_bin_hz) * coarse_bin_hz
+    return int(round(resid_hz / fine_bin_hz)) % fine_bins
+
+
+def predicted_fine_designated_bins(
+    predicted_bin: int, half_width: int, fine_bins: int
+) -> list[int]:
+    """Designated window ``predicted_bin +/- half_width``, modulo the grid."""
+    if not 0 <= int(half_width) < int(fine_bins) // 2:
+        raise ValueError("half_width must be in [0, fine_bins/2).")
+    return [(int(predicted_bin) + i) % int(fine_bins)
+            for i in range(-int(half_width), int(half_width) + 1)]
+
+
 @dataclass(frozen=True)
 class DetectorFrameLayout:
     """Canonical receiver-frame geometry for one detector decision."""
@@ -285,11 +335,14 @@ __all__ = [
     "STREAM_LAYOUT_SCHEMA_TOKEN",
     "SUPPORTED_COMBINE_MODES",
     "SUPPORTED_SPECTRAL_SENSE",
+    "DEFAULT_FINE_DESIGNATED_HALF_WIDTH_BINS",
     "apply_spectral_sense_to_detector_matrix",
     "block_time_stream_to_detector_matrix",
     "build_stream_map",
     "flatten_feed_channel_streams",
     "normalize_spectral_sense",
+    "predicted_fine_designated_bins",
+    "predicted_pilot_fine_bin",
     "spectral_sense_requires_time_reversal",
     "stack_stream_time_blocks",
     "stream_time_block_to_detector_matrix",

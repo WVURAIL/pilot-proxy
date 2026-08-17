@@ -63,7 +63,13 @@ from pilot_proxy.detector_contract import (
     normalized_positive_excess,
     weight_term_norms_sq,
 )
-from pilot_proxy.detector_geometry import SPECTRAL_SENSE_INVERTED, SPECTRAL_SENSE_NORMAL
+from pilot_proxy.detector_geometry import (
+    DEFAULT_FINE_DESIGNATED_HALF_WIDTH_BINS,
+    SPECTRAL_SENSE_INVERTED,
+    SPECTRAL_SENSE_NORMAL,
+    predicted_fine_designated_bins,
+    predicted_pilot_fine_bin,
+)
 from pilot_proxy.dtv_units import (
     DETECTOR_WINDOW_SAMPLES,
     DTV_BANDWIDTH_HZ,
@@ -903,9 +909,14 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_guard = int(
             opts.get("fine_guard_fine_bins", CFAR_DEFAULT_GUARD_FINE_BINS)
         )
+        self._fine_designated_from_opts = "fine_designated_bins" in opts
         self._fine_designated = [
             int(b) for b in opts.get("fine_designated_bins", [0])
         ]
+        self._fine_designated_half_width = int(
+            opts.get("fine_designated_half_width_bins",
+                     DEFAULT_FINE_DESIGNATED_HALF_WIDTH_BINS)
+        )
         self._fine_census = [
             int(b) for b in opts.get("fine_census_excluded_bins", [])
         ]
@@ -929,6 +940,27 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                               DETECTOR_WINDOW_SAMPLES))
         if int(self._nfft) % int(self._K) != 0:
             raise ValueError("detector analyzer: nfft must be divisible by kernel K")
+
+        # Default designated bins: the *predicted* pilot line, not fine bin 0.
+        # The carrier lands at the coarse-grid quantization residual in the
+        # envelope spectrum, so a bin-0 designation watches an empty bin and
+        # leaves the line in the CFAR null bulk. An explicit
+        # fine_designated_bins option always wins; the out-of-band case keeps
+        # [0] because the product is emitted all-invalid anyway.
+        if not self._fine_designated_from_opts and self._pilot_in_band:
+            _fine_bins = fine_bin_count(int(self._nfft) // int(self._K))
+            _predicted = predicted_pilot_fine_bin(
+                pilot_rf_hz=self._pilot_rf_hz,
+                coarse_center_hz=self._coarse_center_hz,
+                sample_rate_hz=self._sample_rate_hz,
+                detector_window_samples=self._K,
+                nfft=self._nfft,
+                spectral_sense=self._spectral_sense,
+                pad_factor=FINE_PAD_FACTOR,
+            )
+            self._fine_designated = predicted_fine_designated_bins(
+                _predicted, self._fine_designated_half_width, _fine_bins
+            )
 
         bank = None
         weights = opts.get("weights")
