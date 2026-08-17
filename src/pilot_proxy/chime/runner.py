@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import operator
 from collections.abc import Mapping as MappingABC
 from pathlib import Path
 from typing import Any, Callable, Mapping, Protocol, Sequence
@@ -22,6 +23,7 @@ from pilot_proxy.detector_contract import (
     input_coordinate_system_for_weight_coordinate,
     null_power_ratio_from_weight_norms,
     normalize_weight_coordinate_system,
+    normalized_positive_excess,
     normalized_positive_excess_policy,
     weight_term_norms_sq,
 )
@@ -106,6 +108,21 @@ class WeightBankLike(Protocol):
 
 def _normalized_positive_excess_policy() -> dict[str, Any]:
     return normalized_positive_excess_policy()
+
+
+def _exact_detection_u64(value: object, *, field: str) -> int:
+    """Accept exact backend uint64-domain values without coercive casts."""
+    if isinstance(value, (bool, np.bool_)):
+        raise ValueError(f"detector field {field!r} must not be boolean")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise ValueError(
+            f"detector field {field!r} must be an exact unsigned integer"
+        ) from exc
+    if not 0 <= result < (1 << 64):
+        raise ValueError(f"detector field {field!r} is outside uint64")
+    return int(result)
 
 
 def _coerce_int_metadata(value: object, *, field: str) -> int:
@@ -614,8 +631,12 @@ def _append_detection_rows(
     rows = list(detection["results"])
     for local_index, row in enumerate(rows):
         frame = int(output_frame_start) + local_index
-        num = int(row.get("p_target_u64", 0))
-        den = int(row.get("p_ref_sum_u64", 0))
+        num = _exact_detection_u64(
+            row.get("p_target_u64", 0), field="p_target_u64"
+        )
+        den = _exact_detection_u64(
+            row.get("p_ref_sum_u64", 0), field="p_ref_sum_u64"
+        )
         p_target_u64[frame, pilot_index] = np.uint64(num)
         p_ref_sum_u64[frame, pilot_index] = np.uint64(den)
         coarse_power_ratio[frame, pilot_index] = float(
@@ -649,7 +670,12 @@ def _append_detection_rows(
                 pilot_capture_efficiency=float(pilot_capture_efficiency),
             )
         )
-        mask[frame, pilot_index] = int(row.get("mask", 0))
+        mask[frame, pilot_index] = normalized_positive_excess(
+            num,
+            den,
+            target_norm_sq=target_norm_sq,
+            reference_norm_sum_sq=reference_norm_sum_sq,
+        )
         valid[frame, pilot_index] = 1 if den > 0 else 0
 
 
@@ -716,20 +742,27 @@ def run_chime_analysis(
         physical_channels=physical_channels,
         physical_channel_range=physical_channel_range,
     )
-    if stream_map is not None and selected:
+    if selected:
         expected = int(selected[0].num_input_streams)
-        if int(stream_map.num_streams) != expected:
-            raise ValueError(
-                "stream map num_streams does not match CHIME input streams: "
-                f"{stream_map.num_streams} != {expected}"
-            )
-    if selected and int(receiver_profile.num_input_streams) != int(
-        selected[0].num_input_streams
-    ):
-        raise ValueError(
-            "receiver profile num_input_streams does not match CHIME data: "
-            f"{receiver_profile.num_input_streams} != {selected[0].num_input_streams}"
-        )
+        for dataset in selected:
+            observed = int(dataset.num_input_streams)
+            label = f"physical channel {int(dataset.physical_channel)}"
+            if observed != expected:
+                raise ValueError(
+                    "selected CHIME datasets use inconsistent input-stream "
+                    f"counts: {label} has {observed}, expected {expected}."
+                )
+            if stream_map is not None and int(stream_map.num_streams) != observed:
+                raise ValueError(
+                    "stream map num_streams does not match CHIME input streams "
+                    f"for {label}: {stream_map.num_streams} != {observed}"
+                )
+            if int(receiver_profile.num_input_streams) != observed:
+                raise ValueError(
+                    "receiver profile num_input_streams does not match CHIME "
+                    f"data for {label}: {receiver_profile.num_input_streams} "
+                    f"!= {observed}"
+                )
     physical_channel = np.asarray(
         [dataset.physical_channel for dataset in selected], dtype=np.int32
     )
@@ -872,8 +905,19 @@ def run_chime_analysis(
                 weights=weights,
                 kernel=kernel_obj,
             )
-            overflow_count_by_pilot[pilot_index] += np.uint64(
-                int(detection.get("rational_overflow_count", 0))
+            overflow = _exact_detection_u64(
+                detection.get("rational_overflow_count", 0),
+                field="rational_overflow_count",
+            )
+            accumulated_overflow = (
+                int(overflow_count_by_pilot[pilot_index]) + overflow
+            )
+            if accumulated_overflow >= (1 << 64):
+                raise ValueError(
+                    "accumulated rational_overflow_count exceeds uint64"
+                )
+            overflow_count_by_pilot[pilot_index] = np.uint64(
+                accumulated_overflow
             )
             _append_detection_rows(
                 detection=detection,
@@ -902,11 +946,9 @@ def run_chime_analysis(
         quantization_by_pilot.append(first_quantization or {})
 
     valid = ((valid != 0) & (p_ref_sum_u64 != 0)).astype(np.uint8)
-    # The mask rule has a single implementation: detect.py's norm-corrected
-    # positive excess, carried here per row via _append_detection_rows. Only
-    # AND with the final valid (which additionally folds weights_valid); do not
-    # recompute the rule, or an injected detector_fn and this path could
-    # silently disagree.
+    # _append_detection_rows derives the declared norm-corrected rule from the
+    # exact stored marginals rather than trusting a backend mask bit. Fold in
+    # the final validity here, including the weights-validity policy.
     mask = ((valid != 0) & (mask != 0)).astype(np.uint8)
 
     input_manifest_path = write_input_manifest(

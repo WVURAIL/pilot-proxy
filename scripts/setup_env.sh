@@ -13,13 +13,18 @@
 #   VENV_DIR=~/envs/pilot-proxy PYTHON=python3.12 \
 #     DATATRAWL_DIR=~/src/datatrawl PILOT_PROXY_DIR=~/src/pilot-proxy \
 #     bash scripts/setup_env.sh
+# To deliberately adopt and clear a genuine pre-guard Python venv, also set:
+#   PILOT_PROXY_ADOPT_LEGACY_VENV=1
 # =============================================================================
 set -euo pipefail
 
 VENV_DIR="${VENV_DIR:-$HOME/pilot-proxy-datatrawl}"
+PILOT_PROXY_ADOPT_LEGACY_VENV="${PILOT_PROXY_ADOPT_LEGACY_VENV:-0}"
 PYTHON="${PYTHON:-python3.12}"
 DATATRAWL_DIR="${DATATRAWL_DIR:-$HOME/datatrawl}"
 PILOT_PROXY_DIR="${PILOT_PROXY_DIR:-$HOME/pilot-proxy}"
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+VENV_GUARD="${SCRIPT_DIR}/setup_env_guard.py"
 
 if ! command -v "${PYTHON}" >/dev/null 2>&1; then
     echo "ERROR: ${PYTHON} is not on PATH (set PYTHON=... to override)." >&2
@@ -38,11 +43,38 @@ for d in "${DATATRAWL_DIR}" "${PILOT_PROXY_DIR}"; do
 done
 
 # --- venv --------------------------------------------------------------------
+# The next command clears every entry under VENV_DIR. Resolve symlinks, refuse
+# protected/foreign directories, create the target root, and durably bind a
+# sidecar to that directory identity. The sidecar survives --clear, so an
+# interrupted rebuild is safely retryable, but not after deletion/recreation.
+# Validated legacy Python venvs require the explicit adoption opt-in.
+_venv_adoption_args=()
+case "${PILOT_PROXY_ADOPT_LEGACY_VENV}" in
+    0) ;;
+    1) _venv_adoption_args=(--adopt-legacy-venv) ;;
+    *)
+        echo "ERROR: PILOT_PROXY_ADOPT_LEGACY_VENV must be 0 or 1." >&2
+        exit 1
+        ;;
+esac
+VENV_DIR="$(
+    "${PYTHON}" "${VENV_GUARD}" check \
+        --venv "${VENV_DIR}" \
+        --home "${HOME}" \
+        --checkout "${DATATRAWL_DIR}" \
+        --checkout "${PILOT_PROXY_DIR}" \
+        --checkout "${SCRIPT_DIR}/.." \
+        "${_venv_adoption_args[@]}"
+)"
+unset _venv_adoption_args
 echo "==> (re)creating venv at '${VENV_DIR}' with ${PYTHON}"
 # --system-site-packages so the session image's CuPy/CUDA stack stays importable
 # (datatrawl prefers the image's CuPy); PYTHONNOUSERSITE=1 below still blocks
 # ~/.local. The venv's own installs take precedence over the image's packages.
 "${PYTHON}" -m venv --clear --system-site-packages "${VENV_DIR}"
+# A successfully created environment also receives a human-visible marker
+# inside it. Rerun authorization comes from the durable sidecar written above.
+"${PYTHON}" "${VENV_GUARD}" mark --venv "${VENV_DIR}"
 # Keep ~/.local user-site packages from leaking into the venv (persisted on the
 # activate script so every future shell that sources it stays isolated too).
 echo 'export PYTHONNOUSERSITE=1' >> "${VENV_DIR}/bin/activate"

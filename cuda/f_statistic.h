@@ -626,7 +626,8 @@ int FStat_Supports_FusedFine(void);
  * cfar_rank writes mask = 0 (invalid). The calibration inputs
  * (anchor, width, 256-bit bulk mask as 4 uint64 words in
  * bulk_mask_words[0..3] with bin b at word b/64 bit b%64, rank,
- * Q16 multiplier) are runtime-bundle data, not compiled constants.
+ * positive Q16 multiplier in [1, 2^64 - 1]) are runtime-bundle data,
+ * not compiled constants.
  *
  * Outputs: d_mask_out ([batch] int32, 1 = reject; zeroed by this call
  * --- it doubles as the completion counter) and d_fine_power_out

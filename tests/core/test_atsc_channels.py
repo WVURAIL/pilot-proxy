@@ -1,6 +1,7 @@
 # coding=utf-8
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from pilot_proxy.atsc_channels import (
@@ -9,6 +10,9 @@ from pilot_proxy.atsc_channels import (
     physical_channel_to_center_hz,
     physical_channel_to_lower_edge_hz,
     physical_channel_to_pilot_hz,
+)
+from pilot_proxy.integration.weight_generation import (
+    parse_physical_channel_selection,
 )
 
 CHANNEL_14 = 14
@@ -52,3 +56,20 @@ def test_physical_channel_spec_parsing() -> None:
 def test_invalid_physical_channel_raises() -> None:
     with pytest.raises(ValueError):
         physical_channel_to_pilot_hz(BELOW_UHF_CHANNEL_MIN)
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [14.9, True, np.bool_(True), "14"],
+)
+def test_physical_channel_requires_exact_integer(invalid: object) -> None:
+    with pytest.raises(TypeError, match="physical channel.*integer"):
+        physical_channel_to_pilot_hz(invalid)
+
+
+@pytest.mark.parametrize("invalid", [14.9, True, np.bool_(True), "14"])
+def test_explicit_physical_channel_selection_requires_exact_integer(
+    invalid: object,
+) -> None:
+    with pytest.raises(TypeError, match="physical channel.*integer"):
+        parse_physical_channel_selection(physical_channels=[invalid])

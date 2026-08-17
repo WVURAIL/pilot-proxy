@@ -17,6 +17,7 @@ quantity ``R_coarse - 1`` is retained only as an explicitly named diagnostic.
 from __future__ import annotations
 
 from fractions import Fraction
+import operator
 
 import numpy as np
 
@@ -33,6 +34,7 @@ COARSE_POWER_RATIO_SCALE = 2.0
 UNIT_NORMALIZED_POWER_RATIO = 1.0
 UNIT_DATA_SHELF_POWER = 1.0
 DEFAULT_THRESHOLD_MAX_DENOMINATOR = 2**32
+UINT64_MAX = (1 << 64) - 1
 
 PILOT_BELOW_DATA_DB = 11.3
 PILOT_CAPTURE_EFFICIENCY = 1.0
@@ -41,6 +43,19 @@ FINE_BIN_WIDTH_HZ = REFERENCE_CHANNEL_WIDTH_HZ / DETECTOR_WINDOW_SAMPLES
 EFFECTIVE_BIN_BW_HZ = ENBW * FINE_BIN_WIDTH_HZ
 N_SHELF_BINS = DTV_BANDWIDTH_HZ / EFFECTIVE_BIN_BW_HZ
 SPREADING_LOSS_DB = DB_POWER_FACTOR * np.log10(N_SHELF_BINS)
+
+
+def _exact_positive_uint64(value: object, *, field: str) -> int:
+    """Validate exact positive kernel-rational inputs."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+    if not 1 <= result <= UINT64_MAX:
+        raise ValueError(f"{field} must be in [1, 2**64 - 1].")
+    return result
 
 
 def _scalar_if_scalar(value, *inputs):
@@ -228,12 +243,14 @@ def power_terms_to_normalized_coarse_power_ratio(
     reference_norm_sum_sq: int,
 ):
     """Return ``num*reference_norm_sum_sq/(den*target_norm_sq)``."""
-    target_norm = int(target_norm_sq)
-    reference_norm = int(reference_norm_sum_sq)
-    if target_norm <= 0:
-        raise ValueError("target_norm_sq must be positive.")
-    if reference_norm <= 0:
-        raise ValueError("reference_norm_sum_sq must be positive.")
+    target_norm = _exact_positive_uint64(
+        target_norm_sq,
+        field="target_norm_sq",
+    )
+    reference_norm = _exact_positive_uint64(
+        reference_norm_sum_sq,
+        field="reference_norm_sum_sq",
+    )
     numerator = np.asarray(num, dtype=np.float64)
     denominator = np.asarray(den, dtype=np.float64)
     out = np.full(
@@ -385,23 +402,36 @@ def normalized_power_ratio_threshold_to_half_rational(
 ) -> tuple[int, int]:
     """Convert ``Q`` threshold to the kernel's ``P_target/P_ref_sum`` ratio."""
     threshold = float(normalized_power_ratio_threshold)
-    target_norm = int(target_norm_sq)
-    reference_norm = int(reference_norm_sum_sq)
-    max_den = int(max_denominator)
+    target_norm = _exact_positive_uint64(
+        target_norm_sq,
+        field="target_norm_sq",
+    )
+    reference_norm = _exact_positive_uint64(
+        reference_norm_sum_sq,
+        field="reference_norm_sum_sq",
+    )
+    max_den = _exact_positive_uint64(
+        max_denominator,
+        field="max_denominator",
+    )
     if threshold < 0.0 or not np.isfinite(threshold):
         raise ValueError(
             "normalized_power_ratio_threshold must be non-negative and finite."
         )
-    if target_norm <= 0:
-        raise ValueError("target_norm_sq must be positive.")
-    if reference_norm <= 0:
-        raise ValueError("reference_norm_sum_sq must be positive.")
-    if max_den <= 0:
-        raise ValueError("max_denominator must be positive.")
     half = Fraction(
         threshold * float(target_norm) / float(reference_norm)
     ).limit_denominator(max_den)
-    return int(half.numerator), int(half.denominator)
+    numerator = int(half.numerator)
+    denominator = int(half.denominator)
+    if not 0 <= numerator <= UINT64_MAX:
+        raise ValueError(
+            "kernel threshold numerator must be in [0, 2**64 - 1]."
+        )
+    if not 1 <= denominator <= UINT64_MAX:
+        raise ValueError(
+            "kernel threshold denominator must be in [1, 2**64 - 1]."
+        )
+    return numerator, denominator
 
 
 def data_shelf_snr_db_to_half_threshold_rational(
@@ -446,6 +476,18 @@ def data_shelf_snr_threshold_fields(
     pilot_capture_efficiency: float = PILOT_CAPTURE_EFFICIENCY,
 ) -> dict[str, float | int]:
     """Return public and kernel thresholds in the same norm-corrected coordinate."""
+    target_norm = _exact_positive_uint64(
+        target_norm_sq,
+        field="target_norm_sq",
+    )
+    reference_norm = _exact_positive_uint64(
+        reference_norm_sum_sq,
+        field="reference_norm_sum_sq",
+    )
+    max_den = _exact_positive_uint64(
+        max_denominator,
+        field="max_denominator",
+    )
     pilot_excess_db = float(
         data_shelf_snr_db_to_pilot_excess_db(
             data_shelf_snr_db,
@@ -464,15 +506,15 @@ def data_shelf_snr_threshold_fields(
     )
     null_power_ratio = float(
         COARSE_POWER_RATIO_SCALE
-        * float(target_norm_sq)
-        / float(reference_norm_sum_sq)
+        * float(target_norm)
+        / float(reference_norm)
     )
     coarse_threshold = float(null_power_ratio * normalized_threshold)
     half_num, half_den = normalized_power_ratio_threshold_to_half_rational(
         normalized_threshold,
-        target_norm_sq=target_norm_sq,
-        reference_norm_sum_sq=reference_norm_sum_sq,
-        max_denominator=max_denominator,
+        target_norm_sq=target_norm,
+        reference_norm_sum_sq=reference_norm,
+        max_denominator=max_den,
     )
     spreading = (
         spreading_loss_db_from_bin_enbw_hz(
@@ -491,10 +533,10 @@ def data_shelf_snr_threshold_fields(
         "threshold_half_num": int(half_num),
         "threshold_half_den": int(half_den),
         "threshold_half_float": float(half_num / half_den),
-        "target_norm_sq": int(target_norm_sq),
-        "reference_norm_sum_sq": int(reference_norm_sum_sq),
+        "target_norm_sq": target_norm,
+        "reference_norm_sum_sq": reference_norm,
         "null_power_ratio": null_power_ratio,
-        "max_denominator": int(max_denominator),
+        "max_denominator": max_den,
         "pilot_below_data_db": float(
             pilot_below_data_db
         ),

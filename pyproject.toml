@@ -77,15 +77,6 @@ version = {attr = "pilot_proxy._version.__version__"}
 where = ["src"]
 include = ["pilot_proxy*"]
 
-[tool.setuptools.data-files]
-"share/pilot-proxy/weights" = [
-  "weights/chime_dtv_weights_k128.bin",
-  "weights/chime_dtv_weights_k128.bin.manifest.json",
-]
-"share/pilot-proxy/configs/detector_core" = ["configs/detector_core/*.json"]
-"share/pilot-proxy/configs/receiver_profiles" = ["configs/receiver_profiles/*.json"]
-"share/pilot-proxy/configs/stream_maps" = ["configs/stream_maps/*.json"]
-
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 markers = [

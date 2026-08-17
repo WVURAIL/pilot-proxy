@@ -105,13 +105,15 @@ section.
 
    ```bash
    pilot-proxy chime-scan --inventory-name chime-pilots --select <freq_id> \
-     --max-files 50 --checkpoint-every 10 --output-dir runs/h0check_<freq_id>
+     --max-files 50 --checkpoint-every 10 --allow-partial \
+     --output-dir runs/h0check_<freq_id>
    pilot-proxy validate-products --run-dir runs/h0check_<freq_id>
    ```
 
    Aim for at least 1000 valid frames per channel. The `--max-files 50` bound
-   is an initial allocation; use the measured valid-frame count rather than
-   assuming it is sufficient.
+   is an intentionally partial initial allocation, recorded as such in
+   `scan_scope.json`; use the measured valid-frame count rather than assuming
+   it is sufficient.
 
 4. **Apply the acceptance criteria** to each channel using `stats.json` and
    `chime_detector_outputs.npz`. The numerical bounds below are planned

@@ -120,6 +120,33 @@ def test_cadc_scan_enumerates_by_freq_id(tmp_path, monkeypatch):
     assert (work / "844.npz").exists()
     assert not (work / "752.npz").exists()   # listed in inventory but not selected
     assert (out / "chime_detector_outputs.npz").exists()  # combined product
+    # The injected backend always says mask=0. The canonical product instead
+    # derives the policy it declares from exact powers and stored weight norms.
+    with np.load(work / "829.npz", allow_pickle=False) as product:
+        num = np.asarray(product["p_target_u64"]).reshape(-1)
+        den = np.asarray(product["p_ref_sum_u64"]).reshape(-1)
+        target_norm = int(np.asarray(product["target_norm_sq"]).reshape(-1)[0])
+        reference_norm = int(
+            np.asarray(product["reference_norm_sum_sq"]).reshape(-1)[0]
+        )
+        expected = [
+            int(int(n) * reference_norm > target_norm * int(d)) if d else 0
+            for n, d in zip(num, den)
+        ]
+        assert np.asarray(product["reject_mask"]).reshape(-1).tolist() == expected
+    scope = json.loads((out / "scan_scope.json").read_text())
+    assert scope["complete"] is True
+    assert scope["totals"] == {
+        "requested": 2,
+        "enumerated": 2,
+        "completed": 2,
+        "capped": 0,
+        "failed": 0,
+        "quarantined": 0,
+        "unprocessed": 0,
+        "extra_completed": 0,
+        "pilots_requested": 2,
+    }
 
 
 # -- #3: explicit per-source option validation -------------------------------
@@ -162,6 +189,303 @@ def test_all_units_failed_is_reported(tmp_path, monkeypatch):
         run_chime_scan(input_dir=data, output_dir=tmp_path / "o", source="local",
                        analyzer="pilot-proxy-detector", select="844",
                        analyzer_options=_cpu_detector_options(), verbose=False)
+    scope = json.loads((tmp_path / "o" / "scan_scope.json").read_text())
+    assert scope["pilots"][0]["enumerated"] == 1
+    assert scope["pilots"][0]["completed"] == 0
+    assert scope["pilots"][0]["quarantined"] == 1
+
+
+def test_partial_scan_requires_explicit_allow_partial(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    for event in ("a", "b"):
+        fmt.make_synth_file(
+            str(data / f"baseband_{event}_844.h5"),
+            n_time=NFFT * 2,
+            n_feeds=N_FEEDS,
+            f_center_mhz=CHAN_MHZ[844],
+            f_tone_bb=1300.0,
+            seed=ord(event),
+        )
+    out = tmp_path / "out"
+    kwargs = {
+        "input_dir": data,
+        "output_dir": out,
+        "source": "local",
+        "analyzer": "pilot-proxy-detector",
+        "select": "844",
+        "max_files": 1,
+        "analyzer_options": _cpu_detector_options(),
+        "verbose": False,
+    }
+
+    with pytest.raises(SystemExit, match="--allow-partial"):
+        run_chime_scan(**kwargs)
+
+    scope = json.loads((out / "scan_scope.json").read_text())
+    assert scope["pilots"][0]["enumerated"] == 2
+    assert scope["pilots"][0]["completed"] == 1
+    assert scope["pilots"][0]["unprocessed"] == 1
+    assert scope["complete"] is False
+
+    result = run_chime_scan(**kwargs, allow_partial=True)
+    assert result["scan_scope"] == out / "scan_scope.json"
+    assert (out / "chime_detector_outputs.npz").exists()
+
+
+def test_chunk_cap_records_capped_units_and_requires_allow_partial(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    fmt.make_synth_file(
+        str(data / "baseband_a_844.h5"),
+        n_time=NFFT * 2,
+        n_feeds=N_FEEDS,
+        f_center_mhz=CHAN_MHZ[844],
+        f_tone_bb=1300.0,
+        seed=1,
+    )
+    out = tmp_path / "out"
+    kwargs = {
+        "input_dir": data,
+        "output_dir": out,
+        "source": "local",
+        "analyzer": "pilot-proxy-detector",
+        "select": "844",
+        "max_chunks_per_file": 1,
+        "analyzer_options": _cpu_detector_options(),
+        "verbose": False,
+    }
+
+    with pytest.raises(SystemExit, match="--allow-partial"):
+        run_chime_scan(**kwargs)
+
+    assert not (out / "chime_detector_outputs.npz").exists()
+    with np.load(out / "_per_pilot" / "844.npz", allow_pickle=False) as product:
+        assert np.asarray(product["frame_index"]).shape == (1,)
+    scope = json.loads((out / "scan_scope.json").read_text())
+    pilot = scope["pilots"][0]
+    assert scope["max_chunks_per_file"] == 1
+    assert scope["complete"] is False
+    assert pilot["status"] == "capped"
+    assert pilot["completed"] == 0
+    assert pilot["capped"] == 1
+    assert len(pilot["capped_unit_keys"]) == 1
+    assert pilot["unprocessed"] == 0
+
+    result = run_chime_scan(**kwargs, allow_partial=True)
+    assert result["scan_scope"] == out / "scan_scope.json"
+    assert (out / "chime_detector_outputs.npz").exists()
+
+
+def test_aborted_scan_counts_only_current_unit_failed(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    for event in (1, 2, 3):
+        fmt.make_synth_file(
+            str(data / f"baseband_{event}_844.h5"),
+            n_time=NFFT,
+            n_feeds=N_FEEDS,
+            f_center_mhz=CHAN_MHZ[844],
+            f_tone_bb=1300.0,
+            seed=event,
+        )
+    calls = 0
+
+    def fail_second_unit(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected second-unit failure")
+        return _stub_detector_fn(**kwargs)
+
+    options = _cpu_detector_options()
+    options["detector_fn"] = fail_second_unit
+    out = tmp_path / "out"
+
+    with pytest.raises(RuntimeError, match="second-unit failure"):
+        run_chime_scan(
+            input_dir=data,
+            output_dir=out,
+            source="local",
+            analyzer="pilot-proxy-detector",
+            select="844",
+            analyzer_options=options,
+            verbose=False,
+        )
+
+    pilot = json.loads((out / "scan_scope.json").read_text())["pilots"][0]
+    assert pilot["completed"] == 0
+    assert pilot["non_durable_completed"] == 1
+    assert pilot["failed"] == 1
+    assert pilot["unprocessed"] == 2
+
+
+def test_later_pilot_units_remain_accounted_when_earlier_pilot_aborts(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    for freq_id in (829, 844):
+        fmt.make_synth_file(
+            str(data / f"baseband_1_{freq_id}.h5"),
+            n_time=NFFT,
+            n_feeds=N_FEEDS,
+            f_center_mhz=CHAN_MHZ[freq_id],
+            f_tone_bb=1300.0,
+            seed=freq_id,
+        )
+
+    def fail_first_pilot(**kwargs):
+        del kwargs
+        raise RuntimeError("injected first-pilot failure")
+
+    options = _cpu_detector_options()
+    options["detector_fn"] = fail_first_pilot
+    out = tmp_path / "out"
+
+    with pytest.raises(RuntimeError, match="first-pilot failure"):
+        run_chime_scan(
+            input_dir=data,
+            output_dir=out,
+            source="local",
+            analyzer="pilot-proxy-detector",
+            select="829,844",
+            analyzer_options=options,
+            verbose=False,
+        )
+
+    entries = {
+        tuple(entry["selection"]): entry
+        for entry in json.loads((out / "scan_scope.json").read_text())["pilots"]
+    }
+    assert entries[(829,)]["failed"] == 1
+    assert entries[(829,)]["unprocessed"] == 0
+    assert entries[(844,)]["status"] == "pending"
+    assert entries[(844,)]["unprocessed"] == 1
+
+
+def test_shorter_than_nfft_unit_is_not_committed(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    fmt.make_synth_file(
+        str(data / "baseband_1_844.h5"),
+        n_time=NFFT - 1,
+        n_feeds=N_FEEDS,
+        f_center_mhz=CHAN_MHZ[844],
+        f_tone_bb=1300.0,
+        seed=1,
+    )
+    out = tmp_path / "out"
+
+    with pytest.raises(RuntimeError, match="zero complete nfft frames"):
+        run_chime_scan(
+            input_dir=data,
+            output_dir=out,
+            source="local",
+            analyzer="pilot-proxy-detector",
+            select="844",
+            analyzer_options=_cpu_detector_options(),
+            verbose=False,
+        )
+
+    pilot = json.loads((out / "scan_scope.json").read_text())["pilots"][0]
+    assert pilot["completed"] == 0
+    assert pilot["failed"] == 1
+    assert not (out / "_per_pilot" / "844.npz").exists()
+
+
+def test_resume_rejects_saved_units_missing_from_current_enumeration(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    paths = []
+    for event in (1, 2):
+        path = data / f"baseband_{event}_844.h5"
+        fmt.make_synth_file(
+            str(path),
+            n_time=NFFT,
+            n_feeds=N_FEEDS,
+            f_center_mhz=CHAN_MHZ[844],
+            f_tone_bb=1300.0,
+            seed=event,
+        )
+        paths.append(path)
+    out = tmp_path / "out"
+    kwargs = {
+        "input_dir": data,
+        "output_dir": out,
+        "source": "local",
+        "analyzer": "pilot-proxy-detector",
+        "select": "844",
+        "analyzer_options": _cpu_detector_options(),
+        "verbose": False,
+    }
+    run_chime_scan(**kwargs)
+    paths[1].unlink()
+
+    with pytest.raises(SystemExit, match="absent|stale|current enumeration"):
+        run_chime_scan(**kwargs, allow_partial=True)
+
+    pilot = json.loads((out / "scan_scope.json").read_text())["pilots"][0]
+    assert pilot["extra_completed"] == 1
+    assert pilot["extra_unit_keys"] == [str(paths[1].resolve())]
+    assert pilot["status"] == "stale"
+
+
+def test_enumerated_scope_is_persisted_before_pipeline_runs(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(REPO_ROOT)
+    data = tmp_path / "data"
+    data.mkdir()
+    for event in (1, 2):
+        fmt.make_synth_file(
+            str(data / f"baseband_{event}_844.h5"),
+            n_time=NFFT,
+            n_feeds=N_FEEDS,
+            f_center_mhz=CHAN_MHZ[844],
+            f_tone_bb=1300.0,
+            seed=event,
+        )
+
+    import datatrawl.pipeline as _dpl
+
+    class _Stop(Exception):
+        pass
+
+    def inspect_scope_before_work(*args, out_path, **kwargs):
+        del args, kwargs
+        scope_path = Path(out_path).parents[1] / "scan_scope.json"
+        scope = json.loads(scope_path.read_text())
+        pilot = scope["pilots"][0]
+        assert pilot["requested"] == 2
+        assert pilot["enumerated"] == 2
+        assert pilot["unprocessed"] == 2
+        assert scope["totals"]["requested"] == 2
+        assert scope["totals"]["pilots_requested"] == 1
+        raise _Stop
+
+    monkeypatch.setattr(_dpl, "run", inspect_scope_before_work)
+
+    with pytest.raises(_Stop):
+        run_chime_scan(
+            input_dir=data,
+            output_dir=tmp_path / "out",
+            source="local",
+            analyzer="pilot-proxy-detector",
+            select="844",
+            analyzer_options=_cpu_detector_options(),
+            verbose=False,
+        )
 
 
 def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):

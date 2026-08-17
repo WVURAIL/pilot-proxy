@@ -77,10 +77,13 @@ def _detector_fn_factory(reject):
             pk = pk[None, ...]
         results = []
         for b in range(int(pk.shape[0])):
+            should_reject = bool(reject(state["i"]))
             results.append({
                 "block_index": b,
-                "mask": int(bool(reject(state["i"]))),
-                "p_target_u64": 10,
+                "mask": int(should_reject),
+                # Canonical reject bits are derived from powers + exact norms,
+                # so make this stand-in unambiguously high or low.
+                "p_target_u64": 1_000_000 if should_reject else 0,
                 "p_ref_sum_u64": 100,
             })
             state["i"] += 1
@@ -333,6 +336,9 @@ def test_current_product_provenance_and_reject_mask(tmp_path):
     assert str(np.asarray(got["schema_version"])) == PER_PILOT_PRODUCT_SCHEMA_TOKEN
     assert str(np.asarray(got["schema_name"])) == "pilotproxy_per_pilot_product"
     assert int(np.asarray(got["schema_revision"])) == 1
+    assert str(np.asarray(got["source_event_key_schema_version"])) == (
+        "pilotproxy_namespaced_source_event_key_v1"
+    )
     stored_contract = json.loads(
         str(np.asarray(got["decision_contract_json"]).reshape(()).item())
     )

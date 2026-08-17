@@ -17,7 +17,6 @@ detected pilot without re-opening the raw files.
 """
 from __future__ import annotations
 
-import os
 import re
 
 # f0: top of the CHIME 400-800 MHz band. The coarse channel width is the
@@ -49,13 +48,13 @@ def source_event_key(unit_key: object, freq_id: int) -> str:
     *same events in the same order*, but each pilot's files carry a *different*
     freq_id token, so the raw keys never match. Removing this product's own
     freq_id token (the one immediately before the extension) collapses
-    ``baseband_<event>_829.h5`` and ``baseband_<event>_844.h5`` to the same
-    ``baseband_<event>.h5``, so two pilots from the same event compare equal while
-    two from different events do not. Keys that don't carry the token are returned
-    basename-only (still comparable, just not normalized).
+    ``baseband_<event>_829.h5`` and ``baseband_<event>_844.h5`` within the same
+    source namespace to the same key.  The directory/URI prefix is deliberately
+    retained: two independent campaigns can reuse a filename without becoming
+    the same acquisition. Keys that do not carry the suffix are returned intact.
     """
-    base = os.path.basename(str(unit_key))
-    return re.sub(rf"_{int(freq_id)}(?=\.)", "", base)
+    key = str(unit_key).replace("\\", "/")
+    return re.sub(rf"_{int(freq_id)}(?=\.[^/]+$)", "", key)
 
 
 __all__ = [

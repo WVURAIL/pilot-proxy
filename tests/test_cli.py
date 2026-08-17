@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 import os
-from types import SimpleNamespace
+import sys
+from pathlib import Path
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
 from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
 from pilot_proxy import cli
-from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH
+from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH, PACKAGE_ROOT
 
 CUSTOM_GNURADIO_PYTHON = "/custom/gnuradio-python"
 SMOKE_IQ_SAMPLES = "128"
@@ -39,20 +41,30 @@ HISTOGRAM_BINS_TEXT = "12"
 REFERENCE_PROFILE = str(CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json")
 
 
+def _package_bridge_snapshot(env: dict[str, str]) -> tuple[Path, list[str], Path]:
+    bridge = Path(env["PYTHONPATH"].split(os.pathsep)[0])
+    entries = sorted(path.name for path in bridge.iterdir())
+    package_target = (bridge / "pilot_proxy").resolve()
+    return bridge, entries, package_target
+
+
 def test_generate_atsc_uses_gnuradio_python_and_disables_user_site(
     monkeypatch,
     tmp_path,
 ) -> None:
     calls = []
+    bridge_snapshots = []
 
     # noinspection PyShadowingNames
 
     def fake_run(cmd, *, cwd, env):
+        bridge_snapshots.append(_package_bridge_snapshot(env))
         calls.append((cmd, cwd, env))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     monkeypatch.setenv("PYTHONPATH", "existing")
+    monkeypatch.chdir(tmp_path)
 
     result = cli.main(
         [
@@ -78,9 +90,93 @@ def test_generate_atsc_uses_gnuradio_python_and_disables_user_site(
         "-m",
         "pilot_proxy.testbench.generate_atsc_signal",
     ]
-    assert cwd == cli.REPO_ROOT
+    assert cwd == tmp_path
     assert env["PYTHONNOUSERSITE"] == "1"
-    assert env["PYTHONPATH"].split(os.pathsep)[0] == str(cli.SRC_ROOT)
+    assert env["PYTHONPATH"].split(os.pathsep)[1:] == ["existing"]
+    bridge, entries, package_target = bridge_snapshots[0]
+    assert not bridge.exists()  # lifetime is scoped to the child invocation
+    assert entries == ["pilot_proxy"]
+    assert package_target == PACKAGE_ROOT
+
+
+def test_installed_wrapper_preserves_cwd_without_fake_source_path(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+
+    def fake_run(cmd, *, cwd, env):
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "SOURCE_CHECKOUT_ROOT", None)
+    monkeypatch.setenv("PYTHONPATH", "caller-supplied")
+    monkeypatch.chdir(tmp_path)
+
+    result = cli.main(
+        [
+            "audit-atsc",
+            "--input-iq",
+            "relative-input.cfile",
+            "--output-json",
+            "relative-output.json",
+        ]
+    )
+
+    assert result == 0
+    _, cwd, env = calls[0]
+    assert cwd == tmp_path
+    assert env["PYTHONPATH"] == "caller-supplied"
+
+
+def test_installed_wrapper_exposes_package_to_secondary_python(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls = []
+    bridge_snapshots = []
+
+    def fake_run(cmd, *, cwd, env):
+        bridge_snapshots.append(_package_bridge_snapshot(env))
+        calls.append((cmd, cwd, env))
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(cli.subprocess, "run", fake_run)
+    monkeypatch.setattr(cli, "SOURCE_CHECKOUT_ROOT", None)
+    monkeypatch.setenv("PYTHONPATH", "caller-supplied")
+    monkeypatch.chdir(tmp_path)
+
+    result = cli.main(
+        [
+            "generate-atsc",
+            "--gnuradio-python",
+            CUSTOM_GNURADIO_PYTHON,
+            "--output-iq",
+            "relative-output.cfile",
+            "--output-ts",
+            "relative-output.ts",
+            "--num-iq-samples",
+            SMOKE_IQ_SAMPLES,
+            "--num-ts-packets",
+            SMOKE_TS_PACKETS,
+        ]
+    )
+
+    assert result == 0
+    cmd, cwd, env = calls[0]
+    assert cmd[0] == CUSTOM_GNURADIO_PYTHON
+    assert cwd == tmp_path
+    pythonpath = env["PYTHONPATH"].split(os.pathsep)
+    assert pythonpath[1:] == ["caller-supplied"]
+    assert pythonpath[0] != str(PACKAGE_ROOT.parent)
+    bridge, entries, package_target = bridge_snapshots[0]
+    assert not bridge.exists()
+    assert entries == ["pilot_proxy"]
+    assert package_target == PACKAGE_ROOT
+    assert cmd[cmd.index("--output-iq") + 1] == str(
+        (tmp_path / "relative-output.cfile").resolve()
+    )
 
 
 def test_audit_atsc_forwards_fail_on_quality(monkeypatch, tmp_path) -> None:
@@ -629,3 +725,30 @@ def test_chime_run_wrapper_does_not_forward_detector_window(monkeypatch, tmp_pat
     cmd = calls[0][0]
     assert cmd[:3] == [cli.sys.executable, "-m", "pilot_proxy.chime.runner"]
     assert "--detector-window-samples" not in cmd
+
+
+def test_chime_scan_forwards_explicit_allow_partial(monkeypatch, tmp_path) -> None:
+    calls = []
+    fake_scan = ModuleType("pilot_proxy.datatrawl_plugins.scan")
+
+    def fake_run_chime_scan(**kwargs):
+        calls.append(kwargs)
+
+    fake_scan.run_chime_scan = fake_run_chime_scan  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, fake_scan.__name__, fake_scan)
+
+    result = cli.main(
+        [
+            "chime-scan",
+            "--input-dir",
+            str(tmp_path / "input"),
+            "--output-dir",
+            str(tmp_path / "output"),
+            "--select",
+            "844",
+            "--allow-partial",
+        ]
+    )
+
+    assert result == 0
+    assert calls[0]["allow_partial"] is True

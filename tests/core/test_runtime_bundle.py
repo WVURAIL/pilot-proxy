@@ -93,6 +93,27 @@ def test_export_runtime_weight_bundle_writes_compact_profiles(tmp_path) -> None:
     assert report["num_errors"] == 0
 
 
+@pytest.mark.parametrize("invalid_channel", [14.9, True, "14"])
+def test_export_runtime_bundle_requires_exact_physical_channels(
+    tmp_path,
+    invalid_channel: object,
+) -> None:
+    with pytest.raises(TypeError, match="physical channel.*integer"):
+        export_runtime_weight_bundle(
+            receiver_profile_path=(
+                CONFIGS_DIR / "receiver_profiles" / "reference_800mhz_pfb.json"
+            ),
+            detector_core_profile_path=(
+                CONFIGS_DIR
+                / "detector_core"
+                / "pilotproxy_cuda_local_reference_power_ratio.json"
+            ),
+            physical_channels=[invalid_channel],
+            weight_coordinate_system=WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+            output_dir=tmp_path / "bundle",
+        )
+
+
 def test_chime_runtime_bundle_post_coordinate_uses_detector_coordinate(
     tmp_path,
 ) -> None:
@@ -542,6 +563,50 @@ def test_calibrated_fine_block_rejects_inconsistencies(tmp_path) -> None:
     assert any("provenance" in c for c in checks)
     assert any("status" in c for c in checks)
     assert any("decision_version" in c for c in checks)
+
+
+@pytest.mark.parametrize("multiplier_q16", (-1, 0, 1 << 64))
+def test_calibrated_fine_block_rejects_multiplier_outside_uint64(
+    tmp_path, multiplier_q16
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    block["cfar_multiplier_q16"] = multiplier_q16
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    assert any(
+        error["check"]
+        == "pilot_profiles.fine_calibration[0].cfar_multiplier_q16"
+        and "uint64 range" in error["message"]
+        for error in report["errors"]
+    )
+
+
+@pytest.mark.parametrize("invalid_word", ("-0x1", "0x10000000000000000"))
+def test_calibrated_fine_block_rejects_mask_word_outside_uint64(
+    tmp_path, invalid_word
+) -> None:
+    output_dir, outputs = _export_reference_bundle(tmp_path)
+    profiles = json.loads(outputs["pilot_profiles"].read_text("utf-8"))
+    block, _bulk = _calibrated_fine_block()
+    block["bulk_mask_words_hex"][0] = invalid_word
+    profiles["profiles"][0]["fine_calibration"] = block
+    _rewrite_profiles(outputs, profiles)
+
+    report = validate_runtime_weight_bundle(bundle_dir=output_dir)
+
+    assert report["valid"] is False
+    assert any(
+        error["check"]
+        == "pilot_profiles.fine_calibration[0].bulk_mask_words_hex"
+        and "uint64" in error["message"]
+        for error in report["errors"]
+    )
 
 
 def test_calibrated_fine_block_requires_complete_provenance(tmp_path) -> None:

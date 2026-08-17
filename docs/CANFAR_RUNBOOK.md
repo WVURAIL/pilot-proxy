@@ -92,7 +92,12 @@ source ~/pilot-proxy-datatrawl/bin/activate
 Do not point `VENV_DIR` at an environment that must be preserved. The script
 uses `python -m venv --clear`, installs both repositories in editable mode,
 checks plugin discovery, and builds the CUDA library when a GPU and `nvcc` are
-available.
+available. It refuses protected, checkout-overlapping, and unowned non-empty
+targets and keeps its ownership record beside the environment so an interrupted
+rebuild can be retried. If this is the first guarded rerun of a genuine virtual
+environment created by an older checkout, add
+`PILOT_PROXY_ADOPT_LEGACY_VENV=1` to the command once; do not use that opt-in for
+an arbitrary directory.
 
 In the expected CANFAR notebook environment, the home directory is on
 persistent `/arc` storage. Activate the virtual environment in every new
@@ -288,8 +293,13 @@ pilot-proxy chime-scan \
   --analyzer pilot-proxy-detector \
   --select 844 \
   --max-files 1 \
-  --max-chunks-per-file 1
+  --max-chunks-per-file 1 \
+  --allow-partial
 ```
+
+The file cap intentionally leaves part of the inventory unprocessed, so this
+bounded smoke test explicitly acknowledges that with `--allow-partial`.
+`scan_scope.json` remains the authoritative record of the omitted units.
 
 Validate the combined products and generate the diagnostic plots:
 
@@ -332,14 +342,17 @@ p = sorted(glob.glob(os.path.expanduser(
         recursive=True))
 z = np.load(p[-1], allow_pickle=False)
 sv = str(np.asarray(z["schema_version"]).reshape(()).item())
+ev = str(np.asarray(z["source_event_key_schema_version"]).reshape(()).item())
 dv = str(np.asarray(z["detector_version"]).reshape(()).item())
 fs = str(np.asarray(z["fine_status"]).reshape(()).item())
 assert sv == "pilotproxy_per_pilot_product_v1", sv
+assert ev == "pilotproxy_namespaced_source_event_key_v1", ev
 assert "pilot-proxy/" in dv and "kernel=2.3.0" in dv, dv
 assert fs == "enabled", fs
 assert z["fine_power_ratio"].shape[1] == int(z["fine_num_bins"]), z["fine_power_ratio"].shape
 r = np.asarray(z["fine_null_bulk_exceedance_fraction"]).reshape(-1)
 print("schema", sv)
+print("event identity", ev)
 print("fine bins", int(z["fine_num_bins"]),
       "| null-bulk exceedance median",
       float(np.nanmedian(r)))
@@ -359,7 +372,8 @@ count continues without duplication and `validate-products` passes on the
 result. If the bounded run finishes before it can be interrupted, relaunch
 the identical command with a higher `--max-files` on the same directory;
 the relaunch restores the checkpoint and continues through the same resume
-path.
+path. Keep `--allow-partial` on these deliberately bounded resume commands;
+remove both the file cap and that acknowledgement for the production run.
 
 ---
 
@@ -530,7 +544,8 @@ pilot-proxy chime-scan \
   --analyzer pilot-proxy-detector \
   --select 844 \
   --max-files 1 \
-  --max-chunks-per-file 1
+  --max-chunks-per-file 1 \
+  --allow-partial
 ```
 
 If the filenames do not end in `_<freq_id>.h5`, pass the parser override with

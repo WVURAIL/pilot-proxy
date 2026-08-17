@@ -2652,6 +2652,10 @@ void FStat_Compute_FusedFineMask_U64(
         record_api_error("cfar_rank must be in [0, 256).");
         return;
     }
+    if (multiplier_q16 == 0) {
+        record_api_error("multiplier_q16 must be in [1, 2^64 - 1].");
+        return;
+    }
     if (h->detector_rows_per_block % FSTAT_FINE_WINDOWS_PER_STREAM != 0) {
         record_api_error(
             "detector_rows_per_block must be a multiple of the frozen "

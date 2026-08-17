@@ -8,6 +8,7 @@ import hashlib
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from pilot_proxy.integration.detector_core import (
@@ -114,6 +115,27 @@ def test_explicit_frame_and_preprocessing_semantics_are_pinned() -> None:
         assert profile.time_reverse_detector_windows_before_kernel is True
 
 
+@pytest.mark.parametrize("invalid_index", [843.9, True, np.bool_(True), "843"])
+@pytest.mark.parametrize(
+    "method",
+    [
+        "coarse_channel_center_hz",
+        "frame_center_normalized",
+        "forbidden_dc_normalized",
+    ],
+)
+def test_receiver_grid_methods_require_exact_channel_index(
+    method: str,
+    invalid_index: object,
+) -> None:
+    profile = load_receiver_profile(
+        RECEIVER_PROFILE_DIR / "chime_dtv_fengine.json"
+    )
+
+    with pytest.raises(TypeError, match="coarse channel index.*integer"):
+        getattr(profile, method)(invalid_index)
+
+
 def test_detector_core_document_is_exact_and_canonical() -> None:
     raw = _read_json(DETECTOR_CORE_PATH)
     profile = load_detector_core_profile(DETECTOR_CORE_PATH)
@@ -121,6 +143,30 @@ def test_detector_core_document_is_exact_and_canonical() -> None:
     assert profile.to_dict() == raw
     assert DetectorCoreProfile.from_dict(raw).to_dict() == raw
     assert profile.reference_offset_bins == profile.skipped_guard_bins + 1
+
+
+@pytest.mark.parametrize(
+    "invalid_window",
+    [64.9, True, np.bool_(True), "64"],
+)
+def test_detector_core_programmatic_window_requires_exact_integer(
+    invalid_window: object,
+) -> None:
+    profile = load_detector_core_profile(DETECTOR_CORE_PATH)
+
+    with pytest.raises(TypeError, match="detector_window_samples.*integer"):
+        profile.with_detector_window_samples(invalid_window)
+
+
+def test_detector_core_replace_rejects_fractional_fixed_point_limit() -> None:
+    from dataclasses import replace
+
+    profile = load_detector_core_profile(DETECTOR_CORE_PATH)
+    limits = dict(profile.fixed_point_limits)
+    limits["power_sum_accumulator_bits"] = 64.9
+
+    with pytest.raises(TypeError, match="fixed_point_limits.*integer"):
+        replace(profile, fixed_point_limits=limits)
 
 
 def test_detector_core_rejects_partial_document() -> None:

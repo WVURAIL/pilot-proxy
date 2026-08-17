@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import ctypes
+import operator
 import os
 import re
 from typing import Any, Optional
 
+import numpy as np
+
 from .paths import DEFAULT_CONFIG_H, DEFAULT_LIB_PATH
+
+FINE_WINDOWS_PER_STREAM = 128
 
 
 # =============================================================================
@@ -143,6 +148,48 @@ def _raise_library_error(lib: Any, operation: str) -> None:
     message = _last_error_from_library(lib)
     if message:
         raise RuntimeError(f"{operation} failed: {message}")
+
+
+def _checked_uint64(value: object, *, field: str, positive: bool = False) -> int:
+    """Validate one exact integer before crossing the ctypes boundary."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+    lower = 1 if positive else 0
+    if not lower <= result < (1 << 64):
+        interval = "[1, 2**64 - 1]" if positive else "[0, 2**64 - 1]"
+        raise ValueError(f"{field} must be in uint64 range {interval}; got {result}.")
+    return result
+
+
+def _checked_c_int(
+    value: object,
+    *,
+    field: str,
+    minimum: int | None = None,
+    maximum: int | None = None,
+) -> int:
+    """Validate an exact integer and its semantic range before ctypes casts it."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+
+    bits = ctypes.sizeof(ctypes.c_int) * 8
+    c_min = -(1 << (bits - 1))
+    c_max = (1 << (bits - 1)) - 1
+    lower = c_min if minimum is None else max(c_min, minimum)
+    upper = c_max if maximum is None else min(c_max, maximum)
+    if not lower <= result <= upper:
+        raise ValueError(
+            f"{field} must be in range [{lower}, {upper}]; got {result}."
+        )
+    return result
 
 
 class FStatKernel:
@@ -436,17 +483,34 @@ class FStatKernel:
 
     def create_handle(self, M: int, d_in: Any, d_out: Any):
         """Create a kernel handle (use as a context manager)."""
-        return _KernelHandle(self._lib, M, d_in, d_out)
+        rows = _checked_c_int(
+            M,
+            field="detector_rows_per_block",
+            minimum=1,
+        )
+        return _KernelHandle(self._lib, rows, d_in, d_out)
 
     def create_detector_matrix_handle(
         self, detector_rows_per_block: int, d_in: Any, d_out: Any
     ):
         """Create a handle using descriptive detector-matrix terminology."""
-        return self.create_handle(int(detector_rows_per_block), d_in, d_out)
+        return self.create_handle(detector_rows_per_block, d_in, d_out)
 
     def create_batch_handle(self, M: int, batch: int, d_in: Any, d_out: Any):
         """Create a batched kernel handle (use as a context manager)."""
-        return _KernelHandle(self._lib, M, d_in, d_out, batch=batch)
+        rows = _checked_c_int(
+            M,
+            field="detector_rows_per_block",
+            minimum=1,
+        )
+        batch_count = _checked_c_int(batch, field="batch", minimum=1)
+        return _KernelHandle(
+            self._lib,
+            rows,
+            d_in,
+            d_out,
+            batch=batch_count,
+        )
 
     def create_detector_matrix_batch_handle(
         self,
@@ -457,12 +521,17 @@ class FStatKernel:
     ):
         """Create a batched handle using descriptive detector-matrix terminology."""
         return self.create_batch_handle(
-            int(detector_rows_per_block), batch, d_in, d_out
+            detector_rows_per_block, batch, d_in, d_out
         )
 
     def create_raw(self, M: int, in_ptr: int, out_ptr: int):
         """Create a handle from raw pointers."""
-        handle = self._lib.FStat_Create(in_ptr, out_ptr, M)
+        rows = _checked_c_int(
+            M,
+            field="detector_rows_per_block",
+            minimum=1,
+        )
+        handle = self._lib.FStat_Create(in_ptr, out_ptr, rows)
         if not handle:
             raise RuntimeError(
                 self.last_error() or "FStat_Create returned NULL."
@@ -473,7 +542,18 @@ class FStatKernel:
         """Create a batched handle from raw pointers."""
         if not getattr(self, "_has_batch_create", False):
             raise RuntimeError("Kernel library does not expose FStat_Create_Batch.")
-        handle = self._lib.FStat_Create_Batch(in_ptr, out_ptr, M, batch)
+        rows = _checked_c_int(
+            M,
+            field="detector_rows_per_block",
+            minimum=1,
+        )
+        batch_count = _checked_c_int(batch, field="batch", minimum=1)
+        handle = self._lib.FStat_Create_Batch(
+            in_ptr,
+            out_ptr,
+            rows,
+            batch_count,
+        )
         if not handle:
             raise RuntimeError(
                 self.last_error() or "FStat_Create_Batch returned NULL."
@@ -591,12 +671,37 @@ class FStatKernel:
             raise RuntimeError(
                 "Kernel library does not expose FStat_Compute_FinePowers_U64."
             )
+        terms = _checked_c_int(
+            self.specs.num_weight_terms,
+            field="num_weight_terms",
+            minimum=1,
+        )
+        stream_capacity: int | None = None
+        features = getattr(self, "features", None)
+        if features is not None:
+            block_threads = int(getattr(features, "block_threads", 0))
+            grid_max_blocks = int(getattr(features, "grid_max_blocks", 0))
+            if block_threads > 0 and grid_max_blocks > 0:
+                stream_capacity = block_threads * grid_max_blocks
+        streams = _checked_c_int(
+            num_streams,
+            field="num_streams",
+            minimum=1,
+            maximum=stream_capacity,
+        )
+        windows = _checked_c_int(
+            windows_per_stream,
+            field="windows_per_stream",
+            minimum=FINE_WINDOWS_PER_STREAM,
+            maximum=FINE_WINDOWS_PER_STREAM,
+        )
+        batch_count = _checked_c_int(batch, field="batch", minimum=1)
         self._lib.FStat_Compute_FinePowers_U64(
             row_projections_ptr,
-            int(self.specs.num_weight_terms),
-            int(num_streams),
-            int(windows_per_stream),
-            int(batch),
+            terms,
+            streams,
+            windows,
+            batch_count,
             fine_powers_ptr,
         )
         self._check_call("FStat_Compute_FinePowers_U64")
@@ -685,18 +790,45 @@ class FStatKernel:
                 "Kernel library does not expose "
                 "FStat_Compute_FusedFineMask_U64."
             )
-        words = list(int(w) for w in bulk_mask_words)
-        if len(words) != 4:
+        raw_words = list(bulk_mask_words)
+        if len(raw_words) != 4:
             raise ValueError("bulk_mask_words must contain 4 uint64 words.")
+        words = [
+            _checked_uint64(word, field=f"bulk_mask_words[{index}]")
+            for index, word in enumerate(raw_words)
+        ]
+        multiplier = _checked_uint64(
+            multiplier_q16,
+            field="multiplier_q16",
+            positive=True,
+        )
+        anchor = _checked_c_int(
+            anchor_bin,
+            field="anchor_bin",
+            minimum=0,
+            maximum=255,
+        )
+        half_width = _checked_c_int(
+            designated_half_width,
+            field="designated_half_width",
+            minimum=0,
+            maximum=127,
+        )
+        rank = _checked_c_int(
+            cfar_rank,
+            field="cfar_rank",
+            minimum=0,
+            maximum=255,
+        )
         arr = (ctypes.c_uint64 * 4)(*words)
         self._lib.FStat_Compute_FusedFineMask_U64(
             handle,
             weights_ptr,
-            int(anchor_bin),
-            int(designated_half_width),
+            anchor,
+            half_width,
             arr,
-            int(cfar_rank),
-            int(multiplier_q16),
+            rank,
+            multiplier,
             fine_powers_ptr,
             mask_ptr,
             powers_ptr if powers_ptr else None,
@@ -720,15 +852,20 @@ class FStatKernel:
                 "Kernel library does not expose "
                 "FStat_Compute_NumDen_Mask_RationalHalf."
             )
-        if int(threshold_half_denominator) <= 0:
-            raise ValueError("threshold_half_denominator must be positive.")
-        if int(threshold_half_numerator) < 0:
-            raise ValueError("threshold_half_numerator must be non-negative.")
+        numerator = _checked_uint64(
+            threshold_half_numerator,
+            field="threshold_half_numerator",
+        )
+        denominator = _checked_uint64(
+            threshold_half_denominator,
+            field="threshold_half_denominator",
+            positive=True,
+        )
         self._lib.FStat_Compute_NumDen_Mask_RationalHalf(
             handle,
             weights_ptr,
-            ctypes.c_ulonglong(int(threshold_half_numerator)),
-            ctypes.c_ulonglong(int(threshold_half_denominator)),
+            ctypes.c_ulonglong(numerator),
+            ctypes.c_ulonglong(denominator),
             numerator_ptr,
             denominator_ptr,
             mask_ptr,
@@ -752,15 +889,20 @@ class FStatKernel:
                 "Kernel library does not expose "
                 "FStat_Compute_NumDen_Mask_RationalHalf_WithOverflowCount."
             )
-        if int(threshold_half_denominator) <= 0:
-            raise ValueError("threshold_half_denominator must be positive.")
-        if int(threshold_half_numerator) < 0:
-            raise ValueError("threshold_half_numerator must be non-negative.")
+        numerator = _checked_uint64(
+            threshold_half_numerator,
+            field="threshold_half_numerator",
+        )
+        denominator = _checked_uint64(
+            threshold_half_denominator,
+            field="threshold_half_denominator",
+            positive=True,
+        )
         self._lib.FStat_Compute_NumDen_Mask_RationalHalf_WithOverflowCount(
             handle,
             weights_ptr,
-            ctypes.c_ulonglong(int(threshold_half_numerator)),
-            ctypes.c_ulonglong(int(threshold_half_denominator)),
+            ctypes.c_ulonglong(numerator),
+            ctypes.c_ulonglong(denominator),
             numerator_ptr,
             denominator_ptr,
             mask_ptr,

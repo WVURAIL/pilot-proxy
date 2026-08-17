@@ -122,6 +122,43 @@ def test_receiver_profile_programmatic_roundtrip() -> None:
     assert reparsed.coarse_channel_width_hz == pytest.approx(390_625.0)
 
 
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("frame_size_samples", 16_384.9),
+        ("frame_size_samples", True),
+        ("frame_size_samples", np.bool_(True)),
+        ("num_input_streams", 2.9),
+        ("num_input_streams", True),
+        ("num_input_streams", np.bool_(True)),
+    ],
+)
+def test_reference_profile_factory_requires_exact_positive_geometry(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {"frame_size_samples": 16_384, "num_input_streams": 2}
+    arguments[field] = invalid
+
+    with pytest.raises(TypeError, match=field):
+        default_reference_receiver_profile(**arguments)
+
+
+@pytest.mark.parametrize(
+    "invalid_rf_hz",
+    [True, False, "1", float("nan"), float("inf"), -1.0],
+)
+def test_receiver_frequency_mapping_rejects_invalid_rf(
+    invalid_rf_hz: object,
+) -> None:
+    profile = load_receiver_profile(
+        CONFIGS_DIR / "receiver_profiles" / "chord_dtv_fengine.json"
+    )
+
+    with pytest.raises(ValueError, match="rf_hz"):
+        receiver_frequency_to_channel(invalid_rf_hz, profile)
+
+
 def test_chime_example_profile_values() -> None:
     profile = load_receiver_profile(
         CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"

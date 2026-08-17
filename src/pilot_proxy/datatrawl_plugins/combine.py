@@ -17,13 +17,36 @@ the per-frame 2-D arrays shaped ``(frames, 1)``.
 """
 from __future__ import annotations
 
+import json
+import os
+import shutil
+import socket
+import stat
+import tempfile
+import uuid
+from contextlib import contextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence
+from typing import Any, Iterator, Mapping, Sequence
+
+import fcntl
 
 import numpy as np
 
+from pilot_proxy.atomic_io import (
+    atomic_write_json,
+    create_temporary_sibling,
+    fsync_directory,
+    fsync_file,
+)
 from pilot_proxy.chime.products import (
+    CHIME_COMBINE_CANONICAL_RELATIVE_PATHS,
+    CHIME_COMBINE_GENERATION_MANIFEST_FILENAME,
+    CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA,
+    CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME,
+    CHIME_COMBINE_PUBLISH_LOCK_FILENAME,
     SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,
+    atomic_savez_compressed,
     ensure_run_dirs,
     write_detector_outputs,
     write_integrated_spectra,
@@ -40,12 +63,203 @@ from pilot_proxy.detector_contract import (
 from pilot_proxy.provenance import (
     detector_version_build_id,
     detector_version_geometry,
+    file_sha256,
 )
 from pilot_proxy.product_contract import (
     CurrentProductContractError,
+    exact_integer_array,
+    exact_integer_scalar,
     validate_current_product_identity,
 )
-import json
+
+from ._chime_coarse import source_event_key
+
+
+_PUBLISH_JOURNAL_NAME = CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+_PUBLISH_JOURNAL_SCHEMA = "pilotproxy_combine_publish_journal_v1"
+_PUBLISH_LOCK_NAME = CHIME_COMBINE_PUBLISH_LOCK_FILENAME
+_PUBLISH_LOCK_SCHEMA = "pilotproxy_combine_publish_lock_v1"
+_TRANSACTION_DIR_PREFIX = ".pilotproxy-combine-transaction."
+_GENERATION_LABEL = "combine_generation_manifest"
+
+
+@dataclass(frozen=True)
+class _PublishOwnership:
+    path: Path
+    fd: int
+    owner_token: str
+
+    def assert_owned(self) -> None:
+        """Fail if the fixed lock path no longer names our locked inode/token."""
+        try:
+            descriptor_stat = os.fstat(self.fd)
+            path_stat = os.stat(self.path, follow_symlinks=False)
+        except OSError as exc:
+            raise RuntimeError("combine: publish lock ownership was lost") from exc
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or descriptor_stat.st_nlink != 1
+            or path_stat.st_nlink != 1
+            or descriptor_stat.st_dev != path_stat.st_dev
+            or descriptor_stat.st_ino != path_stat.st_ino
+        ):
+            raise RuntimeError("combine: publish lock ownership was replaced")
+        try:
+            raw = os.pread(self.fd, 65_536, 0)
+            payload = json.loads(raw)
+        except (OSError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError("combine: publish lock metadata is invalid") from exc
+        if payload.get("owner_token") != self.owner_token:
+            raise RuntimeError("combine: publish lock owner token changed")
+
+
+def _write_locked_metadata(fd: int, payload: Mapping[str, Any]) -> None:
+    encoded = (
+        json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    ).encode("utf-8")
+    os.ftruncate(fd, 0)
+    offset = 0
+    while offset < len(encoded):
+        offset += os.pwrite(fd, encoded[offset:], offset)
+    os.fsync(fd)
+
+
+def _unlock_and_close(fd: int) -> None:
+    """Always close a lock descriptor, even if explicit unlock is unsupported."""
+    try:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+@contextmanager
+def _exclusive_publish_ownership(run_dir: Path) -> Iterator[_PublishOwnership]:
+    """Acquire a crash-recoverable single-writer lock for one run directory.
+
+    ``O_EXCL`` owns a fresh path. If a crashed process left the path behind,
+    acquiring its kernel ``flock`` proves that no live publisher still holds
+    it; the same inode is then safely retokenized without an unlink/recreate
+    race. A live holder makes acquisition fail closed.
+    """
+    run = Path(run_dir).absolute()
+    _resolved_directory_root(run, what="run directory")
+    lock_path = run / _PUBLISH_LOCK_NAME
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    fd: int | None = None
+    for _ in range(16):
+        created = False
+        try:
+            fd = os.open(lock_path, flags | os.O_CREAT | os.O_EXCL, 0o666)
+            created = True
+        except FileExistsError:
+            try:
+                fd = os.open(lock_path, flags)
+            except FileNotFoundError:
+                continue
+            except OSError as exc:
+                raise RuntimeError(
+                    f"combine: existing publish lock is unsafe: {lock_path}"
+                ) from exc
+        except OSError as exc:
+            raise RuntimeError(
+                f"combine: cannot create exclusive publish lock {lock_path}"
+            ) from exc
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            # A failed kernel-lock call must not leak this descriptor. A path
+            # freshly created by this attempt may also be removed, but only
+            # while it still names our one-link inode; an existing publisher's
+            # path is never unlinked here.
+            try:
+                descriptor_stat = os.fstat(fd)
+                try:
+                    path_stat = os.stat(lock_path, follow_symlinks=False)
+                except OSError:
+                    path_stat = None
+                if (
+                    created
+                    and path_stat is not None
+                    and stat.S_ISREG(path_stat.st_mode)
+                    and descriptor_stat.st_nlink == 1
+                    and path_stat.st_nlink == 1
+                    and descriptor_stat.st_dev == path_stat.st_dev
+                    and descriptor_stat.st_ino == path_stat.st_ino
+                ):
+                    lock_path.unlink()
+                    fsync_directory(run)
+            finally:
+                os.close(fd)
+            if isinstance(exc, BlockingIOError):
+                raise RuntimeError(
+                    "combine: another process owns the canonical publish lock; "
+                    "retry after that chime-combine process finishes"
+                ) from exc
+            raise RuntimeError(
+                "combine: kernel publish-lock acquisition failed; refusing "
+                "to publish without exclusive ownership"
+            ) from exc
+        try:
+            descriptor_stat = os.fstat(fd)
+            path_stat = os.stat(lock_path, follow_symlinks=False)
+        except OSError:
+            _unlock_and_close(fd)
+            fd = None
+            continue
+        if (
+            not stat.S_ISREG(path_stat.st_mode)
+            or descriptor_stat.st_nlink != 1
+            or path_stat.st_nlink != 1
+            or descriptor_stat.st_dev != path_stat.st_dev
+            or descriptor_stat.st_ino != path_stat.st_ino
+        ):
+            _unlock_and_close(fd)
+            raise RuntimeError(
+                "combine: publish lock must be one regular, non-hard-linked file"
+            )
+        break
+    if fd is None:
+        raise RuntimeError("combine: could not establish publish-lock ownership")
+
+    token = uuid.uuid4().hex
+    ownership = _PublishOwnership(lock_path, fd, token)
+    initialized = False
+    try:
+        _write_locked_metadata(
+            fd,
+            {
+                "schema_version": _PUBLISH_LOCK_SCHEMA,
+                "owner_token": token,
+                "pid": os.getpid(),
+                "hostname": socket.gethostname(),
+            },
+        )
+        fsync_directory(run)
+        ownership.assert_owned()
+        initialized = True
+        yield ownership
+    finally:
+        try:
+            descriptor_stat = os.fstat(fd)
+            try:
+                path_stat = os.stat(lock_path, follow_symlinks=False)
+            except OSError:
+                path_stat = None
+            same_safe_inode = bool(
+                path_stat is not None
+                and stat.S_ISREG(path_stat.st_mode)
+                and descriptor_stat.st_nlink == 1
+                and path_stat.st_nlink == 1
+                and descriptor_stat.st_dev == path_stat.st_dev
+                and descriptor_stat.st_ino == path_stat.st_ino
+            )
+            if same_safe_inode:
+                if initialized:
+                    ownership.assert_owned()
+                lock_path.unlink()
+                fsync_directory(run)
+        finally:
+            _unlock_and_close(fd)
 
 
 def _write_json(path: Path, obj: Any) -> None:
@@ -57,8 +271,12 @@ class CombineEmptyIntersectionError(ValueError):
 
 
 def _label(z: Mapping[str, Any]) -> str:
-    ch = int(np.asarray(z["physical_channel"]).reshape(-1)[0])
-    fid = int(np.asarray(z["freq_id"]).reshape(-1)[0])
+    ch = exact_integer_scalar(
+        z, "physical_channel", dtype=np.int32, minimum=14, maximum=69
+    )
+    fid = exact_integer_scalar(
+        z, "freq_id", dtype=np.int64, minimum=0, maximum=1023
+    )
     return f"ch{ch}/freq_id {fid}"
 
 
@@ -71,6 +289,151 @@ _PER_FRAME_KEYS = (
     "reject_mask", "valid", "baseband_power_linear",
     "frame_unit_index", "frame_in_unit",
 )
+
+
+def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return available acquisition metadata keyed by the namespaced event key."""
+    events = np.asarray(z["source_event_keys"]).reshape(-1).astype(str)
+    fields = (
+        "unit_event_id",
+        "unit_time0_ctime",
+        "unit_time0_fpga",
+        "unit_delta_time",
+    )
+    arrays: dict[str, np.ndarray] = {}
+    for field in fields:
+        if field not in z:
+            continue
+        values = np.asarray(z[field])
+        if values.ndim != 1:
+            raise ValueError(
+                f"combine: {_label(z)} field {field!r} must be 1D"
+            )
+        if field == "unit_event_id":
+            values = exact_integer_array(
+                values,
+                field=field,
+                dtype=np.int64,
+                ndim=1,
+                minimum=-1,
+            )
+        elif field == "unit_time0_fpga":
+            values = exact_integer_array(
+                values,
+                field=field,
+                dtype=np.uint64,
+                ndim=1,
+                minimum=0,
+            )
+        elif values.dtype != np.dtype(np.float64) or np.any(np.isinf(values)):
+            raise ValueError(
+                f"combine: {_label(z)} field {field!r} must be float64 "
+                "without infinite values"
+            )
+        if field == "unit_delta_time" and np.any(
+            np.isfinite(values) & (values <= 0.0)
+        ):
+            raise ValueError(
+                f"combine: {_label(z)} finite unit_delta_time must be positive"
+            )
+        if values.size != events.size:
+            raise ValueError(
+                f"combine: {_label(z)} field {field!r} has {values.size} "
+                f"entries for {events.size} source events"
+            )
+        arrays[field] = values
+    out: dict[str, dict[str, Any]] = {}
+    for index, event in enumerate(events.tolist()):
+        if event in out:
+            raise ValueError(
+                f"combine: {_label(z)} records source event {event!r} more "
+                "than once; event timing would be ambiguous"
+            )
+        out[event] = {field: values[index] for field, values in arrays.items()}
+    return out
+
+
+def _known_event_metadata(field: str, value: Any) -> bool:
+    if field == "unit_event_id":
+        return int(value) >= 0
+    if field == "unit_time0_fpga":
+        return int(value) > 0
+    numeric = float(value)
+    return bool(np.isfinite(numeric) and (field != "unit_delta_time" or numeric > 0.0))
+
+
+def _validate_common_event_metadata(
+    products: Sequence[Mapping[str, Any]], common_events: set[str]
+) -> None:
+    """Refuse path-matched events whose acquisition IDs or clocks disagree."""
+    metadata = [_unit_metadata_by_event(z) for z in products]
+    for event in sorted(common_events):
+        per_pilot = [rows[event] for rows in metadata]
+        for field in (
+            "unit_event_id",
+            "unit_time0_fpga",
+            "unit_delta_time",
+            "unit_time0_ctime",
+        ):
+            known = [row[field] for row in per_pilot if field in row and _known_event_metadata(field, row[field])]
+            if not known:
+                continue
+            if len(known) != len(products):
+                raise ValueError(
+                    f"combine: common source event {event!r} has {field} "
+                    "metadata for only some pilots; refusing an unverifiable "
+                    "cross-channel alignment"
+                )
+            if field in {"unit_event_id", "unit_time0_fpga"}:
+                consistent = len({int(value) for value in known}) == 1
+            elif field == "unit_delta_time":
+                consistent = bool(
+                    np.allclose(
+                        np.asarray(known, dtype=np.float64),
+                        float(known[0]),
+                        rtol=1e-12,
+                        atol=0.0,
+                    )
+                )
+            else:
+                delta_times = [
+                    float(row.get("unit_delta_time", 0.0)) for row in per_pilot
+                ]
+                sample_periods = [
+                    value
+                    for value in delta_times
+                    if np.isfinite(value) and value > 0.0
+                ]
+                if len(sample_periods) != len(products):
+                    raise ValueError(
+                        f"combine: common source event {event!r} has start "
+                        "times but lacks a sample period for some pilots; "
+                        "timing alignment is unverifiable"
+                    )
+                values = np.asarray(known, dtype=np.float64)
+                earliest = float(np.min(values))
+                latest = float(np.max(values))
+                half_sample = 0.5 * min(sample_periods)
+                # A displacement of half a sample is already ambiguous.  A
+                # direct subtraction can round an exact half-sample offset
+                # slightly downward, so reserve one timestamp ULP at each end
+                # before comparing.  This is deliberately conservative at
+                # large epoch values, where sub-sample timing may itself be
+                # unrepresentable as float64.
+                timestamp_margin = abs(float(np.spacing(earliest))) + abs(
+                    float(np.spacing(latest))
+                )
+                tolerance = max(
+                    0.0,
+                    float(np.nextafter(half_sample, 0.0)) - timestamp_margin,
+                )
+                spread = latest - earliest
+                consistent = bool(spread == 0.0 or spread < tolerance)
+            if not consistent:
+                raise ValueError(
+                    f"combine: common source event {event!r} disagrees on "
+                    f"{field} across pilots: {known!r}"
+                )
 
 
 def _align_frames(
@@ -110,6 +473,8 @@ def _align_frames(
             f"{counts}. Stack a channel subset instead (`pilot-proxy "
             f"chime-combine --report` shows the presence histogram and the "
             f"drop-curve; `--drop <freq_ids>` excludes channels).")
+    common_events = {identity.split("\0")[0] for identity in common}
+    _validate_common_event_metadata(products, common_events)
     ref_ids = identities[0].tolist()
     canonical = [i for i in ref_ids if i in common]
     aligned: list[dict[str, Any]] = []
@@ -156,6 +521,40 @@ def _align_frames(
     return aligned, frame_index, info
 
 
+def _validate_source_event_key_derivation(
+    product: Mapping[str, Any], *, context: str
+) -> None:
+    """Recompute namespaced keys; a marker alone is not identity evidence."""
+    try:
+        freq_id = exact_integer_scalar(
+            product, "freq_id", dtype=np.int64, minimum=0, maximum=1023
+        )
+        unit_order = [
+            str(value)
+            for value in np.asarray(product["unit_order"]).reshape(-1)
+        ]
+        recorded = [
+            str(value)
+            for value in np.asarray(product["source_event_keys"]).reshape(-1)
+        ]
+    except KeyError as exc:
+        raise ValueError(
+            f"combine: {context}: missing event-identity field {exc.args[0]!r}"
+        ) from exc
+    if len(unit_order) != len(recorded):
+        raise ValueError(
+            f"combine: {context}: unit_order has {len(unit_order)} entries but "
+            f"source_event_keys has {len(recorded)}"
+        )
+    expected = [source_event_key(key, freq_id) for key in unit_order]
+    if recorded != expected:
+        raise ValueError(
+            f"combine: {context}: source_event_keys are not the required "
+            "namespaced derivation of unit_order and freq_id; regenerate this "
+            "per-pilot product"
+        )
+
+
 def report_products(product_paths: Sequence[str | Path]) -> str:
     """Event-presence report for a set of per-pilot products: per-pilot counts,
     the presence histogram, the all-pilot intersection, and the greedy
@@ -167,9 +566,10 @@ def report_products(product_paths: Sequence[str | Path]) -> str:
         with np.load(str(p), allow_pickle=False) as z:
             product = {name: z[name] for name in z.files}
         validate_current_product_identity(product)
+        _validate_source_event_key_derivation(product, context=str(p))
         label = (
-            f"ch{int(np.asarray(product['physical_channel']).reshape(-1)[0])}"
-            + f"/freq_id {int(np.asarray(product['freq_id']).reshape(-1)[0])}"
+            f"ch{exact_integer_scalar(product, 'physical_channel', dtype=np.int32, minimum=14, maximum=69)}"
+            + f"/freq_id {exact_integer_scalar(product, 'freq_id', dtype=np.int64, minimum=0, maximum=1023)}"
         )
         events = set(
             np.asarray(product["source_event_keys"]).reshape(-1).astype(str).tolist()
@@ -243,12 +643,18 @@ def _load_sorted(product_paths: Sequence[str | Path]) -> list[Mapping[str, Any]]
             validate_current_product_identity(loaded)
         except CurrentProductContractError as exc:
             raise ValueError(f"combine: {path}: {exc}") from exc
+        _validate_source_event_key_derivation(loaded, context=str(path))
         products.append(loaded)
     products.sort(
-        key=lambda z: int(np.asarray(z["physical_channel"]).reshape(-1)[0])
+        key=lambda z: exact_integer_scalar(
+            z, "physical_channel", dtype=np.int32, minimum=14, maximum=69
+        )
     )
     chans = [
-        int(np.asarray(z["physical_channel"]).reshape(-1)[0]) for z in products
+        exact_integer_scalar(
+            z, "physical_channel", dtype=np.int32, minimum=14, maximum=69
+        )
+        for z in products
     ]
     dupes = sorted({channel for channel in chans if chans.count(channel) > 1})
     if dupes:
@@ -269,8 +675,20 @@ def _frame_identity(z: Mapping[str, Any]) -> np.ndarray:
             + ", ".join(missing)
         )
     events = np.asarray(z["source_event_keys"]).reshape(-1).astype(str)
-    unit_index = np.asarray(z["frame_unit_index"], dtype=np.int64).reshape(-1)
-    frame_in_unit = np.asarray(z["frame_in_unit"], dtype=np.int64).reshape(-1)
+    unit_index = exact_integer_array(
+        z["frame_unit_index"],
+        field="frame_unit_index",
+        dtype=np.int32,
+        ndim=1,
+        minimum=0,
+    )
+    frame_in_unit = exact_integer_array(
+        z["frame_in_unit"],
+        field="frame_in_unit",
+        dtype=np.int32,
+        ndim=1,
+        minimum=0,
+    )
     if unit_index.shape != frame_in_unit.shape:
         raise ValueError("combine: frame_unit_index and frame_in_unit shapes differ")
     if np.any(unit_index < 0) or np.any(unit_index >= events.size):
@@ -486,7 +904,7 @@ def _scalars(products: Sequence[Mapping[str, Any]], key: str, dtype) -> np.ndarr
     )
 
 
-def combine_detector_products(
+def _combine_detector_products(
     product_paths: Sequence[str | Path],
     run_dir: str | Path,
     *,
@@ -692,8 +1110,8 @@ def combine_detector_products(
                 {"schema_version": CHIME_RUN_CONFIG_SCHEMA_TOKEN, **common})
     if align_info.get("mode") == "event_keyed":
         identity_path = run_dir / "chime_frame_identity.npz"
-        np.savez_compressed(
-            str(identity_path),
+        atomic_savez_compressed(
+            identity_path,
             frame_event_key=np.asarray(align_info["frame_event_key"], dtype=str),
             frame_in_unit=np.asarray(align_info["frame_in_unit"], dtype=np.int64),
         )
@@ -728,6 +1146,584 @@ def combine_detector_products(
     outputs["stats"] = run_dir / "stats.json"
     outputs["input_manifest"] = run_dir / "input_manifest.json"
     return outputs
+
+
+def _validate_staged_outputs(outputs: Mapping[str, Path]) -> None:
+    for path in outputs.values():
+        candidate = Path(path)
+        if not candidate.is_file():
+            raise RuntimeError(f"combine: staged output was not created: {candidate}")
+        if candidate.suffix == ".npz":
+            with np.load(candidate, allow_pickle=False) as archive:
+                for name in archive.files:
+                    np.asarray(archive[name])
+        elif candidate.suffix == ".json":
+            json.loads(candidate.read_text(encoding="utf-8"))
+
+
+def _safe_relative_path(value: object) -> Path:
+    relative = Path(str(value))
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise RuntimeError(
+            f"combine: invalid path in publish transaction: {value!r}"
+        )
+    if relative.as_posix() not in CHIME_COMBINE_CANONICAL_RELATIVE_PATHS:
+        raise RuntimeError(
+            "combine: path is not a canonical output allowed in a publish "
+            f"transaction: {relative}"
+        )
+    return relative
+
+
+def _resolved_directory_root(path: Path, *, what: str) -> Path:
+    root = Path(path).absolute()
+    if root.is_symlink():
+        raise RuntimeError(f"combine: {what} may not be a symlink: {root}")
+    try:
+        resolved = root.resolve(strict=True)
+    except OSError as exc:
+        raise RuntimeError(f"combine: cannot resolve {what}: {root}") from exc
+    if not resolved.is_dir():
+        raise RuntimeError(f"combine: {what} is not a directory: {root}")
+    return resolved
+
+
+def _safe_descendant(
+    root: Path,
+    relative: Path,
+    *,
+    what: str,
+    require_file: bool = False,
+) -> Path:
+    """Return a lexical child after rejecting symlink traversal and escapes."""
+    relative = Path(relative)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise RuntimeError(f"combine: invalid {what} path: {relative}")
+    root_path = Path(root).absolute()
+    resolved_root = _resolved_directory_root(root_path, what=f"{what} root")
+    candidate = root_path
+    for part in relative.parts:
+        candidate = candidate / part
+        if candidate.is_symlink():
+            raise RuntimeError(
+                f"combine: refusing symlinked {what} path component: {candidate}"
+            )
+    try:
+        candidate.resolve(strict=False).relative_to(resolved_root)
+    except ValueError as exc:
+        raise RuntimeError(
+            f"combine: {what} escapes its resolved root: {candidate}"
+        ) from exc
+    if require_file and not candidate.is_file():
+        raise RuntimeError(f"combine: required {what} is missing: {candidate}")
+    return candidate
+
+
+def _generation_manifest_payload(
+    root: Path, relative_paths: Sequence[Path], *, state: str
+) -> dict[str, Any]:
+    files: dict[str, str] = {}
+    for raw_relative in sorted(relative_paths, key=lambda item: item.as_posix()):
+        relative = _safe_relative_path(raw_relative)
+        if relative.as_posix() == CHIME_COMBINE_GENERATION_MANIFEST_FILENAME:
+            continue
+        candidate = _safe_descendant(
+            root, relative, what="generation output", require_file=True
+        )
+        digest = file_sha256(candidate)
+        if digest is None:
+            raise RuntimeError(f"combine: could not hash generation output {candidate}")
+        files[relative.as_posix()] = digest
+    return {
+        "schema_version": CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA,
+        "generation_id": uuid.uuid4().hex,
+        "state": str(state),
+        "files": files,
+    }
+
+
+def _stage_generation_manifest(
+    staged_outputs: Mapping[str, Path], staging_dir: Path
+) -> dict[str, Path]:
+    staging_dir = Path(staging_dir).absolute()
+    _resolved_directory_root(staging_dir, what="transaction directory")
+    outputs = {
+        str(label): Path(path).absolute() for label, path in staged_outputs.items()
+    }
+    if _GENERATION_LABEL in outputs:
+        raise RuntimeError("combine: duplicate generation-manifest output label")
+    relative_paths = [
+        _safe_relative_path(path.relative_to(staging_dir))
+        for path in outputs.values()
+    ]
+    marker = _safe_descendant(
+        staging_dir,
+        Path(CHIME_COMBINE_GENERATION_MANIFEST_FILENAME),
+        what="staged generation manifest",
+    )
+    payload = _generation_manifest_payload(
+        staging_dir, relative_paths, state="committed"
+    )
+    atomic_write_json(marker, payload)
+    outputs[_GENERATION_LABEL] = marker
+    return outputs
+
+
+def _write_recovery_generation_manifest(run_dir: Path) -> Path:
+    relative_paths: list[Path] = []
+    for name in CHIME_COMBINE_CANONICAL_RELATIVE_PATHS:
+        if name == CHIME_COMBINE_GENERATION_MANIFEST_FILENAME:
+            continue
+        relative = Path(name)
+        candidate = _safe_descendant(
+            run_dir, relative, what="recovered canonical output"
+        )
+        if candidate.exists():
+            if not candidate.is_file():
+                raise RuntimeError(
+                    f"combine: recovered canonical output is not a file: {candidate}"
+                )
+            relative_paths.append(relative)
+    marker_relative = Path(CHIME_COMBINE_GENERATION_MANIFEST_FILENAME)
+    marker = _safe_descendant(
+        run_dir, marker_relative, what="recovery generation manifest"
+    )
+    payload = _generation_manifest_payload(
+        run_dir, relative_paths, state="recovered"
+    )
+    atomic_write_json(marker, payload)
+    return marker
+
+
+def _durable_replace(source: Path, destination: Path) -> None:
+    source_parent = Path(source).parent
+    destination_parent = Path(destination).parent
+    os.replace(source, destination)
+    fsync_directory(destination_parent)
+    if source_parent != destination_parent:
+        fsync_directory(source_parent)
+
+
+def _restore_file_from_backup(
+    backup: Path,
+    destination: Path,
+    *,
+    backup_root: Path,
+    destination_root: Path,
+    relative: Path,
+) -> None:
+    """Atomically restore a backup without consuming it (recovery is idempotent)."""
+    backup = _safe_descendant(
+        backup_root, relative, what="publish backup", require_file=True
+    )
+    destination = _safe_descendant(
+        destination_root, relative, what="canonical restore destination"
+    )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = _safe_descendant(
+        destination_root, relative, what="canonical restore destination"
+    )
+    fd, temporary = create_temporary_sibling(
+        destination, suffix=".restore.tmp"
+    )
+    os.close(fd)
+    try:
+        shutil.copy2(backup, temporary)
+        fsync_file(temporary)
+        _durable_replace(temporary, destination)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def _load_publish_journal(
+    run_dir: Path,
+) -> tuple[Path, list[dict[str, Any]], str]:
+    _resolved_directory_root(run_dir, what="run directory")
+    journal_path = _safe_descendant(
+        run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+    )
+    if journal_path.is_symlink():
+        raise RuntimeError(
+            f"combine: publish journal may not be a symlink: {journal_path}"
+        )
+    try:
+        payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError) as exc:
+        raise RuntimeError(
+            f"combine: cannot recover invalid publish journal {journal_path}"
+        ) from exc
+    if payload.get("schema_version") != _PUBLISH_JOURNAL_SCHEMA:
+        raise RuntimeError(
+            f"combine: unsupported publish journal schema in {journal_path}"
+        )
+    journal_owner = payload.get("owner_token")
+    if not isinstance(journal_owner, str) or len(journal_owner) != 32:
+        raise RuntimeError(
+            f"combine: publish journal has an invalid owner token: {journal_path}"
+        )
+    transaction_name = str(payload.get("transaction_directory", ""))
+    if (
+        Path(transaction_name).name != transaction_name
+        or not transaction_name.startswith(_TRANSACTION_DIR_PREFIX)
+    ):
+        raise RuntimeError(
+            f"combine: invalid transaction directory in {journal_path}"
+        )
+    transaction_dir = _safe_descendant(
+        run_dir, Path(transaction_name), what="transaction directory"
+    )
+    if not transaction_dir.is_dir():
+        raise RuntimeError(
+            f"combine: transaction directory is missing: {transaction_dir}"
+        )
+    _resolved_directory_root(transaction_dir, what="transaction directory")
+    raw_entries = payload.get("entries")
+    if not isinstance(raw_entries, list) or not raw_entries:
+        raise RuntimeError(f"combine: publish journal has no entries: {journal_path}")
+    entries: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for raw in raw_entries:
+        if not isinstance(raw, dict):
+            raise RuntimeError(f"combine: invalid publish journal entry: {raw!r}")
+        relative = _safe_relative_path(raw.get("relative_path", ""))
+        if relative in seen:
+            raise RuntimeError(
+                f"combine: duplicate publish path in journal: {relative}"
+            )
+        seen.add(relative)
+        had_previous = raw.get("had_previous")
+        if not isinstance(had_previous, bool):
+            raise RuntimeError(
+                f"combine: invalid had_previous flag in journal: {raw!r}"
+            )
+        entries.append(
+            {
+                "label": str(raw.get("label", "")),
+                "relative_path": relative,
+                "had_previous": had_previous,
+            }
+        )
+    return transaction_dir, entries, journal_owner
+
+
+def _unlink_owned_journal(
+    journal_path: Path,
+    *,
+    expected_journal_owner: str,
+    ownership: _PublishOwnership,
+) -> None:
+    ownership.assert_owned()
+    try:
+        payload = json.loads(journal_path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(
+            "combine: refusing to unlink an unreadable publish journal"
+        ) from exc
+    if payload.get("owner_token") != expected_journal_owner:
+        raise RuntimeError(
+            "combine: refusing to unlink a publish journal owned by another token"
+        )
+    journal_path.unlink()
+    fsync_directory(journal_path.parent)
+
+
+def _recover_interrupted_publish(
+    run_dir: Path, ownership: _PublishOwnership
+) -> bool:
+    """Roll back a journalled partial publication before starting new work."""
+    ownership.assert_owned()
+    destination = Path(run_dir).absolute()
+    _resolved_directory_root(destination, what="run directory")
+    journal_path = _safe_descendant(
+        destination, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+    )
+    if not journal_path.exists() and not journal_path.is_symlink():
+        return False
+    transaction_dir, entries, journal_owner = _load_publish_journal(destination)
+    backup_dir = _safe_descendant(
+        transaction_dir, Path("_previous_outputs"), what="backup directory"
+    )
+    if backup_dir.exists():
+        if not backup_dir.is_dir():
+            raise RuntimeError(
+                f"combine: publish backup root is not a directory: {backup_dir}"
+            )
+        _resolved_directory_root(backup_dir, what="backup directory")
+
+    # Validate every journal-controlled path before changing any canonical file.
+    # The recovery generation manifest inventories the complete allowlist, so
+    # reject a symlink anywhere in that namespace up front as well.
+    for name in CHIME_COMBINE_CANONICAL_RELATIVE_PATHS:
+        _safe_descendant(
+            destination,
+            Path(name),
+            what="canonical generation namespace",
+        )
+    validated: list[tuple[dict[str, Any], Path, Path | None]] = []
+    for entry in entries:
+        relative = entry["relative_path"]
+        canonical = _safe_descendant(
+            destination, relative, what="canonical recovery destination"
+        )
+        staged = _safe_descendant(
+            transaction_dir, relative, what="staged recovery source"
+        )
+        if staged.exists() and not staged.is_file():
+            raise RuntimeError(
+                f"combine: staged recovery source is not a file: {staged}"
+            )
+        backup: Path | None = None
+        if entry["had_previous"]:
+            if not backup_dir.is_dir():
+                raise RuntimeError(
+                    "combine: cannot recover interrupted publication because "
+                    f"backup directory is missing: {backup_dir}"
+                )
+            backup = _safe_descendant(
+                backup_dir,
+                relative,
+                what="publish backup",
+                require_file=True,
+            )
+        validated.append((entry, canonical, backup))
+
+    for entry, canonical, backup in validated:
+        ownership.assert_owned()
+        relative = entry["relative_path"]
+        if entry["had_previous"]:
+            assert backup is not None
+            _restore_file_from_backup(
+                backup,
+                canonical,
+                backup_root=backup_dir,
+                destination_root=destination,
+                relative=relative,
+            )
+        elif canonical.exists():
+            canonical.unlink()
+            fsync_directory(canonical.parent)
+    # A rollback also advances generation identity. A validator that overlaps
+    # even a fast failed-and-recovered publication therefore cannot mistake its
+    # transient reads for one stable generation.
+    _write_recovery_generation_manifest(destination)
+    _unlink_owned_journal(
+        journal_path,
+        expected_journal_owner=journal_owner,
+        ownership=ownership,
+    )
+    shutil.rmtree(transaction_dir, ignore_errors=False)
+    fsync_directory(destination)
+    return True
+
+
+def _prepare_publish_transaction(
+    staged_outputs: Mapping[str, Path],
+    staging_dir: Path,
+    run_dir: Path,
+    ownership: _PublishOwnership,
+) -> list[dict[str, Any]]:
+    """Durably back up the old generation and record rollback instructions."""
+    ownership.assert_owned()
+    run_dir = Path(run_dir).absolute()
+    staging_dir = Path(staging_dir).absolute()
+    run_root = _resolved_directory_root(run_dir, what="run directory")
+    staging_root = _resolved_directory_root(
+        staging_dir, what="transaction directory"
+    )
+    try:
+        staging_root.relative_to(run_root)
+    except ValueError as exc:
+        raise RuntimeError(
+            "combine: transaction directory must resolve beneath the run directory"
+        ) from exc
+    backup_dir = _safe_descendant(
+        staging_dir, Path("_previous_outputs"), what="backup directory"
+    )
+    entries: list[dict[str, Any]] = []
+    seen: set[Path] = set()
+    for label, staged_value in staged_outputs.items():
+        staged = Path(staged_value).absolute()
+        try:
+            relative = _safe_relative_path(staged.relative_to(staging_dir))
+        except ValueError as exc:
+            raise RuntimeError(
+                f"combine: staged output is outside transaction root: {staged}"
+            ) from exc
+        if relative in seen:
+            raise RuntimeError(f"combine: duplicate staged output path: {relative}")
+        seen.add(relative)
+        staged = _safe_descendant(
+            staging_dir, relative, what="staged generation output", require_file=True
+        )
+        destination = _safe_descendant(
+            run_dir, relative, what="canonical publish destination"
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination = _safe_descendant(
+            run_dir, relative, what="canonical publish destination"
+        )
+        had_previous = destination.exists()
+        if had_previous:
+            if not destination.is_file():
+                raise RuntimeError(
+                    f"combine: output destination is not a file: {destination}"
+                )
+            mode = stat.S_IMODE(destination.stat().st_mode)
+            staged.chmod(mode)
+            backup = _safe_descendant(
+                staging_dir,
+                Path("_previous_outputs") / relative,
+                what="publish backup",
+            )
+            backup.parent.mkdir(parents=True, exist_ok=True)
+            backup = _safe_descendant(
+                staging_dir,
+                Path("_previous_outputs") / relative,
+                what="publish backup",
+            )
+            shutil.copy2(destination, backup)
+            fsync_file(backup)
+            fsync_directory(backup.parent)
+            fsync_directory(backup_dir)
+            fsync_directory(staging_dir)
+        fsync_file(staged)
+        fsync_directory(staged.parent)
+        fsync_directory(staging_dir)
+        entries.append(
+            {
+                "label": str(label),
+                "relative_path": relative,
+                "had_previous": had_previous,
+            }
+        )
+    journal_payload = {
+        "schema_version": _PUBLISH_JOURNAL_SCHEMA,
+        "owner_token": ownership.owner_token,
+        "transaction_directory": staging_dir.name,
+        "entries": [
+            {
+                "label": entry["label"],
+                "relative_path": entry["relative_path"].as_posix(),
+                "had_previous": entry["had_previous"],
+            }
+            for entry in entries
+        ],
+    }
+    journal_path = _safe_descendant(
+        run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+    )
+    if journal_path.exists() or journal_path.is_symlink():
+        raise RuntimeError(
+            "combine: refusing to replace an existing publish journal"
+        )
+    ownership.assert_owned()
+    atomic_write_json(journal_path, journal_payload)
+    return entries
+
+
+def _publish_output_set(
+    staged_outputs: Mapping[str, Path], staging_dir: Path, run_dir: Path
+) -> dict[str, Path]:
+    """Publish one generation with a durable, restart-recoverable rollback log."""
+    run_dir = Path(run_dir).absolute()
+    staging_dir = Path(staging_dir).absolute()
+    _resolved_directory_root(run_dir, what="run directory")
+    staged_outputs = _stage_generation_manifest(staged_outputs, staging_dir)
+    _validate_staged_outputs(staged_outputs)
+    with _exclusive_publish_ownership(run_dir) as ownership:
+        journal_path = _safe_descendant(
+            run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+        )
+        if journal_path.exists() or journal_path.is_symlink():
+            _recover_interrupted_publish(run_dir, ownership)
+        entries = _prepare_publish_transaction(
+            staged_outputs, staging_dir, run_dir, ownership
+        )
+        try:
+            for entry in entries:
+                ownership.assert_owned()
+                relative = entry["relative_path"]
+                staged = _safe_descendant(
+                    staging_dir,
+                    relative,
+                    what="staged generation output",
+                    require_file=True,
+                )
+                destination = _safe_descendant(
+                    run_dir, relative, what="canonical publish destination"
+                )
+                _durable_replace(staged, destination)
+        except BaseException:
+            _recover_interrupted_publish(run_dir, ownership)
+            raise
+        _unlink_owned_journal(
+            journal_path,
+            expected_journal_owner=ownership.owner_token,
+            ownership=ownership,
+        )
+        return {
+            entry["label"]: run_dir / entry["relative_path"]
+            for entry in entries
+        }
+
+
+def _cleanup_unreferenced_staging(run_dir: Path, staging_dir: Path) -> bool:
+    """Remove staging unless a valid durable journal names this transaction."""
+    run = Path(run_dir).absolute()
+    staging = Path(staging_dir).absolute()
+    journal = run / _PUBLISH_JOURNAL_NAME
+    preserve = False
+    if journal.exists() or journal.is_symlink():
+        try:
+            transaction, _entries, _owner = _load_publish_journal(run)
+        except RuntimeError:
+            # An unreadable journal may describe a partially published copy
+            # whose only rollback material is this tree. Fail safe: without a
+            # valid different transaction identity, we cannot prove staging is
+            # an unrelated concurrent loser's disposable work.
+            preserve = True
+        else:
+            preserve = transaction == staging
+    if preserve:
+        return False
+    shutil.rmtree(staging, ignore_errors=True)
+    fsync_directory(run)
+    return True
+
+
+def combine_detector_products(
+    product_paths: Sequence[str | Path],
+    run_dir: str | Path,
+    *,
+    chunk_seconds: float = 10.0,
+    drop_freq_ids: Sequence[int] | None = None,
+) -> dict[str, Path]:
+    """Build the complete canonical set off-path, then publish it together."""
+    destination = Path(run_dir)
+    destination_existed = destination.exists()
+    destination.mkdir(parents=True, exist_ok=True)
+    staging = Path(
+        tempfile.mkdtemp(
+            prefix=_TRANSACTION_DIR_PREFIX,
+            dir=destination,
+        )
+    )
+    try:
+        staged_outputs = _combine_detector_products(
+            product_paths,
+            staging,
+            chunk_seconds=chunk_seconds,
+            drop_freq_ids=drop_freq_ids,
+        )
+        return _publish_output_set(staged_outputs, staging, destination)
+    finally:
+        if _cleanup_unreferenced_staging(destination, staging):
+            if not destination_existed:
+                try:
+                    destination.rmdir()
+                except OSError:
+                    pass
 
 
 __all__ = [

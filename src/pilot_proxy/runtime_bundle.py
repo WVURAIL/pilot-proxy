@@ -11,6 +11,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
+from pilot_proxy.atsc_channels import validate_uhf_physical_channel
 from pilot_proxy.detector_contract import (
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
     WEIGHT_COORDINATE_RAW_INPUT,
@@ -951,11 +952,11 @@ def _validate_fine_calibration(
                 f"{field}.designated_half_width",
                 f"out of range: {half_width}",
             )
-        if mult <= 0:
+        if not 0 < mult < (1 << 64):
             _add_error(
                 errors,
                 f"{field}.cfar_multiplier_q16",
-                f"must be positive: {mult}",
+                f"must be in uint64 range [1, {(1 << 64) - 1}]: {mult}",
             )
         if 0 <= anchor < FINE_CALIBRATION_NUM_BINS:
             popcount = sum(bin(w).count("1") for w in words)
@@ -1503,7 +1504,10 @@ def export_runtime_weight_bundle(
     # declares which lengths the compiled kernel family supports.
     core = core.with_detector_window_samples(int(profile.detector_window_samples))
     coordinate_system = normalize_weight_coordinate_system(weight_coordinate_system)
-    channels = [int(channel) for channel in physical_channels]
+    channels = [
+        validate_uhf_physical_channel(channel)
+        for channel in physical_channels
+    ]
     if not channels:
         raise ValueError("at least one physical channel must be selected")
 

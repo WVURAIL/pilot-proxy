@@ -23,6 +23,8 @@ STRUCTURED_COMPLEX = "structured_complex"
 REAL_IMAG_LAST_AXIS = "real_imag_last_axis"
 UNKNOWN_ENCODING = "unknown"
 DEFAULT_DATASET_PATH = "baseband"
+CHIME_COARSE_WIDTH_HZ = 400_000_000.0 / 1024.0
+ATSC_COARSE_CHANNEL_TOLERANCE_HZ = CHIME_COARSE_WIDTH_HZ / 2.0
 
 
 @dataclass(frozen=True)
@@ -104,71 +106,170 @@ def _find_dataset_path(h5: h5py.File, requested: str | None) -> str:
 
 def _infer_axes(obj: h5py.Dataset) -> tuple[int, int, int | None]:
     labels = tuple(label.lower() for label in _axis_labels(obj.attrs))
-    if "time" in labels and "input" in labels:
-        time_axis = labels.index("time")
-        stream_axis = labels.index("input")
-    elif obj.ndim == 2:
-        time_axis = 0
-        stream_axis = 1
-    else:
-        dims = list(obj.shape)
-        stream_axis = int(np.argmax(dims))
-        time_axis = 0 if stream_axis != 0 else 1
-
     complex_axis = None
-    if obj.ndim >= 3 and obj.shape[-1] == 2:
+    scalar_dtype = np.dtype(obj.dtype)
+    values_are_already_complex = bool(
+        np.issubdtype(scalar_dtype, np.complexfloating) or scalar_dtype.names
+    )
+    if not values_are_already_complex and obj.ndim >= 3 and obj.shape[-1] == 2:
         tail_label = labels[-1] if len(labels) == obj.ndim else ""
         if tail_label in {"complex", "real_imag", "ri", ""}:
             complex_axis = obj.ndim - 1
+
+    if "time" in labels and "input" in labels:
+        time_axis = labels.index("time")
+        stream_axis = labels.index("input")
+    else:
+        logical_axes = [axis for axis in range(obj.ndim) if axis != complex_axis]
+        # Unlabelled CHIME arrays use the conventional (time, input[, RI])
+        # layout.  Inferring the largest dimension as the stream axis swaps a
+        # normal time-major block whenever time happens to be longest.
+        time_axis = logical_axes[0] if logical_axes else 0
+        stream_axis = logical_axes[1] if len(logical_axes) > 1 else time_axis
     return int(time_axis), int(stream_axis), complex_axis
 
 
 def _float_attr(attrs: Any, key: str) -> float | None:
     if key not in attrs:
         return None
-    value = float(attrs[key])
+    values = np.asarray(attrs[key])
+    if values.size != 1:
+        raise ValueError(f"HDF5 attribute {key!r} must be one finite number")
+    try:
+        value = float(values.reshape(()).item())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(
+            f"HDF5 attribute {key!r} must be one finite number"
+        ) from exc
     if not np.isfinite(value):
-        return None
+        raise ValueError(f"HDF5 attribute {key!r} must be finite")
     return value
 
 
 def _int_attr(attrs: Any, key: str) -> int | None:
     if key not in attrs:
         return None
-    return int(attrs[key])
+    values = np.asarray(attrs[key])
+    if values.size != 1:
+        raise ValueError(f"HDF5 attribute {key!r} must be one integer")
+    try:
+        numeric = float(values.reshape(()).item())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"HDF5 attribute {key!r} must be integral") from exc
+    if not np.isfinite(numeric) or not numeric.is_integer():
+        raise ValueError(f"HDF5 attribute {key!r} must be integral, got {numeric!r}")
+    return int(numeric)
 
 
-def _frequency_hz_from_attrs(attrs: Any) -> float | None:
-    for key in ("pilot_frequency_hz", "dtv_pilot_hz", "frequency_hz"):
+def _consistent_frequency_attrs(
+    attrs: Any,
+    keys: tuple[str, ...],
+    *,
+    label: str,
+    mhz_keys: frozenset[str] = frozenset(),
+) -> float | None:
+    found: list[tuple[str, float]] = []
+    for key in keys:
         value = _float_attr(attrs, key)
-        if value is not None:
-            return float(value)
-    freq = _float_attr(attrs, "freq")
-    if freq is None:
+        if value is None:
+            continue
+        if key in mhz_keys and abs(value) < 1.0e6:
+            value *= 1.0e6
+        found.append((key, float(value)))
+    if not found:
         return None
-    # CHIME acquisition files store coarse-channel frequency in MHz.
-    return float(freq * 1.0e6 if abs(freq) < 1.0e6 else freq)
+    reference = found[0][1]
+    contradictory = [
+        (key, value)
+        for key, value in found[1:]
+        if not np.isclose(value, reference, rtol=0.0, atol=1.0)
+    ]
+    if contradictory:
+        raise ValueError(
+            f"contradictory {label} HDF5 aliases: {found!r}"
+        )
+    return reference
 
 
-def nearest_atsc_physical_channel(frequency_hz: float) -> int | None:
+def _pilot_frequency_hz_from_attrs(attrs: Any) -> float | None:
+    return _consistent_frequency_attrs(
+        attrs,
+        ("pilot_frequency_hz", "dtv_pilot_hz"),
+        label="pilot-frequency",
+    )
+
+
+def _coarse_center_hz_from_attrs(attrs: Any) -> float | None:
+    return _consistent_frequency_attrs(
+        attrs,
+        (
+            "coarse_channel_center_hz",
+            "chime_frequency_hz",
+            "frequency_hz",
+            "freq",
+        ),
+        label="coarse-centre",
+        mhz_keys=frozenset({"freq"}),
+    )
+
+
+def nearest_atsc_physical_channel(
+    frequency_hz: float,
+    *,
+    tolerance_hz: float = ATSC_COARSE_CHANNEL_TOLERANCE_HZ,
+) -> int | None:
     """Return the nearest UHF ATSC physical channel for a pilot-like frequency."""
     freq = float(frequency_hz)
     candidates = range(ATSC_UHF_MIN_PHYSICAL_CHANNEL, ATSC_UHF_MAX_PHYSICAL_CHANNEL + 1)
     best = min(candidates, key=lambda ch: abs(physical_channel_to_pilot_hz(ch) - freq))
     delta = abs(physical_channel_to_pilot_hz(best) - freq)
-    # A CHIME coarse channel can be up to half a 390.625 kHz bin from the pilot.
-    return int(best) if delta <= 3.0e6 else None
+    # A pilot belongs to this receiver channel only when the coarse-channel
+    # centre is at most half one 390.625-kHz F-engine bin away.  A former 3-MHz
+    # threshold admitted adjacent freq_ids into the same ATSC pilot dataset.
+    return int(best) if delta <= float(tolerance_hz) else None
 
 
-def _physical_channel_from_attrs(attrs: Any) -> int | None:
+def _physical_channel_from_attrs(
+    attrs: Any,
+    *,
+    coarse_center_hz: float | None,
+    pilot_frequency_hz: float | None,
+) -> int | None:
+    explicit: list[tuple[str, int]] = []
     for key in ("physical_channel", "dtv_physical_channel"):
         channel = _int_attr(attrs, key)
         if channel is not None:
-            return channel
-    frequency_hz = _frequency_hz_from_attrs(attrs)
-    if frequency_hz is None:
-        return None
-    return nearest_atsc_physical_channel(float(frequency_hz))
+            explicit.append((key, channel))
+    if explicit and len({channel for _, channel in explicit}) != 1:
+        raise ValueError(
+            f"contradictory physical-channel HDF5 aliases: {explicit!r}"
+        )
+    physical_channel = explicit[0][1] if explicit else None
+    pilot_channel = (
+        None
+        if pilot_frequency_hz is None
+        else nearest_atsc_physical_channel(pilot_frequency_hz)
+    )
+    coarse_channel = (
+        None
+        if coarse_center_hz is None
+        else nearest_atsc_physical_channel(coarse_center_hz)
+    )
+    if pilot_frequency_hz is not None and pilot_channel is None:
+        raise ValueError(
+            f"pilot frequency {pilot_frequency_hz:.0f} Hz is not near an ATSC pilot"
+        )
+    candidates = [
+        channel
+        for channel in (physical_channel, pilot_channel, coarse_channel)
+        if channel is not None
+    ]
+    if candidates and len(set(candidates)) != 1:
+        raise ValueError(
+            "physical-channel, pilot-frequency, and coarse-centre metadata "
+            f"disagree: {candidates!r}"
+        )
+    return candidates[0] if candidates else None
 
 
 def _sample_encoding(obj: h5py.Dataset) -> str:
@@ -179,12 +280,13 @@ def _sample_encoding(obj: h5py.Dataset) -> str:
         names = {name.lower() for name in dtype.names}
         if names & {"real", "re", "r"} and names & {"imag", "im", "i"}:
             return STRUCTURED_COMPLEX
+    _, _, complex_axis = _infer_axes(obj)
+    if complex_axis is not None:
+        return REAL_IMAG_LAST_AXIS
     if dtype == np.dtype("uint8"):
         return CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4
     if dtype == np.dtype("int8"):
         return PACKED_TWOS_COMPLEMENT_COMPLEX_INT4
-    if obj.ndim >= 3 and obj.shape[-1] == 2:
-        return REAL_IMAG_LAST_AXIS
     return UNKNOWN_ENCODING
 
 
@@ -201,13 +303,87 @@ def _read_segment(path: Path, dataset_path: str | None) -> tuple[ChimeSegment, i
         if not isinstance(obj, h5py.Dataset):
             raise TypeError(f"{resolved_dataset_path!r} is not a dataset in {path}")
         time_axis, stream_axis, complex_axis = _infer_axes(obj)
-        frequency_hz = _frequency_hz_from_attrs(h5.attrs)
-        physical_channel = _physical_channel_from_attrs(h5.attrs)
-        pilot_frequency_hz = (
-            None
-            if physical_channel is None
-            else float(physical_channel_to_pilot_hz(int(physical_channel)))
+        data_axes = (time_axis, stream_axis)
+        if (
+            len(set(data_axes)) != 2
+            or any(axis < 0 or axis >= obj.ndim for axis in data_axes)
+        ):
+            raise ValueError(
+                f"CHIME dataset {resolved_dataset_path!r} in {path} must have "
+                "distinct valid time and input axes"
+            )
+        if complex_axis is not None and (
+            complex_axis in data_axes
+            or complex_axis < 0
+            or complex_axis >= obj.ndim
+            or obj.shape[complex_axis] != 2
+        ):
+            raise ValueError(
+                f"CHIME dataset {resolved_dataset_path!r} in {path} has an "
+                "invalid real/imag axis"
+            )
+        logical_ndim = obj.ndim - int(complex_axis is not None)
+        if logical_ndim != 2:
+            raise ValueError(
+                f"CHIME dataset {resolved_dataset_path!r} in {path} must have "
+                "exactly time and input axes plus an optional real/imag axis; "
+                f"got shape {obj.shape!r}"
+            )
+        freq_id = _int_attr(h5.attrs, "freq_id")
+        if freq_id is not None and not 0 <= freq_id < 1024:
+            raise ValueError(f"invalid CHIME freq_id {freq_id} in {path}")
+        pilot_frequency_hz = _pilot_frequency_hz_from_attrs(h5.attrs)
+        frequency_hz = _coarse_center_hz_from_attrs(h5.attrs)
+        if frequency_hz is None and freq_id is None:
+            raise ValueError(
+                f"CHIME segment {path} has neither freq_id nor a finite "
+                "coarse-channel centre; receiver-channel identity is unverifiable"
+            )
+        if frequency_hz is None and freq_id is not None:
+            frequency_hz = 800_000_000.0 - freq_id * CHIME_COARSE_WIDTH_HZ
+        physical_channel = _physical_channel_from_attrs(
+            h5.attrs,
+            coarse_center_hz=frequency_hz,
+            pilot_frequency_hz=pilot_frequency_hz,
         )
+        if frequency_hz is not None and freq_id is not None:
+            expected_center_hz = 800_000_000.0 - freq_id * CHIME_COARSE_WIDTH_HZ
+            if not np.isclose(
+                frequency_hz,
+                expected_center_hz,
+                rtol=0.0,
+                atol=1.0,
+            ):
+                raise ValueError(
+                    f"CHIME freq_id {freq_id} in {path} implies centre "
+                    f"{expected_center_hz:.0f} Hz, but metadata records "
+                    f"{frequency_hz:.0f} Hz"
+                )
+        if frequency_hz is not None and physical_channel is not None:
+            inferred_channel = nearest_atsc_physical_channel(frequency_hz)
+            if inferred_channel != physical_channel:
+                raise ValueError(
+                    f"CHIME coarse-channel centre {frequency_hz:.0f} Hz in "
+                    f"{path} is not within half a coarse bin of ATSC physical "
+                    f"channel {physical_channel}"
+                )
+        if pilot_frequency_hz is not None and physical_channel is not None:
+            expected_pilot_hz = physical_channel_to_pilot_hz(physical_channel)
+            if not np.isclose(
+                pilot_frequency_hz,
+                expected_pilot_hz,
+                rtol=0.0,
+                atol=1.0,
+            ):
+                raise ValueError(
+                    f"pilot frequency {pilot_frequency_hz:.0f} Hz does not "
+                    f"match ATSC physical channel {physical_channel} pilot "
+                    f"{expected_pilot_hz:.0f} Hz"
+                )
+        elif physical_channel is not None:
+            pilot_frequency_hz = float(
+                physical_channel_to_pilot_hz(physical_channel)
+            )
         segment = ChimeSegment(
             path=Path(path),
             physical_channel=physical_channel,
@@ -216,7 +392,7 @@ def _read_segment(path: Path, dataset_path: str | None) -> tuple[ChimeSegment, i
             num_time_samples=int(obj.shape[time_axis]),
             shape=tuple(int(value) for value in obj.shape),
             dtype=str(obj.dtype),
-            freq_id=_int_attr(h5.attrs, "freq_id"),
+            freq_id=freq_id,
             coarse_channel_center_hz=frequency_hz,
             sample_encoding=_sample_encoding(obj),
         )
@@ -230,21 +406,55 @@ def discover_chime_pilot_datasets(
     filename_pattern: str = "*.h5",
 ) -> dict[int, ChimePilotDataset]:
     """Discover segmented CHIME pilot-channel datasets below the root path."""
-    grouped: dict[int, list[tuple[ChimeSegment, int, int, int | None]]] = {}
+    # Segment first by receiver-channel identity, not merely by the much wider
+    # 6-MHz ATSC physical channel.  The public result remains keyed by physical
+    # channel because one ATSC pilot must resolve to exactly one CHIME freq_id.
+    grouped: dict[
+        tuple[int, int | None, float | None],
+        list[tuple[ChimeSegment, int, int, int | None]],
+    ] = {}
     for path in _walk(Path(root), filename_pattern):
         segment, time_axis, stream_axis, complex_axis = _read_segment(path, dataset_path)
         if segment.physical_channel is None:
             continue
-        grouped.setdefault(int(segment.physical_channel), []).append(
+        identity = (
+            int(segment.physical_channel),
+            segment.freq_id,
+            segment.coarse_channel_center_hz,
+        )
+        grouped.setdefault(identity, []).append(
             (segment, time_axis, stream_axis, complex_axis)
         )
 
     datasets: dict[int, ChimePilotDataset] = {}
-    for physical_channel in sorted(grouped):
-        items = sorted(grouped[physical_channel], key=lambda item: _sort_key(item[0].path))
+    for identity in sorted(
+        grouped,
+        key=lambda value: (
+            value[0],
+            -1 if value[1] is None else value[1],
+            float("-inf") if value[2] is None else value[2],
+        ),
+    ):
+        physical_channel, _freq_id, _coarse_center = identity
+        if physical_channel in datasets:
+            previous = datasets[physical_channel]
+            raise ValueError(
+                "multiple CHIME coarse-channel identities map to one ATSC "
+                f"physical channel {physical_channel}: "
+                f"freq_id={previous.freq_id}, "
+                f"center={previous.coarse_channel_center_hz!r} and "
+                f"freq_id={_freq_id}, center={_coarse_center!r}. Refusing to "
+                "merge neighboring receiver channels."
+            )
+        items = sorted(grouped[identity], key=lambda item: _sort_key(item[0].path))
         segments = [item[0] for item in items]
         first_segment, time_axis, stream_axis, complex_axis = items[0]
         for segment, seg_time_axis, seg_stream_axis, seg_complex_axis in items:
+            if len(segment.shape) != len(first_segment.shape):
+                raise ValueError(
+                    "segments for one coarse channel use inconsistent ranks: "
+                    f"{first_segment.shape!r} and {segment.shape!r}."
+                )
             if segment.dataset_path != first_segment.dataset_path:
                 raise ValueError(
                     "segments for one physical channel use multiple dataset paths: "
@@ -262,6 +472,26 @@ def discover_chime_pilot_datasets(
                 raise ValueError(
                     "segments for one physical channel use inconsistent input counts."
                 )
+            if segment.dtype != first_segment.dtype:
+                raise ValueError(
+                    "segments for one coarse channel use inconsistent dtypes: "
+                    f"{first_segment.dtype!r} and {segment.dtype!r}."
+                )
+            if segment.sample_encoding != first_segment.sample_encoding:
+                raise ValueError(
+                    "segments for one coarse channel use inconsistent sample "
+                    f"encodings: {first_segment.sample_encoding!r} and "
+                    f"{segment.sample_encoding!r}."
+                )
+            for axis, (size, first_size) in enumerate(
+                zip(segment.shape, first_segment.shape)
+            ):
+                if axis != time_axis and size != first_size:
+                    raise ValueError(
+                        "segments for one coarse channel use inconsistent "
+                        f"non-time dimensions: {first_segment.shape!r} and "
+                        f"{segment.shape!r}."
+                    )
         datasets[physical_channel] = ChimePilotDataset(
             physical_channel=int(physical_channel),
             pilot_frequency_hz=float(physical_channel_to_pilot_hz(physical_channel)),
@@ -417,7 +647,9 @@ def dataset_manifest(dataset: ChimePilotDataset) -> dict[str, Any]:
 
 
 __all__ = [
+    "ATSC_COARSE_CHANNEL_TOLERANCE_HZ",
     "CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4",
+    "CHIME_COARSE_WIDTH_HZ",
     "COMPLEX_FLOAT",
     "ChimePilotDataset",
     "ChimeSegment",

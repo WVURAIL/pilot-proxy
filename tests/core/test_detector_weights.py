@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import shutil
 
+import numpy as np
 import pytest
 
 from pilot_proxy.detector_weights import DetectorWeightBank
@@ -14,6 +15,7 @@ from pilot_proxy.integration.detector_core import (
 )
 from pilot_proxy.integration.weight_generation import DetectorCoreLayout, target_layout
 from pilot_proxy.paths import CONFIGS_DIR
+from pilot_proxy.paths import DEFAULT_CHORD_WEIGHTS_PATH
 from pilot_proxy.paths import DEFAULT_WEIGHTS_PATH
 
 FIRST_SHIPPED_PHYSICAL_CHANNEL = 14
@@ -27,6 +29,10 @@ EDGE_WRAP_PILOT_MHZ = 470.309441
 EDGE_WRAP_LOWER_REFERENCE_OFFSET_BINS = -2
 EDGE_WRAP_UPPER_REFERENCE_OFFSET_BINS = 2
 REFERENCE_COARSE_CHANNEL_WIDTH_HZ = 390_625.0
+CHORD_WEIGHTS_PATH = DEFAULT_CHORD_WEIGHTS_PATH
+SHIPPED_CHANNEL_14_CENTER_MHZ = 470.3125
+CHIME_CHANNEL_14_COARSE_INDEX = 843
+CHORD_CHANNEL_14_COARSE_INDEX = 2408
 
 
 def _core(*, k: int = 128, reference_offset_bins: int = 2) -> DetectorCoreLayout:
@@ -35,6 +41,32 @@ def _core(*, k: int = 128, reference_offset_bins: int = 2) -> DetectorCoreLayout
         skipped_guard_bins=int(reference_offset_bins) - 1,
         reference_offset_bins=int(reference_offset_bins),
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    [
+        ("detector_window_samples", 128.9),
+        ("detector_window_samples", True),
+        ("detector_window_samples", np.bool_(True)),
+        ("skipped_guard_bins", 1.9),
+        ("skipped_guard_bins", np.bool_(True)),
+        ("reference_offset_bins", 2.9),
+    ],
+)
+def test_detector_core_layout_requires_exact_geometry(
+    field: str,
+    invalid: object,
+) -> None:
+    arguments = {
+        "detector_window_samples": 128,
+        "skipped_guard_bins": 1,
+        "reference_offset_bins": 2,
+    }
+    arguments[field] = invalid
+
+    with pytest.raises(TypeError, match=field):
+        DetectorCoreLayout(**arguments)
 
 
 def _reference_profile():
@@ -54,6 +86,68 @@ def test_weight_bank_validates_known_physical_channel() -> None:
     assert bank.known_pilot_frequencies_mhz[0] == FIRST_SHIPPED_PILOT_MHZ
 
 
+@pytest.mark.parametrize(
+    ("weight_path", "coarse_index", "first_center_mhz", "last_center_mhz"),
+    (
+        (
+            DEFAULT_WEIGHTS_PATH,
+            CHIME_CHANNEL_14_COARSE_INDEX,
+            799.609375,
+            400.0,
+        ),
+        (
+            CHORD_WEIGHTS_PATH,
+            CHORD_CHANNEL_14_COARSE_INDEX,
+            0.0,
+            1599.8046875,
+        ),
+    ),
+)
+def test_expert_lookup_uses_receiver_native_frequency_grid(
+    weight_path, coarse_index, first_center_mhz, last_center_mhz
+) -> None:
+    bank = DetectorWeightBank(explicit_path=weight_path)
+
+    assert bank.reference_freqs[0] == pytest.approx(first_center_mhz)
+    assert bank.reference_freqs[-1] == pytest.approx(last_center_mhz)
+    assert bank.reference_freqs[coarse_index] == pytest.approx(
+        SHIPPED_CHANNEL_14_CENTER_MHZ
+    )
+    weights, valid = bank.get_weights(FIRST_SHIPPED_PILOT_MHZ)
+
+    assert valid is True
+    assert weights is not None
+    np.testing.assert_array_equal(weights, bank.rom_table[coarse_index])
+
+
+@pytest.mark.parametrize(
+    ("weight_path", "frequency_mhz"),
+    (
+        (DEFAULT_WEIGHTS_PATH, 399.999),
+        (DEFAULT_WEIGHTS_PATH, 800.0),
+        (CHORD_WEIGHTS_PATH, -0.001),
+        (CHORD_WEIGHTS_PATH, 1600.0),
+    ),
+)
+def test_expert_lookup_rejects_out_of_receiver_band(
+    weight_path, frequency_mhz
+) -> None:
+    bank = DetectorWeightBank(explicit_path=weight_path)
+
+    with pytest.raises(ValueError, match="outside the receiver profile"):
+        bank.get_weights(frequency_mhz)
+
+
+@pytest.mark.parametrize(
+    "frequency_mhz", (float("nan"), float("inf"), -float("inf"))
+)
+def test_expert_lookup_rejects_nonfinite_frequency(frequency_mhz) -> None:
+    bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+
+    with pytest.raises(ValueError, match="must be finite"):
+        bank.get_weights(frequency_mhz)
+
+
 def test_weight_bank_rejects_unknown_pilot_frequency() -> None:
     bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
 
@@ -62,6 +156,84 @@ def test_weight_bank_rejects_unknown_pilot_frequency() -> None:
             UNKNOWN_PILOT_MHZ_NEAR_CHANNEL_14,
             tolerance_hz=PILOT_FREQUENCY_TOLERANCE_HZ,
         )
+
+
+@pytest.mark.parametrize(
+    "invalid_tolerance",
+    [float("nan"), float("inf"), -float("inf"), -1.0, True, np.bool_(True)],
+)
+def test_weight_bank_rejects_invalid_pilot_tolerance(
+    invalid_tolerance: object,
+) -> None:
+    bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+
+    with pytest.raises(ValueError, match="tolerance_hz.*finite and nonnegative"):
+        bank.get_weights_for_pilot_frequency(
+            FIRST_SHIPPED_PILOT_MHZ,
+            tolerance_hz=invalid_tolerance,
+        )
+
+
+def test_weight_bank_accepts_zero_tolerance_for_exact_pilot() -> None:
+    bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+
+    weights, valid = bank.get_weights_for_pilot_frequency(
+        FIRST_SHIPPED_PILOT_MHZ,
+        tolerance_hz=0.0,
+    )
+
+    assert valid is True
+    assert weights is not None
+
+
+@pytest.mark.parametrize(
+    ("field", "kwargs"),
+    [
+        ("K", {"K": 128.9}),
+        ("N", {"N": 3.9}),
+        ("reference_offset_bins", {"reference_offset_bins": 2.9}),
+    ],
+)
+def test_weight_bank_constructor_requires_exact_geometry(
+    field: str,
+    kwargs: dict[str, object],
+) -> None:
+    with pytest.raises(TypeError, match=field):
+        DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH, **kwargs)
+
+
+def test_weight_bank_expected_kernel_requires_exact_geometry() -> None:
+    with pytest.raises(TypeError, match="expected_kernel.K"):
+        DetectorWeightBank(
+            explicit_path=DEFAULT_WEIGHTS_PATH,
+            expected_kernel=(128.9, 3, 4, 2),
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_channel",
+    [14.9, True, np.bool_(True), "14"],
+)
+def test_weight_bank_physical_channel_requires_exact_integer(
+    invalid_channel: object,
+) -> None:
+    bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+
+    with pytest.raises(TypeError, match="physical channel"):
+        bank.get_weights_for_physical_channel(invalid_channel)
+
+
+@pytest.mark.parametrize(
+    "invalid_index",
+    [843.9, True, np.bool_(True), "843"],
+)
+def test_weight_bank_coarse_index_requires_exact_integer(
+    invalid_index: object,
+) -> None:
+    bank = DetectorWeightBank(explicit_path=DEFAULT_WEIGHTS_PATH)
+
+    with pytest.raises(TypeError, match="coarse channel index"):
+        bank._weights_for_channel_index(invalid_index)
 
 
 def test_noncontract_detector_spacing_field_is_rejected() -> None:
@@ -118,6 +290,18 @@ def test_k128_dtv14_dc_in_skipped_guard_not_reference() -> None:
     assert layout["dc_reference_shifted"] is False
     assert layout["forbidden_tone_in_skipped_guard"] is True
     assert layout["reference_placement_status"] == "nominal"
+
+
+@pytest.mark.parametrize("invalid_channel", [14.9, True, np.bool_(True), "14"])
+def test_target_layout_requires_exact_physical_channel(
+    invalid_channel: object,
+) -> None:
+    with pytest.raises(TypeError, match="physical channel.*integer"):
+        target_layout(
+            physical_channel=invalid_channel,
+            profile=_reference_profile(),
+            core=_core(k=128, reference_offset_bins=2),
+        )
 
 
 def test_target_on_forbidden_tone_hard_fails(monkeypatch) -> None:
@@ -213,6 +397,58 @@ def test_weight_bank_rejects_manifest_binary_binding_mismatch(tmp_path) -> None:
         json.dumps(manifest), encoding="utf-8"
     )
     with pytest.raises(ValueError, match="manifest/binary"):
+        DetectorWeightBank(explicit_path=copied)
+
+
+def test_weight_bank_rejects_receiver_profile_hash_mismatch(tmp_path) -> None:
+    copied = tmp_path / DEFAULT_WEIGHTS_PATH.name
+    shutil.copyfile(DEFAULT_WEIGHTS_PATH, copied)
+    source_manifest = DEFAULT_WEIGHTS_PATH.with_suffix(
+        DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
+    )
+    manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+    manifest["receiver_profile"]["channelizer"]["frequency_axis"][
+        "order"
+    ] = "ascending_rf"
+    copied.with_suffix(copied.suffix + ".manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="receiver.profile.hash|profile hash"):
+        DetectorWeightBank(explicit_path=copied)
+
+
+def test_weight_bank_rejects_fractional_manifest_coarse_index(tmp_path) -> None:
+    copied = tmp_path / DEFAULT_WEIGHTS_PATH.name
+    shutil.copyfile(DEFAULT_WEIGHTS_PATH, copied)
+    source_manifest = DEFAULT_WEIGHTS_PATH.with_suffix(
+        DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
+    )
+    manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+    manifest["target_reference_layout"][0]["coarse_channel_index"] = 843.9
+    copied.with_suffix(copied.suffix + ".manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    with pytest.raises(TypeError, match="coarse_channel_index.*integer"):
+        DetectorWeightBank(explicit_path=copied)
+
+
+def test_weight_bank_rejects_wrong_integer_manifest_coarse_index(tmp_path) -> None:
+    copied = tmp_path / DEFAULT_WEIGHTS_PATH.name
+    shutil.copyfile(DEFAULT_WEIGHTS_PATH, copied)
+    source_manifest = DEFAULT_WEIGHTS_PATH.with_suffix(
+        DEFAULT_WEIGHTS_PATH.suffix + ".manifest.json"
+    )
+    manifest = json.loads(source_manifest.read_text(encoding="utf-8"))
+    manifest["target_reference_layout"][0]["coarse_channel_index"] = 828
+    copied.with_suffix(copied.suffix + ".manifest.json").write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="coarse index disagrees"):
         DetectorWeightBank(explicit_path=copied)
 
 

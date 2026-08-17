@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from .products import (
+    atomic_savez_compressed,
     mean_where,
     relative_time_seconds,
     valid_mask_counts,
@@ -193,8 +194,7 @@ def write_reductions_npz(
         mask=mask,
         valid=valid,
     )
-    np.savez_compressed(path, **products)
-    return path
+    return atomic_savez_compressed(path, **products)
 
 
 __all__ = [

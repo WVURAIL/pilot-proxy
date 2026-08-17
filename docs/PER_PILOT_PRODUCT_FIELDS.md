@@ -9,6 +9,7 @@ listed in [`FINE_REDUCTION_PRODUCTS.md`](FINE_REDUCTION_PRODUCTS.md).
 schema_name = "pilotproxy_per_pilot_product"
 schema_revision = 1
 schema_version = "pilotproxy_per_pilot_product_v1"
+source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 
 The `pilot-proxy-detector` analyzer writes one product for one selected receiver
@@ -28,9 +29,11 @@ of consumed input files.
 | `pilot_frequency_hz` | `(1,)` | `float64` | ATSC pilot RF frequency |
 | `chime_frequency_hz` | `(1,)` | `float64` | CHIME coarse-channel center |
 | `nfft` | scalar | `int64` | Analysis frame and FFT length used for this product |
+| `sample_rate_hz` | scalar | `float64` | Positive acquisition sample rate; finite `unit_delta_time` values must equal its reciprocal |
 | `detector_window_samples` | scalar | `int64` | Receiver-selected CUDA detector window `K` (128 for CHIME; 64 for the current CHORD profiles) |
 | `num_input_streams` | scalar | `int64` | Input feed/polarization streams summed |
 | `sense` | scalar | `int64` | Spectral sense, `+1` or `-1` |
+| `source_event_key_schema_version` | scalar | `str` | Required namespaced event-identity contract; legacy basename-only products are rejected |
 
 The schema does not fix `nfft` to one value. The current software profile and
 tests use 16,384 samples, which is associated with the planned CHIME engine
@@ -82,6 +85,8 @@ reject_mask = valid && (p_target_u64 * reference_norm_sum_sq
 The integer cross multiplication is the recorded `mask_rule`. It avoids a
 floating-point threshold decision and uses the weight-norm flat-floor reference
 `null_power_ratio = 2*target_norm_sq/reference_norm_sum_sq` rather than assuming `null_power_ratio = 1`.
+The analyzer recomputes this bit from the exact stored powers and norms; a
+backend-provided mask bit is not accepted as authoritative.
 
 Reporting can derive `keep_mask = 1 - reject_mask`; the per-pilot product does
 not store a second copy.
@@ -169,13 +174,20 @@ The file also stores keys needed for resume and channel alignment:
 |---|---:|---|
 | `unit_keys` | `(U,)` | Sorted set of committed datatrawl unit keys |
 | `unit_order` | `(U,)` | Unit keys in analyzer consumption order |
-| `source_event_keys` | `(U,)` | Event identity used to align the same acquisition across `freq_id` products |
+| `source_event_keys` | `(U,)` | Namespaced event identity derived from the aligned `unit_order` entry and `freq_id`; combine recomputes and verifies every value |
+
+`unit_keys` and `unit_order` must each be unique and contain the same exact set.
+Every nonempty unit must own at least one frame through `frame_unit_index`; the
+only allowed zero-frame resume checkpoint also has zero units. These rules stop
+an unused unit from poisoning resume's completed-unit set.
 
 Resume checks the schema, `freq_id`, frame cap, detector geometry, calibration,
 weights, mask rule, detector contract, and reference placement. A source-tree
-hash change is allowed only when the remaining `detector_version` geometry and
-kernel tokens match. Other mismatches stop the run and require a clean output
-directory.
+hash or package-version change makes the full `detector_version` differ and
+stops the resume, even when the remaining geometry tokens match. This prevents
+one checkpoint from appending frames produced by a second implementation and
+then relabeling the earlier frames. Start a clean output directory for the new
+build.
 
 ---
 

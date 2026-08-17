@@ -25,10 +25,168 @@ import json
 from pathlib import Path
 from typing import Any, Mapping
 
+import numpy as np
+
+from pilot_proxy.atomic_io import atomic_write_json
+
 _DETECTOR_ANALYZER = "pilot-proxy-detector"
 _READER_FOR_ANALYZER = {
     _DETECTOR_ANALYZER: "chime-baseband-packed",  # native int4 -> lossless kernel pack
 }
+_SCAN_SCOPE_SCHEMA_VERSION = "pilotproxy_chime_scan_scope_v1"
+
+
+def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    atomic_write_json(path, payload)
+
+
+def _selection_values(selection: Any) -> list[int]:
+    if isinstance(selection, (list, tuple)):
+        return [int(value) for value in selection]
+    return [int(selection)]
+
+
+def _saved_unit_keys(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        with np.load(path, allow_pickle=False) as product:
+            if "unit_keys" not in product.files:
+                return set()
+            return {
+                str(value)
+                for value in np.asarray(product["unit_keys"]).reshape(-1).tolist()
+            }
+    except (OSError, TypeError, ValueError):
+        return set()
+
+
+def _framed_unit_keys(path: Path) -> set[str]:
+    """Saved unit keys that own at least one persisted detector frame.
+
+    A frame proves that a unit contributed data, not that the whole unit was
+    consumed: ``max_chunks_per_file`` deliberately stops the reader early.
+    Callers must classify these keys as completed or capped using the product's
+    scan parameters.
+    """
+    if not path.exists():
+        return set()
+    try:
+        with np.load(path, allow_pickle=False) as product:
+            unit_order = [
+                str(value)
+                for value in np.asarray(product["unit_order"]).reshape(-1).tolist()
+            ]
+            frame_units = np.asarray(
+                product["frame_unit_index"], dtype=np.int64
+            ).reshape(-1)
+        if np.any(frame_units < 0) or np.any(frame_units >= len(unit_order)):
+            return set()
+        return {unit_order[int(index)] for index in np.unique(frame_units)}
+    except (KeyError, OSError, TypeError, ValueError):
+        return set()
+
+
+def _stored_chunk_cap(path: Path) -> tuple[bool, int | None]:
+    """Return ``(known, cap)`` for a saved product's per-file cap."""
+    if not path.exists():
+        return False, None
+    try:
+        with np.load(path, allow_pickle=False) as product:
+            value = np.asarray(product["max_chunks_per_file"])
+            if value.shape != () or value.dtype.kind not in "iu":
+                return False, None
+            cap = int(value.item())
+    except (KeyError, OSError, TypeError, ValueError):
+        return False, None
+    return True, cap if cap >= 0 else None
+
+
+def _quarantined_unit_keys(
+    units: list[Any], quarantine_path: Path
+) -> set[str]:
+    keys: set[str] = set()
+    names: set[str] = set()
+    try:
+        lines = quarantine_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return set()
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+        key = row.get("quarantine_key", row.get("key"))
+        if key is not None:
+            keys.add(str(key))
+        elif row.get("name") is not None:
+            names.add(str(row["name"]))
+    quarantined: set[str] = set()
+    for unit in units:
+        metadata = getattr(unit, "meta", None) or {}
+        stable_key = str(metadata.get("quarantine_key", unit.key))
+        if stable_key in keys or str(unit.name) in names:
+            quarantined.add(str(unit.key))
+    return quarantined
+
+
+def _quarantined_units(units: list[Any], quarantine_path: Path) -> int:
+    return len(_quarantined_unit_keys(units, quarantine_path))
+
+
+def _analyzer_progress_keys(analyzer: Any, product_path: Path) -> set[str]:
+    keys = _framed_unit_keys(product_path)
+    processed = getattr(analyzer, "processed_keys", None)
+    if callable(processed):
+        try:
+            keys.update(str(value) for value in processed())
+        except Exception:
+            pass
+    return keys
+
+
+def _failed_current_unit_count(
+    exc: BaseException,
+    units: list[Any],
+    *,
+    completed_keys: set[str],
+    quarantined_keys: set[str],
+    max_files: int | None,
+) -> int:
+    """Identify only the in-order unit named by a pipeline unit failure."""
+    considered = units if not max_files else units[: int(max_files)]
+    pending = [
+        unit
+        for unit in considered
+        if str(unit.key) not in completed_keys
+        and str(unit.key) not in quarantined_keys
+    ]
+    if not pending or not isinstance(exc, RuntimeError):
+        return 0
+    message = str(exc)
+    return 1 if str(pending[0].name) in message else 0
+
+
+def _refresh_scope_totals(scope: dict[str, Any]) -> None:
+    entries = list(scope["pilots"])
+    count_fields = (
+        "requested",
+        "enumerated",
+        "completed",
+        "capped",
+        "failed",
+        "quarantined",
+        "unprocessed",
+        "extra_completed",
+    )
+    scope["totals"] = {
+        field: int(sum(int(entry.get(field, 0)) for entry in entries))
+        for field in count_fields
+    }
+    scope["totals"]["pilots_requested"] = len(entries)
+    scope["complete"] = bool(entries) and all(
+        entry.get("status") == "complete" for entry in entries
+    )
 
 
 def _named_inventory_path(name: str, source_root: str | Path | None = None) -> Path:
@@ -191,6 +349,7 @@ def run_chime_scan(
     download_workers: int = 1,
     max_staged_files: int = 1,
     checkpoint_every: int | None = None,
+    allow_partial: bool = False,
     analyzer_options: Mapping[str, Any] | None = None,
     verbose: bool = True,
 ) -> dict[str, Path]:
@@ -219,6 +378,11 @@ def run_chime_scan(
     surfacing as every file failing to analyze). There is no CPU detector path for
     production (the CPU reference exists only as a test fixture), so there is no
     GPU/CPU toggle here.
+
+    By default every requested pilot must enumerate at least one unit and every
+    enumerated unit must complete. ``allow_partial=True`` is the explicit escape
+    hatch for capped smoke runs or intentionally incomplete inventories; either
+    way, ``scan_scope.json`` durably records the per-pilot outcome.
     """
     from datatrawl import pipeline, registry
     from datatrawl.instruments import load_instrument
@@ -337,7 +501,8 @@ def run_chime_scan(
             f"(expected 'local' or 'cadc-datatrail')."
         )
     if max_chunks_per_file is not None:
-        options["max_chunks_per_file"] = int(max_chunks_per_file)
+        max_chunks_per_file = int(max_chunks_per_file)
+        options["max_chunks_per_file"] = max_chunks_per_file
 
     ctx = RunContext(instrument=inst, options=options)
 
@@ -366,32 +531,201 @@ def run_chime_scan(
     work.mkdir(parents=True, exist_ok=True)
     tmp_dir = str(work / "_staging")
     quarantine_path = str(work / "quarantine.jsonl")
+    scope_path = Path(output_dir) / "scan_scope.json"
+    scope: dict[str, Any] = {
+        "schema_version": _SCAN_SCOPE_SCHEMA_VERSION,
+        "source": str(source),
+        "allow_partial": bool(allow_partial),
+        "max_chunks_per_file": max_chunks_per_file,
+        "requested_selections": [_selection_values(run) for run in runs],
+        "requested_pilots": len(runs),
+        "pilots": [
+            {
+                "selection": _selection_values(run),
+                "requested": 0,
+                "enumerated": 0,
+                "completed": 0,
+                "capped": 0,
+                "failed": 0,
+                "quarantined": 0,
+                "unprocessed": 0,
+                "extra_completed": 0,
+                "non_durable_completed": 0,
+                "extra_unit_keys": [],
+                "capped_unit_keys": [],
+                "zero_frame_unit_keys": [],
+                "status": "pending",
+            }
+            for run in runs
+        ],
+    }
+    _refresh_scope_totals(scope)
+    _atomic_write_json(scope_path, scope)
 
-    product_paths: list[str] = []
-    for sub_sel in runs:
+    prepared_runs: list[tuple[Any, list[Any], Path]] = []
+    for run_index, sub_sel in enumerate(runs):
+        scope_entry = scope["pilots"][run_index]
         ctx.selection = sub_sel
         units = list(src.enumerate(ctx))
+        unit_keys = {str(unit.key) for unit in units}
+        scope_entry["enumerated"] = len(units)
+        scope_entry["requested"] = len(units)
+        scope_entry["requested_units"] = len(units)
+        scope_entry["unprocessed"] = len(units)
         stem = ("_".join(str(s) for s in sub_sel)
                 if isinstance(sub_sel, (list, tuple)) else str(sub_sel))
+        scope_entry["product"] = str(work / f"{stem}.npz")
+        out_path = work / f"{stem}.npz"
+        saved_keys = _saved_unit_keys(out_path)
+        framed_saved_keys = _framed_unit_keys(out_path)
+        _saved_cap_known, saved_chunk_cap = _stored_chunk_cap(out_path)
+        extra_keys = sorted(saved_keys - unit_keys)
+        zero_frame_keys = sorted(
+            (saved_keys & unit_keys) - framed_saved_keys
+        )
+        scope_entry["extra_completed"] = len(extra_keys)
+        scope_entry["extra_unit_keys"] = extra_keys
+        scope_entry["zero_frame_unit_keys"] = zero_frame_keys
+        prepared_runs.append((sub_sel, units, out_path))
+        # Enumeration is durable before staging or analyzing any file, so an
+        # interruption still leaves an auditable requested scope.
+        _refresh_scope_totals(scope)
+        _atomic_write_json(scope_path, scope)
+        if extra_keys or zero_frame_keys:
+            quarantined = _quarantined_units(units, Path(quarantine_path))
+            framed_keys = unit_keys & framed_saved_keys
+            capped_keys = framed_keys if saved_chunk_cap is not None else set()
+            completed_keys = framed_keys - capped_keys
+            scope_entry.update(
+                completed=len(completed_keys),
+                capped=len(capped_keys),
+                capped_unit_keys=sorted(capped_keys),
+                quarantined=quarantined,
+                failed=0,
+                unprocessed=max(
+                    0,
+                    len(units)
+                    - len(completed_keys)
+                    - len(capped_keys)
+                    - quarantined,
+                ),
+                status="stale" if extra_keys else "zero_frames",
+            )
+            _refresh_scope_totals(scope)
+            _atomic_write_json(scope_path, scope)
+        elif not units:
+            scope_entry["status"] = "empty"
+            _refresh_scope_totals(scope)
+            _atomic_write_json(scope_path, scope)
+
+    product_paths: list[str] = []
+    for run_index, (sub_sel, units, out_path) in enumerate(prepared_runs):
+        scope_entry = scope["pilots"][run_index]
+        unit_keys = {str(unit.key) for unit in units}
+        if scope_entry["status"] in {"stale", "zero_frames"}:
+            continue
         if not units:
             if verbose:
                 print(f"  [chime-scan] select={sub_sel}: no files matched; skipping",
                       flush=True)
             continue
-        out = str(work / f"{stem}.npz")
+        ctx.selection = sub_sel
+        out = str(out_path)
         if verbose:
             print(f"  [chime-scan] select={sub_sel}: {len(units)} file(s) -> {out}",
-                  flush=True)
+                      flush=True)
         analyzer_obj = analyzer_cls()  # fresh analyzer per product
-        result = pipeline.run(
-            source=src, reader=rdr, analyzer=analyzer_obj, units=units,
-            out_path=out, tmp_dir=tmp_dir, ctx=ctx,
-            download_workers=int(download_workers),
-            max_staged_files=int(max_staged_files),
-            max_files=max_files, max_frames_per_file=max_chunks_per_file,
-            checkpoint_every=(50 if checkpoint_every is None else int(checkpoint_every)),
-            quarantine_path=quarantine_path, verbose=False,
+        try:
+            result = pipeline.run(
+                source=src, reader=rdr, analyzer=analyzer_obj, units=units,
+                out_path=out, tmp_dir=tmp_dir, ctx=ctx,
+                download_workers=int(download_workers),
+                max_staged_files=int(max_staged_files),
+                max_files=max_files, max_frames_per_file=max_chunks_per_file,
+                checkpoint_every=(
+                    50 if checkpoint_every is None else int(checkpoint_every)
+                ),
+                quarantine_path=quarantine_path, verbose=False,
+            )
+        except BaseException as exc:
+            progress_keys = _analyzer_progress_keys(analyzer_obj, Path(out))
+            durable_framed_keys = unit_keys & _framed_unit_keys(Path(out))
+            attempted_completed_keys = unit_keys & progress_keys
+            quarantined_keys = _quarantined_unit_keys(
+                units, Path(quarantine_path)
+            )
+            failed = _failed_current_unit_count(
+                exc,
+                units,
+                completed_keys=attempted_completed_keys,
+                quarantined_keys=quarantined_keys,
+                max_files=max_files,
+            )
+            saved_cap_known, saved_chunk_cap = _stored_chunk_cap(Path(out))
+            cap_is_active = (
+                saved_chunk_cap is not None
+                if saved_cap_known
+                else max_chunks_per_file is not None
+            )
+            capped_keys = durable_framed_keys if cap_is_active else set()
+            completed_keys = durable_framed_keys - capped_keys
+            quarantined = len(quarantined_keys)
+            scope_entry.update(
+                completed=len(completed_keys),
+                capped=len(capped_keys),
+                capped_unit_keys=sorted(capped_keys),
+                non_durable_completed=len(
+                    attempted_completed_keys - durable_framed_keys
+                ),
+                quarantined=quarantined,
+                failed=failed,
+                unprocessed=max(
+                    0,
+                    len(units)
+                    - len(completed_keys)
+                    - len(capped_keys)
+                    - quarantined
+                    - failed,
+                ),
+                status="aborted",
+            )
+            _refresh_scope_totals(scope)
+            _atomic_write_json(scope_path, scope)
+            raise
+        framed_keys = unit_keys & _framed_unit_keys(Path(out))
+        capped_keys = framed_keys if max_chunks_per_file is not None else set()
+        completed_keys = framed_keys - capped_keys
+        completed = len(completed_keys)
+        capped = len(capped_keys)
+        failed = int(getattr(result, "n_failed", 0))
+        quarantined = _quarantined_units(units, Path(quarantine_path))
+        unprocessed = max(
+            0, len(units) - completed - capped - failed - quarantined
         )
+        complete = (
+            max_chunks_per_file is None
+            and completed == len(units)
+            and failed == 0
+            and quarantined == 0
+            and unprocessed == 0
+        )
+        scope_entry.update(
+            completed=completed,
+            capped=capped,
+            capped_unit_keys=sorted(capped_keys),
+            failed=failed,
+            quarantined=quarantined,
+            unprocessed=unprocessed,
+            status=(
+                "complete"
+                if complete
+                else "capped"
+                if capped
+                else "partial"
+            ),
+        )
+        _refresh_scope_totals(scope)
+        _atomic_write_json(scope_path, scope)
         # The engine only writes the product if at least one unit was accumulated;
         # if every unit failed/quarantined there is no product (or it has zero
         # frames). Treat that as an error rather than silently feeding an absent/
@@ -401,21 +735,52 @@ def run_chime_scan(
         # resumed) instead of n_new, so a relaunch that finds a channel already
         # complete (n_new == 0) is recognized as produced rather than mistaken
         # for a failure.
-        produced = Path(out).exists() and int(getattr(result, "n_done", 0)) > 0
+        produced = Path(out).exists() and bool(framed_keys)
         if not produced:
-            raise SystemExit(
-                f"chime-scan: freq_id {sub_sel}: no usable product; "
-                f"{int(getattr(result, 'n_failed', 0))} of {len(units)} unit(s) "
-                f"failed, {int(getattr(result, 'n_quarantined', 0))} quarantined "
-                f"(see {quarantine_path}). For pilot-proxy-detector this is most often a "
-                f"missing GPU/cupy environment; run on a GPU node."
-            )
+            continue
         product_paths.append(out)
+
+    incomplete = [
+        entry for entry in scope["pilots"] if entry.get("status") != "complete"
+    ]
+    stale = [
+        entry
+        for entry in scope["pilots"]
+        if entry.get("extra_unit_keys") or entry.get("zero_frame_unit_keys")
+    ]
+    if stale:
+        detail = "; ".join(
+            f"select={entry['selection']}: extra saved units="
+            f"{entry['extra_unit_keys']}, zero-frame saved units="
+            f"{entry['zero_frame_unit_keys']}"
+            for entry in stale
+        )
+        raise SystemExit(
+            "chime-scan: saved per-pilot product does not match the current "
+            f"enumeration ({detail}); refusing to publish stale frames. "
+            f"Details: {scope_path}. Use a clean output directory or restore "
+            "the original inventory."
+        )
+    if incomplete and not allow_partial:
+        detail = "; ".join(
+            f"select={entry['selection']}: enumerated={entry['enumerated']}, "
+            f"completed={entry['completed']}, capped={entry['capped']}, "
+            f"failed={entry['failed']}, "
+            f"quarantined={entry['quarantined']}, "
+            f"unprocessed={entry['unprocessed']}"
+            for entry in incomplete
+        )
+        no_product = "no usable product; " if not product_paths else ""
+        raise SystemExit(
+            f"chime-scan: {no_product}incomplete requested scope; refusing to publish a "
+            f"partial run ({detail}). Details: {scope_path}. Rerun to resume, "
+            "or pass --allow-partial to accept this incomplete scope explicitly."
+        )
 
     if not product_paths:
         raise SystemExit(
             "chime-scan: no products produced; no files matched the selection "
-            f"(source={source}, select={select})"
+            f"(source={source}, select={select}); scope: {scope_path}"
         )
 
     try:
@@ -423,14 +788,15 @@ def run_chime_scan(
     except CombineEmptyIntersectionError as exc:
         print(f"[chime-scan] terminal combine skipped: {exc}", flush=True)
         print(
-            "[chime-scan] all per-pilot products are complete under "
+            "[chime-scan] per-pilot products are preserved under "
             f"{work}; the scan itself succeeded. Choose a channel subset with "
             "`pilot-proxy chime-combine --report --work-dir <work>` and stack "
             "it with `chime-combine --work-dir <work> --drop <freq_ids> "
             "--output-dir <run>`.",
             flush=True,
         )
-        return {"per_pilot_work_dir": work}
+        return {"per_pilot_work_dir": work, "scan_scope": scope_path}
+    outputs["scan_scope"] = scope_path
     if verbose:
         print(f"[chime-scan] combined {len(product_paths)} pilot product(s) -> {output_dir}",
               flush=True)

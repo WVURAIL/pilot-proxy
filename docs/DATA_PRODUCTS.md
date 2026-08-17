@@ -85,6 +85,23 @@ created merely by running the detector. Its principal fields are:
 - `num_errors`;
 - `errors`.
 
+### `.pilotproxy-combine-generation.json`
+
+`chime-scan`/`chime-combine` publishes this hidden generation manifest last.
+It contains a unique generation ID and SHA-256 digest for every canonical file
+in that combined output set. A failed publication that is rolled back also
+advances the generation ID. `validate-products` reads the identity before and
+after validation, checks the file digests, and refuses a run if publication
+overlapped its reads. The hidden `.pilotproxy-combine-publish.json` journal is
+present only while a transaction needs completion or recovery and also makes
+validation fail closed. A kernel-backed exclusive publish lock serializes
+writers across recovery, journal preparation, and canonical replacement; a
+second writer cannot replace or remove the active writer's journal.
+
+Direct `chime-run` outputs predate and do not require the combine-generation
+manifest; in the absence of both combine metadata files they retain their
+existing validation behavior.
+
 ## Detector NPZ
 
 ### `chime_detector_outputs.npz`

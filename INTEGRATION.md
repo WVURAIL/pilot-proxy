@@ -68,6 +68,11 @@ discovery, and runs the offline datatrawl integration tests. On a GPU node, it
 requires `nvcc`, resolves CuPy, builds the CUDA kernel, and verifies that the
 kernel loads. The exact invocation and the manual fallback are in
 [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup).
+The safety guard refuses protected, checkout-overlapping, and unowned non-empty
+targets. To adopt a genuine virtual environment created by an older checkout,
+set `PILOT_PROXY_ADOPT_LEGACY_VENV=1` for that first guarded rerun; the durable
+ownership record then survives `venv --clear` and makes interrupted rebuilds
+retryable.
 
 The operational detector has no CPU fallback in `chime-scan`. Run it on a GPU
 node with a CuPy build that matches the CUDA runtime. The CPU detector injections
@@ -140,7 +145,7 @@ find "$LOCAL_H5" -maxdepth 1 -name "*.h5"   | sed -E 's/.*_([0-9]+)\.h5$/\1/'   
 Then run one file and one chunk as a bounded GPU smoke test:
 
 ```bash
-pilot-proxy chime-scan   --input-dir "$LOCAL_H5"   --output-dir "$HOME/pilot_proxy_runs/detector_smoke_844"   --source local   --analyzer pilot-proxy-detector   --select 844   --max-files 1   --max-chunks-per-file 1
+pilot-proxy chime-scan   --input-dir "$LOCAL_H5"   --output-dir "$HOME/pilot_proxy_runs/detector_smoke_844"   --source local   --analyzer pilot-proxy-detector   --select 844   --max-files 1   --max-chunks-per-file 1   --allow-partial
 ```
 
 ---
@@ -192,8 +197,14 @@ pilot-proxy chime-scan \
   --analyzer pilot-proxy-detector \
   --select 844 \
   --max-files 1 \
-  --max-chunks-per-file 1
+  --max-chunks-per-file 1 \
+  --allow-partial
 ```
+
+`--allow-partial` is required here because the smoke-test cap deliberately
+leaves inventoried files unprocessed. The resulting `scan_scope.json` still
+records that incomplete scope; omit the flag for production scans so an
+incomplete requested inventory fails closed.
 
 After the bounded run succeeds, the following command scans every `freq_id`
 present in the inventory. `--select` defaults to that set, `--source` is inferred

@@ -4,10 +4,13 @@
 from __future__ import annotations
 
 import json
+import operator
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
+
+import numpy as np
 
 from pilot_proxy.detector_constants import (
     DEFAULT_DETECTOR_WINDOW_SAMPLES,
@@ -104,6 +107,16 @@ def _require_int(value: Any, field_name: str) -> int:
     return value
 
 
+def _exact_integer(value: object, *, field: str) -> int:
+    """Validate programmatic core geometry without truncation."""
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        return operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+
+
 def _require_bool(value: Any, field_name: str) -> bool:
     if not isinstance(value, bool):
         raise ValueError(f"{field_name} must be a boolean.")
@@ -139,7 +152,11 @@ class DetectorCoreProfile:
         if self.detector_core_id != DETECTOR_CORE_ID_PILOT_PROXY_CUDA_LOCAL_REFERENCE_POWER_RATIO:
             raise ValueError(f"unsupported detector_core_id: {self.detector_core_id!r}")
         supported = tuple(
-            int(value) for value in self.supported_detector_window_samples
+            _exact_integer(
+                value,
+                field="supported_detector_window_samples",
+            )
+            for value in self.supported_detector_window_samples
         )
         expected_supported = tuple(sorted(SUPPORTED_DETECTOR_WINDOW_SAMPLES))
         if supported != expected_supported:
@@ -149,11 +166,36 @@ class DetectorCoreProfile:
                 f"{list(supported)}."
             )
         object.__setattr__(self, "supported_detector_window_samples", supported)
-        if int(self.detector_window_samples) not in supported:
+        detector_window = _exact_integer(
+            self.detector_window_samples,
+            field="detector_window_samples",
+        )
+        if detector_window not in supported:
             raise ValueError(
                 "detector_window_samples must be one of "
                 f"{list(supported)}; got {self.detector_window_samples}."
             )
+        object.__setattr__(self, "detector_window_samples", detector_window)
+        exact_locked_fields = {
+            "num_weight_terms": _exact_integer(
+                self.num_weight_terms,
+                field="num_weight_terms",
+            ),
+            "skipped_guard_bins": _exact_integer(
+                self.skipped_guard_bins,
+                field="skipped_guard_bins",
+            ),
+            "packed_complex_bits": _exact_integer(
+                self.packed_complex_bits,
+                field="packed_complex_bits",
+            ),
+            "sample_bits_per_component": _exact_integer(
+                self.sample_bits_per_component,
+                field="sample_bits_per_component",
+            ),
+        }
+        for field, value in exact_locked_fields.items():
+            object.__setattr__(self, field, value)
         if self.num_weight_terms != LOCKED_NUM_WEIGHT_TERMS:
             raise ValueError("num_weight_terms must be locked to 3.")
         if self.skipped_guard_bins != LOCKED_SKIPPED_GUARD_BINS:
@@ -195,7 +237,10 @@ class DetectorCoreProfile:
             )
         if self.per_frequency_threshold is not False:
             raise ValueError("per_frequency_threshold must be false.")
-        limits = {str(key): int(value) for key, value in self.fixed_point_limits.items()}
+        limits = {
+            str(key): _exact_integer(value, field=f"fixed_point_limits.{key}")
+            for key, value in self.fixed_point_limits.items()
+        }
         expected_limits = {
             "dot_product_component_accumulator_bits_target": (
                 DOT_PRODUCT_COMPONENT_ACCUMULATOR_BITS_TARGET
@@ -222,7 +267,7 @@ class DetectorCoreProfile:
         """Select one supported compile-time detector window length."""
         return replace(
             self,
-            detector_window_samples=int(detector_window_samples),
+            detector_window_samples=detector_window_samples,
         )
 
     @classmethod

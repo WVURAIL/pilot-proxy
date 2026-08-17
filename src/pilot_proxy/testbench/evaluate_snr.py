@@ -10,17 +10,11 @@ import json
 import math
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any
 
 import numpy as np
-
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SRC_ROOT = REPO_ROOT / "src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
 
 from pilot_proxy.detector_geometry import (  # noqa: E402
     DetectorFrameLayout,
@@ -71,7 +65,13 @@ from pilot_proxy.integration import QUANTIZATION_SCALE_MODE_GLOBAL  # noqa: E402
 from pilot_proxy.integration.packing import (  # noqa: E402
     pack_channelized_streams_for_detector,
 )
-from pilot_proxy.paths import DEFAULT_LIB_PATH, DEFAULT_WEIGHTS_PATH  # noqa: E402
+from pilot_proxy.paths import (  # noqa: E402
+    DEFAULT_LIB_PATH,
+    DEFAULT_WEIGHTS_PATH,
+    GENERATED_DIR,
+    SOURCE_CHECKOUT_ROOT,
+    resolve_user_path,
+)
 from pilot_proxy.reference_channelizer import (  # noqa: E402
     REFERENCE_ADC_SAMPLE_RATE_HZ,
     REFERENCE_BAND_LOWER_HZ,
@@ -99,6 +99,10 @@ from pilot_proxy.testbench.quantize import (  # noqa: E402
     LOCKED_DETECTOR_WINDOW_SAMPLES,
 )
 from pilot_proxy.integration.packing import estimate_complex_scale  # noqa: E402
+from pilot_proxy.secondary_python import (  # noqa: E402
+    package_only_pythonpath,
+    prepend_pythonpath,
+)
 
 HZ_PER_MHZ = 1.0e6
 HALF_SCALE = 2.0
@@ -231,6 +235,9 @@ def add_gnuradio_awgn_for_snr(
     snr_bandwidth_hz: float,
 ) -> tuple[np.ndarray, float, float, dict[str, Any]]:
     """Add AWGN with GNU Radio analog.noise_source_c in a helper process."""
+    caller_cwd = Path.cwd()
+    input_iq_path = resolve_user_path(input_iq_path, relative_to=caller_cwd)
+    output_iq_path = resolve_user_path(output_iq_path, relative_to=caller_cwd)
     clean, clean_signal_power, noise_power = _signal_and_noise_power_for_snr(
         signal,
         snr_db=snr_db,
@@ -238,14 +245,6 @@ def add_gnuradio_awgn_for_snr(
         snr_bandwidth_hz=snr_bandwidth_hz,
     )
     metadata_path = output_iq_path.with_suffix(output_iq_path.suffix + ".json")
-    env = os.environ.copy()
-    existing_pythonpath = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        str(SRC_ROOT)
-        if not existing_pythonpath
-        else str(SRC_ROOT) + os.pathsep + existing_pythonpath
-    )
-    env["PYTHONNOUSERSITE"] = "1"
     cmd = [
         str(gnuradio_python),
         "-m",
@@ -267,13 +266,20 @@ def add_gnuradio_awgn_for_snr(
         "--seed",
         str(int(seed)),
     ]
-    result = subprocess.run(
-        cmd,
-        cwd=REPO_ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-    )
+    with package_only_pythonpath(gnuradio_python) as package_bridge:
+        env = os.environ.copy()
+        if package_bridge is not None:
+            prepend_pythonpath(env, package_bridge)
+        elif SOURCE_CHECKOUT_ROOT is not None:
+            prepend_pythonpath(env, SOURCE_CHECKOUT_ROOT / "src")
+        env["PYTHONNOUSERSITE"] = "1"
+        result = subprocess.run(
+            cmd,
+            cwd=caller_cwd,
+            env=env,
+            capture_output=True,
+            text=True,
+        )
     if result.returncode != 0:
         details = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(
@@ -501,8 +507,8 @@ def _kernel_measurements(
                 kernel.compute_numden_mask_rational_half_checked(
                     handle,
                     weights.ctypes.data,
-                    int(threshold["threshold_half_num"]),
-                    int(threshold["threshold_half_den"]),
+                    threshold["threshold_half_num"],
+                    threshold["threshold_half_den"],
                     d_mask_num.data.ptr,
                     d_mask_den.data.ptr,
                     d_mask.data.ptr,
@@ -514,8 +520,8 @@ def _kernel_measurements(
                 kernel.compute_numden_mask_rational_half(
                     handle,
                     weights.ctypes.data,
-                    int(threshold["threshold_half_num"]),
-                    int(threshold["threshold_half_den"]),
+                    threshold["threshold_half_num"],
+                    threshold["threshold_half_den"],
                     d_mask_num.data.ptr,
                     d_mask_den.data.ptr,
                     d_mask.data.ptr,
@@ -1220,7 +1226,7 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=REPO_ROOT / "generated" / "dtv_snr_eval",
+        default=GENERATED_DIR / "dtv_snr_eval",
     )
     parser.add_argument(
         "--requested-data-shelf-snr-db",
@@ -1308,7 +1314,7 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser.add_argument(
         "--waveform-audit-json",
         type=Path,
-        default=REPO_ROOT / "generated" / "atsc" / "atsc_waveform_audit.json",
+        default=GENERATED_DIR / "atsc" / "atsc_waveform_audit.json",
         help="Optional waveform-audit JSON to embed in the validation report.",
     )
     parser.add_argument(
@@ -1417,6 +1423,15 @@ def main(argv: list[str] | None = None) -> int:
 
 def run(args: argparse.Namespace) -> int:
     """Run the evaluator from a parsed namespace (shared with the CLI)."""
+    caller_cwd = Path.cwd()
+    args.input_iq = resolve_user_path(args.input_iq, relative_to=caller_cwd)
+    args.output_dir = resolve_user_path(args.output_dir, relative_to=caller_cwd)
+    args.waveform_audit_json = resolve_user_path(
+        args.waveform_audit_json,
+        relative_to=caller_cwd,
+    )
+    args.lib_path = resolve_user_path(args.lib_path, relative_to=caller_cwd)
+    args.weights_path = resolve_user_path(args.weights_path, relative_to=caller_cwd)
     if args.bits != LOCKED_BITS_PER_COMPONENT:
         raise SystemExit("This evaluator is intended for locked 4+4 bit input.")
     if args.detector_window_samples != LOCKED_DETECTOR_WINDOW_SAMPLES:

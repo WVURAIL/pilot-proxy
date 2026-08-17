@@ -4,6 +4,7 @@
 schema_name = "pilotproxy_per_pilot_product"
 schema_revision = 1
 schema_version = "pilotproxy_per_pilot_product_v1"
+source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 
 This is the only supported per-pilot product contract. PilotProxy had no public
@@ -42,3 +43,9 @@ Resume and combine require the exact schema identity, decision contract,
 geometry, timing identity, weights, and detector provenance. A mismatch is an
 error. Current runtime code contains no aliases, adapters, repair paths, or
 fallback readers for pre-release products.
+
+The source-event identity version is required even though the enclosing product
+schema remains revision 1. It gates the change from historical basename-only
+keys to keys that retain the complete archive or campaign namespace. Products
+without this field cannot be combined or resumed because identical basenames in
+different campaigns are not the same acquisition.

@@ -106,7 +106,7 @@ def test_combine_matches_multipilot_runner(tmp_path):
                             f_center_mhz=mhz, f_tone_bb=1200.0 + 10 * ch, seed=ch)
         with h5py.File(p, "a") as h:   # timed inputs -> combined sample_rate = 1/delta_time
             h.attrs["delta_time"] = 1.0 / fmt.FS
-            h.attrs["time0_ctime"] = 1.0e9 + ch
+            h.attrs["time0_ctime"] = 1.0e9
         files[ch] = p
 
     profile = dataclasses.replace(

@@ -93,7 +93,7 @@ def _build_work_dir(tmp_path):
                             f_center_mhz=mhz, f_tone_bb=1200.0 + 10 * ch, seed=ch)
         with h5py.File(path, "a") as handle:
             handle.attrs["delta_time"] = 1.0 / fmt.FS
-            handle.attrs["time0_ctime"] = 1.0e9 + ch
+            handle.attrs["time0_ctime"] = 1.0e9
         ctx = RunContext(instrument=inst, selection=[FREQ_IDS[ch]], options={
             "detector_fn": _cpu_ref_detector_fn,
             "kernel": _stub_kernel(K),

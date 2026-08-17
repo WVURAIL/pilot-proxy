@@ -221,7 +221,9 @@ def test_scan_ragged_inventory_combines_intersection(tmp_path, monkeypatch):
     drops = {p["freq_id"]: p["n_frames_dropped"] for p in align["by_pilot"]}
     assert drops == {844: 2, 829: 2, 752: 0}
     with np.load(out / "chime_frame_identity.npz") as ident:
-        assert set(ident["frame_event_key"].tolist()) == {"baseband_100.h5"}
+        assert set(ident["frame_event_key"].tolist()) == {
+            "cadc:TEST/baseband_100.h5"
+        }
 
     # report + subset knob over the same work dir
     work = sorted((out / "_per_pilot").glob("*.npz"))
@@ -321,29 +323,16 @@ def test_invariants_allow_release_version_bump_same_geometry():
     assert len(notes["detector_versions"]) == 2
 
 
-def test_resume_provenance_token_policy():
-    """Specification of the resume identity rule, shared by the detector's
-    resume check and combine's _check_invariants: detector_version strings
-    differing ONLY in build-identity tokens (`pilot-proxy/<version>` and
-    `source=`) are geometry-identical and must not block resume; any other
-    token difference must.
-
-    Both sites import detector_version_geometry, so this asserts against the
-    shipped helper rather than a re-implementation. An earlier copy of this
-    test re-derived the rule inline and hardcoded one version on both sides,
-    which is exactly why the 1.0.0 release bump reached production before
-    anything caught it.
-    """
+def test_combine_provenance_token_policy():
+    """Combine may retain distinct builds; resume is tested as exact elsewhere."""
     from pilot_proxy.provenance import detector_version_geometry as geom
-    from pilot_proxy.datatrawl_plugins import combine, detector
+    from pilot_proxy.datatrawl_plugins import combine
 
     a, b = _ver("aaa111"), _ver("bbb222")
-    assert a != b and geom(a) == geom(b)                    # source-only: continue
+    assert a != b and geom(a) == geom(b)                    # stack, retaining both
     c = _ver("aaa111", version="1.0.0")
-    assert a != c and geom(a) == geom(c)                    # version bump: continue
+    assert a != c and geom(a) == geom(c)
     d = _ver("aaa111", kernel="other")
-    assert geom(a) != geom(d)                               # kernel change: refuse
+    assert geom(a) != geom(d)
 
-    # Both enforcement sites resolve to this one helper.
     assert combine._version_geometry(a) == geom(a)
-    assert detector.detector_version_geometry is geom

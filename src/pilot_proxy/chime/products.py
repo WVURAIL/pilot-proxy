@@ -4,11 +4,16 @@
 from __future__ import annotations
 
 import csv
+import os
 from pathlib import Path
 from typing import Any, Sequence
 
 import numpy as np
 
+from pilot_proxy.atomic_io import (
+    create_temporary_sibling,
+    fsync_directory,
+)
 from pilot_proxy.detector_contract import NORMALIZED_POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.json_utils import write_json_strict
 from pilot_proxy.schema_identity import schema_token
@@ -17,6 +22,28 @@ from .hdf5_input import ChimePilotDataset, dataset_manifest
 CHIME_DETECTOR_OUTPUTS_FILENAME = "chime_detector_outputs.npz"
 CHIME_SPECTROGRAM_CACHE_FILENAME = "chime_spectrogram_cache.npz"
 CHIME_INTEGRATED_SPECTRA_FILENAME = "chime_integrated_spectra.npz"
+CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME = ".pilotproxy-combine-publish.json"
+CHIME_COMBINE_PUBLISH_LOCK_FILENAME = ".pilotproxy-combine-publish.lock"
+CHIME_COMBINE_GENERATION_MANIFEST_FILENAME = (
+    ".pilotproxy-combine-generation.json"
+)
+CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA = (
+    "pilotproxy_combine_generation_v1"
+)
+CHIME_COMBINE_CANONICAL_RELATIVE_PATHS = frozenset(
+    {
+        CHIME_DETECTOR_OUTPUTS_FILENAME,
+        CHIME_SPECTROGRAM_CACHE_FILENAME,
+        CHIME_INTEGRATED_SPECTRA_FILENAME,
+        "chime_reductions_10s.npz",
+        "chime_frame_identity.npz",
+        "run_config.json",
+        "stats.json",
+        "input_manifest.json",
+        "tables/mask_summary_by_pilot.csv",
+        CHIME_COMBINE_GENERATION_MANIFEST_FILENAME,
+    }
+)
 CHIME_INPUT_MANIFEST_SCHEMA_NAME = "pilotproxy_chime_input_manifest"
 CHIME_INPUT_MANIFEST_SCHEMA_REVISION = 1
 CHIME_INPUT_MANIFEST_SCHEMA_TOKEN = schema_token(
@@ -30,6 +57,31 @@ SCAN_INPUT_MANIFEST_SCHEMA_TOKEN = schema_token(
     SCAN_INPUT_MANIFEST_SCHEMA_REVISION,
 )
 SAMPLE_RATE_HZ = 390_625.0
+
+
+def atomic_savez_compressed(path: Path, **arrays: np.ndarray) -> Path:
+    """Write and CRC-read an NPZ beside its destination before atomic replace."""
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = create_temporary_sibling(
+        destination, suffix=".tmp.npz"
+    )
+    os.close(fd)
+    try:
+        np.savez_compressed(temporary, **arrays)
+        # Force every member through NumPy/zip CRC validation before the file
+        # can replace a prior canonical product.
+        with np.load(temporary, allow_pickle=False) as archive:
+            for name in archive.files:
+                np.asarray(archive[name])
+        with temporary.open("rb") as handle:
+            os.fsync(handle.fileno())
+        os.replace(temporary, destination)
+        fsync_directory(destination.parent)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    return destination
 
 
 def ensure_run_dirs(run_dir: Path) -> tuple[Path, Path]:
@@ -191,8 +243,7 @@ def write_detector_outputs(
             normalized_pilot_excess, dtype=np.float64
         ),
     )
-    np.savez_compressed(path, **arrays)
-    return path
+    return atomic_savez_compressed(path, **arrays)
 
 
 def write_spectrogram_cache(
@@ -211,7 +262,7 @@ def write_spectrogram_cache(
     path = Path(run_dir) / CHIME_SPECTROGRAM_CACHE_FILENAME
     path.parent.mkdir(parents=True, exist_ok=True)
     valid_array = _valid_array_like(baseband_power_linear, valid)
-    np.savez_compressed(
+    return atomic_savez_compressed(
         path,
         baseband_power_linear=np.asarray(baseband_power_linear, dtype=np.float64),
         baseband_power_db=power_to_db(baseband_power_linear),
@@ -230,7 +281,6 @@ def write_spectrogram_cache(
             sample_rate_hz=float(sample_rate_hz),
         ),
     )
-    return path
 
 
 def write_integrated_spectra(
@@ -275,8 +325,7 @@ def write_integrated_spectra(
     )
     if freq_id is not None:
         payload["freq_id"] = np.asarray(freq_id, dtype=np.int64)
-    np.savez_compressed(path, **payload)
-    return path
+    return atomic_savez_compressed(path, **payload)
 
 
 def spectrum_before_after(
@@ -439,7 +488,13 @@ def write_run_config(run_dir: Path, config: dict[str, Any]) -> Path:
 
 
 __all__ = [
+    "atomic_savez_compressed",
     "CHIME_DETECTOR_OUTPUTS_FILENAME",
+    "CHIME_COMBINE_CANONICAL_RELATIVE_PATHS",
+    "CHIME_COMBINE_GENERATION_MANIFEST_FILENAME",
+    "CHIME_COMBINE_GENERATION_MANIFEST_SCHEMA",
+    "CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME",
+    "CHIME_COMBINE_PUBLISH_LOCK_FILENAME",
     "CHIME_INPUT_MANIFEST_SCHEMA_NAME",
     "CHIME_INPUT_MANIFEST_SCHEMA_REVISION",
     "CHIME_INPUT_MANIFEST_SCHEMA_TOKEN",

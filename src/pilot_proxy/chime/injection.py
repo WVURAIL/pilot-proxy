@@ -81,7 +81,7 @@ def resolve_baseband_frequency_hz(
             "or physical_channel"
         )
     if physical_channel is not None:
-        pilot_frequency_hz = float(physical_channel_to_pilot_hz(int(physical_channel)))
+        pilot_frequency_hz = float(physical_channel_to_pilot_hz(physical_channel))
     if pilot_frequency_hz is not None:
         baseband_frequency_hz = float(pilot_frequency_hz) - float(center_hz)
     assert baseband_frequency_hz is not None
