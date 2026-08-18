@@ -112,7 +112,6 @@ def bao_time_vs_masking_rows() -> list[dict]:
 
     def req_hours(metric, target, increasing):
         lo, hi = 1.0, 1.0e6
-        flo = metric(lo)
         for _ in range(200):
             mid = (lo * hi) ** 0.5
             value = metric(mid)
