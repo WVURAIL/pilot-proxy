@@ -45,6 +45,36 @@ PYTHONPATH=src python tools/export_dissertation_data.py \
 A missing table is recorded as `pending` in `export_manifest.json`. The exporter
 never substitutes digitized artwork, inferred values, or synthetic data.
 
+## Generate the optional tables
+
+`tools/make_dissertation_tables.py` produces two of the optional tables
+directly from their owning pipelines:
+
+```bash
+PYTHONPATH=src python tools/make_dissertation_tables.py \
+  --products /path/to/per_pilot_products
+```
+
+- `census_psd.csv` — the archive-averaged spectrum within ±15 kHz of each
+  synthesized pilot, read from every per-pilot product's stored integrated
+  before-mask spectrum. Offsets are reported in the transmitted-frequency
+  sense (the receiver's spectral inversion is undone), so off-nominal carriers
+  appear at their measured RF displacement.
+- `bao_time_vs_masking.csv` — observing-time-versus-masked-fraction curves
+  for the survey-amplitude, worst-bin-amplitude, and worst-bin-dilation
+  targets, computed with the released `baonoise` package (bao-noise-tolerance
+  must be installed; pass `--skip-forecast` to omit).
+
+Tables are written to `exports/dissertation/inputs/` (ignored by git) and are
+then supplied to the exporter through `--census-psd` and
+`--bao-time-vs-masking`. The remaining optional tables
+(`worked_example_spectra`, `bao_convergence`, `bao_two_walls`) are deliberately
+not generated here: the worked example annotates two specific archived frames
+whose identities must be named explicitly, and the two bias tables depend on
+the `_Pres` bias-response bank and the dissertation draft's fine-credit and
+floor-basis conventions. They remain `pending` until those calculations are
+reproduced under their own conventions.
+
 ## Verify before import
 
 ```bash
@@ -78,6 +108,13 @@ labeled `curated-dissertation-snapshot` in the manifest. Updating it is a
 scientific change and should be accompanied by the analysis evidence that
 justifies the new values or classification.
 
+`dissertation_summary_v2.json` (snapshot `dissertation-draft-2026-08-18`) is
+the current snapshot: it extends the status matrix to the 21 channels with
+archive products at the August 2026 trawl completion, adds the epoch pairs of
+the dated sign-off channels (19, 20, 26, 27) with their measured survey-rule
+fractions and off-epoch shelf floors noted, and leaves the lower band's
+residual-chain and tolerance rows pending. Select it with `--summary`.
+
 ## Large products
 
 The exporter does not move raw captures, result bundles, NPZ dumps, or Fisher
@@ -89,8 +126,10 @@ resulting dissertation export.
 
 The dissertation bundle can render every current figure reproducibly, but some
 plots still consume audited frozen intermediate tables rather than direct
-exports from the owning scientific pipeline. Before the archival dissertation
-release, replace the frozen inputs for the census power spectra, worked detector
-example, BAO forecast curves, and any digitized introductory cosmology curves.
-The manifest must continue to label these as frozen bridges until their upstream
-generators emit hash-pinned tables directly.
+exports from the owning scientific pipeline. The census power spectra and the
+observing-time-versus-masking curves now have direct generators (above). Before
+the archival dissertation release, replace the remaining frozen inputs: the
+worked detector example, the BAO convergence and two-walls curves, and any
+digitized introductory cosmology curves. The manifest must continue to label
+these as frozen bridges until their upstream generators emit hash-pinned tables
+directly.
