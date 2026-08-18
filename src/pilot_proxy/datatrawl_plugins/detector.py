@@ -514,6 +514,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_p_fa: float = float(CFAR_DEFAULT_P_FA)
         self._fine_guard: int = int(CFAR_DEFAULT_GUARD_FINE_BINS)
         self._fine_designated: list[int] = [0]
+        self._fine_designated_resumed: bool = False
         self._fine_census: list[int] = []
         self._fine_power_ratio: list[np.ndarray] = []
         self._fine_loc: list[float] = []
@@ -743,6 +744,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_p_fa = float(np.asarray(data["fine_p_fa"]))
         self._fine_guard = int(np.asarray(data["fine_guard_fine_bins"]))
         self._fine_designated = [int(x) for x in _col("fine_designated_bins")]
+        # The resumed designation is part of the product's decision history;
+        # begin() must not replace it with a freshly predicted default, or the
+        # resumed-provenance contract check would refuse its own checkpoint.
+        self._fine_designated_resumed = True
         self._fine_census = [
             int(x) for x in _col("fine_census_excluded_bins")
         ]
@@ -910,9 +915,13 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             opts.get("fine_guard_fine_bins", CFAR_DEFAULT_GUARD_FINE_BINS)
         )
         self._fine_designated_from_opts = "fine_designated_bins" in opts
-        self._fine_designated = [
-            int(b) for b in opts.get("fine_designated_bins", [0])
-        ]
+        if self._fine_designated_from_opts:
+            self._fine_designated = [
+                int(b) for b in opts["fine_designated_bins"]
+            ]
+        elif not getattr(self, "_fine_designated_resumed", False):
+            self._fine_designated = [0]
+        # resumed without an explicit option: keep the checkpoint's designation
         self._fine_designated_half_width = int(
             opts.get("fine_designated_half_width_bins",
                      DEFAULT_FINE_DESIGNATED_HALF_WIDTH_BINS)
@@ -947,7 +956,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         # leaves the line in the CFAR null bulk. An explicit
         # fine_designated_bins option always wins; the out-of-band case keeps
         # [0] because the product is emitted all-invalid anyway.
-        if not self._fine_designated_from_opts and self._pilot_in_band:
+        if (not self._fine_designated_from_opts
+                and not getattr(self, "_fine_designated_resumed", False)
+                and self._pilot_in_band):
             _fine_bins = fine_bin_count(int(self._nfft) // int(self._K))
             _predicted = predicted_pilot_fine_bin(
                 pilot_rf_hz=self._pilot_rf_hz,

@@ -725,6 +725,15 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
     hash, K, schema) matches. Returns provenance notes:
     {"detector_versions": [...]} when more than one build contributed, so the
     full stamps survive into the combined product.
+
+    `detector_contract_json` gets the same treatment for
+    `fine_reduction.designated_bins`: the designated window targets each
+    pilot's own predicted carrier line, so it is per-pilot data rather than
+    shared geometry, and it steers only the fine diagnostic CFAR — no
+    combined output stacks fine arrays. Every other contract field must
+    still match exactly. When windows differ, the per-pilot windows are
+    returned as {"fine_designated_bins_by_pilot": [...]} so they survive
+    into the combined provenance.
     """
     notes: dict[str, Any] = {}
     ref = products[0]
@@ -734,6 +743,40 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
                 f"combine: current per-pilot product is missing {key!r}, needed "
                 f"to verify {what}"
             )
+        if key == "detector_contract_json":
+            docs = []
+            for z in products:
+                if key not in z:
+                    raise ValueError(
+                        f"combine: a product is missing '{key}', needed to "
+                        f"verify {what}.")
+                docs.append(json.loads(
+                    str(np.asarray(z[key]).reshape(()).item())))
+
+            def _without_designated(doc):
+                doc = json.loads(json.dumps(doc))
+                fine = doc.get("fine_reduction")
+                if isinstance(fine, dict):
+                    fine.pop("designated_bins", None)
+                return json.dumps(doc, sort_keys=True)
+
+            ref_doc = _without_designated(docs[0])
+            for doc in docs[1:]:
+                if _without_designated(doc) != ref_doc:
+                    raise ValueError(
+                        f"combine: per-pilot products disagree on '{key}' "
+                        f"beyond fine_reduction.designated_bins; refusing to "
+                        f"stack mismatched {what}.")
+            windows = [
+                (doc.get("fine_reduction") or {}).get("designated_bins")
+                for doc in docs
+            ]
+            if len({json.dumps(w) for w in windows}) > 1:
+                notes["fine_designated_bins_by_pilot"] = windows
+                print(f"[combine] provenance: {len(products)} pilots carry "
+                      f"channel-targeted fine designated windows; stacking "
+                      f"with the union in the combined contract.", flush=True)
+            continue
         if key == "detector_version":
             versions = []
             for z in products:
@@ -940,9 +983,23 @@ def _combine_detector_products(
         "detector geometry",
     )
     # Validate the shared serialized contract before producing any output. The
-    # invariant check above proves every selected product carries the same JSON
-    # scalar, so validating the decoded document once covers the entire stack.
+    # invariant check above proves every selected product carries the same
+    # document modulo the per-pilot designated windows, so validating the
+    # decoded document once covers the entire stack.
     contract = _detector_contract_from(products)
+    if "fine_designated_bins_by_pilot" in invariant_notes:
+        # The combined document is scan-level provenance: record the union of
+        # the per-pilot windows (schema-valid unique list); the exact window
+        # per pilot travels in detector_provenance_by_pilot and the stats
+        # notes.
+        contract = dict(contract)
+        fine = dict(contract.get("fine_reduction") or {})
+        fine["designated_bins"] = sorted({
+            int(b)
+            for w in invariant_notes["fine_designated_bins_by_pilot"] if w
+            for b in w
+        })
+        contract["fine_reduction"] = fine
     products_full = products
     products, frame_index, align_info = _align_frames(products_full)
     nfft = int(np.asarray(products[0]["nfft"]))
@@ -1090,6 +1147,10 @@ def _combine_detector_products(
             ),
             "detector_version": str(np.asarray(z.get("detector_version", "")).reshape(()).item()),
             "mask_rule": str(np.asarray(z.get("mask_rule", "")).reshape(()).item()),
+            "fine_designated_bins": [
+                int(b) for b in
+                np.asarray(z.get("fine_designated_bins", []), dtype=np.int64).reshape(-1)
+            ],
         })
     common = {
         "source": "chime-scan",
