@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "snapshot_id": "dissertation-draft-2026-08-18",
-  "scope_note": "Curated values for the August 2026 near-final trawl snapshot (21 of 23 allocations; channel 16 completing). Lower-band channels carry survey- and epoch-level evidence only; their residual-chain and tolerance rows are pending, and this snapshot is not a final 23-channel verdict.",
+  "scope_note": "Curated values for the completed August 2026 trawl (channels 16-36 complete against their archive holdings; channels 14-15 queued in the scan). Lower-band channels carry survey- and epoch-level evidence only; their residual-chain and tolerance rows are pending, and this snapshot is not a final 23-channel verdict.",
   "epoch_operating_points": [
     {
       "channel": 32,
@@ -175,7 +175,7 @@
       "secondary_status": "",
       "epoch_scope": "current epoch",
       "evidence_state": "screening",
-      "note": "Partial product (trawl completing); trace-level occupancy with warm-season propagation; residual-chain evaluation pending."
+      "note": "Trace-level occupancy with warm-season propagation; residual-chain evaluation pending."
     },
     {
       "channels": [18, 21, 23, 25],
