@@ -60,14 +60,18 @@ PYTHONPATH=src python tools/make_dissertation_tables.py \
   before-mask spectrum. Offsets are reported in the transmitted-frequency
   sense (the receiver's spectral inversion is undone), so off-nominal carriers
   appear at their measured RF displacement.
+- `worked_example_spectra.csv` — the worked example's two archived frames
+  (generated only behind `--worked-example`): the frames are named
+  explicitly by UTC day and F/mu0 ratio, and rows are emitted only after
+  the digits the dissertation quotes reproduce from the product.
 - `bao_time_vs_masking.csv` — observing-time-versus-masked-fraction curves
   for the survey-amplitude, worst-bin-amplitude, and worst-bin-dilation
   targets, computed with the released `baonoise` package (bao-noise-tolerance
   must be installed; pass `--skip-forecast` to omit).
 
 Tables are written to `exports/dissertation/inputs/` (ignored by git) and are
-then supplied to the exporter through `--census-psd` and
-`--bao-time-vs-masking`.
+then supplied to the exporter through `--census-psd`,
+`--worked-example-spectra`, and `--bao-time-vs-masking`.
 
 `tools/make_chain_table.py` generates the per-channel residual-chain table
 (the dissertation's Table 9.6 and its lower-band extension) from the same
@@ -75,12 +79,10 @@ products via the released `baonoise` residual machinery. Its built-in
 self-test reproduces the published first-measured-block constants from raw
 products and aborts on any drift: the table's provenance is the
 reproduction, not a remembered analysis. The remaining optional tables
-(`worked_example_spectra`, `bao_convergence`, `bao_two_walls`) are deliberately
-not generated here: the worked example annotates two specific archived frames
-whose identities must be named explicitly, and the two bias tables depend on
-the `_Pres` bias-response bank and the dissertation draft's fine-credit and
-floor-basis conventions. They remain `pending` until those calculations are
-reproduced under their own conventions.
+(`bao_convergence`, `bao_two_walls`) are deliberately not generated here:
+they depend on the `_Pres` bias-response bank and the dissertation draft's
+fine-credit and floor-basis conventions. They remain `pending` until those
+calculations are reproduced under their own conventions.
 
 ## Verify before import
 

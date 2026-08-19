@@ -2,19 +2,23 @@
 """Generate the optional scientific tables for the dissertation export.
 
 This tool assembles the CSV inputs that ``pilot_proxy.dissertation_exports``
-accepts through its ``--census-psd`` and ``--bao-time-vs-masking`` options.
-It reads per-pilot survey products directly and, for the forecast table,
-uses the released ``baonoise`` package (bao-noise-tolerance) --- which is why
-this lives in ``tools/`` rather than inside :mod:`pilot_proxy`: the package
-itself stays free of the cross-repository dependency, and the export module
-records whatever inputs this tool produced.
+accepts through its ``--census-psd``, ``--worked-example-spectra``, and
+``--bao-time-vs-masking`` options. It reads per-pilot survey products
+directly and, for the forecast table, uses the released ``baonoise``
+package (bao-noise-tolerance) --- which is why this lives in ``tools/``
+rather than inside :mod:`pilot_proxy`: the package itself stays free of the
+cross-repository dependency, and the export module records whatever inputs
+this tool produced.
+
+``worked_example_spectra.csv`` is generated only behind ``--worked-example``:
+the two archived frames it contains are named explicitly (UTC day and
+F/mu0 ratio, WORKED_EXAMPLE_PANELS below) and no row is written unless the
+digits the dissertation quotes --- T[60..64] of the exemplar frame and the
+weakest frame's designated-window maximum --- reproduce from the product.
+The self-test is the provenance.
 
 Tables NOT generated here, deliberately:
 
-* ``worked_example_spectra.csv`` --- the worked-example figure annotates two
-  specific archived frames whose identities are not recorded in this tool's
-  inputs; regenerating it requires naming those frames explicitly rather
-  than guessing.
 * ``bao_convergence.csv`` and ``bao_two_walls.csv`` --- these depend on the
   ``_Pres`` bias-response bank and the dissertation draft's fine-credit and
   floor-basis conventions; they remain bridges until that calculation is
@@ -24,6 +28,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import glob
 import os
 from pathlib import Path
@@ -33,6 +38,19 @@ import numpy as np
 SPECTRUM_KEY = "integrated_spectrum_before_mask"
 NFFT = 16384
 WINDOW_KHZ = 15.0
+
+# Worked example (pipeline chapter): the two archived channel-36 frames,
+# named by UTC day and F/mu0 ratio and verified digit-for-digit against
+# what the dissertation quotes before any row is emitted.
+WORKED_EXAMPLE_CHANNEL = 36
+WORKED_EXAMPLE_PANELS = (
+    # (panel, utc day, F/mu0 target)
+    ("a", "2025-07-31", 1.258),   # exemplar masked frame (15:52:22 UT)
+    ("b", "2025-05-16", 0.897),   # cohort's weakest valid frame
+)
+WORKED_RATIO_TOL = 0.0006
+WORKED_A_T60_64 = (1.066, 8.730, 18.615, 7.598, 1.083)   # published, tol 0.002
+WORKED_B_T62 = 2.59                                      # published, tol 0.01
 
 
 def _write(path: Path, columns, rows) -> int:
@@ -91,6 +109,63 @@ def census_psd_rows(products_dir: Path) -> list[dict]:
             })
     if not rows:
         raise SystemExit("no products with integrated spectra found")
+    return rows
+
+
+def worked_example_rows(products_dir: Path) -> list[dict]:
+    """(panel, fine_bin, T) for the worked example's two archived frames.
+
+    Frames are located by UTC day and F/mu0 ratio (WORKED_EXAMPLE_PANELS)
+    and accepted only when the published digits reproduce: T[60..64] of the
+    exemplar frame, the designated-window maximum of the weakest frame.
+    Exactly one frame per panel must verify; anything else aborts rather
+    than guessing.
+    """
+    path = None
+    for candidate in sorted(glob.glob(os.path.join(products_dir, "*.npz"))):
+        with np.load(candidate, allow_pickle=False) as archive:
+            if int(archive["physical_channel"][0]) == WORKED_EXAMPLE_CHANNEL:
+                path = candidate
+                break
+    if path is None:
+        raise SystemExit(f"no product for channel {WORKED_EXAMPLE_CHANNEL} "
+                         f"under {products_dir}")
+    with np.load(path, allow_pickle=False) as archive:
+        fstat = np.asarray(archive["fstat_raw"], dtype=float).reshape(-1)
+        mu0 = float(np.ravel(archive["mu0"])[0])
+        fine = np.asarray(archive["fstat_fine"], dtype=float)
+        unit_index = np.asarray(archive["frame_unit_index"],
+                                dtype=int).reshape(-1)
+        unit_t0 = np.asarray(archive["unit_time0_ctime"],
+                             dtype=float).reshape(-1)
+    frame_t = unit_t0[unit_index]
+    days = np.array([datetime.datetime.fromtimestamp(
+        x, datetime.timezone.utc).strftime("%Y-%m-%d") for x in frame_t])
+    ratio = fstat / mu0
+
+    rows: list[dict] = []
+    for panel, day, target in WORKED_EXAMPLE_PANELS:
+        verified = []
+        for i in np.where((days == day)
+                          & (np.abs(ratio - target) < WORKED_RATIO_TOL))[0]:
+            T = fine[i]
+            if panel == "a":
+                ok = all(abs(float(T[60 + j]) - WORKED_A_T60_64[j]) < 0.002
+                         for j in range(5))
+            else:
+                ok = abs(float(T[62]) - WORKED_B_T62) < 0.01
+            if ok:
+                verified.append(int(i))
+        if len(verified) != 1:
+            raise SystemExit(
+                f"worked-example panel {panel}: {len(verified)} frames on "
+                f"{day} reproduce the published digits (need exactly 1); "
+                "refusing to guess")
+        T = fine[verified[0]]
+        rows += [{"panel": panel, "fine_bin": b, "T": f"{float(T[b]):.6g}"}
+                 for b in range(256)]
+        print(f"worked-example panel {panel}: frame {verified[0]} "
+              f"({day}, F/mu0={ratio[verified[0]]:.4f}) verified")
     return rows
 
 
@@ -155,12 +230,21 @@ def main() -> int:
                         help="directory for the generated CSV tables")
     parser.add_argument("--skip-forecast", action="store_true",
                         help="skip the baonoise-dependent forecast table")
+    parser.add_argument("--worked-example", action="store_true",
+                        help="also generate worked_example_spectra.csv "
+                             "(verifies the published digits first)")
     args = parser.parse_args()
 
     count = _write(args.out / "census_psd.csv",
                    ("channel", "offset_khz", "db_rel_median"),
                    census_psd_rows(args.products))
     print(f"census_psd.csv: {count} rows")
+
+    if args.worked_example:
+        count = _write(args.out / "worked_example_spectra.csv",
+                       ("panel", "fine_bin", "T"),
+                       worked_example_rows(args.products))
+        print(f"worked_example_spectra.csv: {count} rows")
 
     if not args.skip_forecast:
         count = _write(args.out / "bao_time_vs_masking.csv",
