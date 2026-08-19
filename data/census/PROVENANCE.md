@@ -1,7 +1,9 @@
 # Transmitter-census provenance
 
 The source workbook is `TV_Stations_UHF_within500mi_DRAO.xlsx`, retrieved on
-2026-06-09. It is a manually compiled listing from FCC LMS and ISED station
+2026-06-09. The workbook, the reduction script, and the upstream source
+material are maintained in the `WVURAIL/dtv-station-census` repository;
+this directory vendors the derived `census.csv` unchanged. It is a manually compiled listing from FCC LMS and ISED station
 information, not a propagation simulation. The inclusion rule was every UHF
 ATSC television station listed within 500 statute miles of DRAO
 (`49.3208 N`, `119.6239 W`). We used the station class and frequency-tolerance
@@ -20,22 +22,21 @@ strengths are optimistic upper-bound estimates, not site predictions.
 The final merged CSV contains 42 rows with field strength. Before the
 channel-sharing merge, 43 values were present. Rows outside the 120-mile study
 have no field strength and fall back to distance when the association code
-needs a rank. The earlier record says that the RabbitEars result-list printout
-was archived with the source material; no separate copy is present in this
-checkout.
+needs a rank. The archived RabbitEars result-list printout is committed in
+dtv-station-census as `sources/rabbitears/dtv_120m.pdf`.
 
 ## Deterministic reduction
 
-Regenerate the CSV with:
+Regenerate the CSV in the dtv-station-census repository:
 
 ```bash
-python census_from_xlsx.py TV_Stations_UHF_within500mi_DRAO.xlsx census.csv
+python census/census_from_xlsx.py census/TV_Stations_UHF_within500mi_DRAO.xlsx census.csv
 ```
 
 The reduction applies the following rules:
 
-The row counts below were independently reproduced by running the committed
-reduction over the retained workbook. The RabbitEars study settings above are
+The row counts below were independently reproduced by running the reduction
+(now in dtv-station-census) over the retained workbook. The RabbitEars study settings above are
 recorded source metadata; the separate result-list printout is unavailable,
 so those settings were not independently verified here.
 
