@@ -67,7 +67,14 @@ PYTHONPATH=src python tools/make_dissertation_tables.py \
 
 Tables are written to `exports/dissertation/inputs/` (ignored by git) and are
 then supplied to the exporter through `--census-psd` and
-`--bao-time-vs-masking`. The remaining optional tables
+`--bao-time-vs-masking`.
+
+`tools/make_chain_table.py` generates the per-channel residual-chain table
+(the dissertation's Table 9.6 and its lower-band extension) from the same
+products via the released `baonoise` residual machinery. Its built-in
+self-test reproduces the published first-measured-block constants from raw
+products and aborts on any drift: the table's provenance is the
+reproduction, not a remembered analysis. The remaining optional tables
 (`worked_example_spectra`, `bao_convergence`, `bao_two_walls`) are deliberately
 not generated here: the worked example annotates two specific archived frames
 whose identities must be named explicitly, and the two bias tables depend on

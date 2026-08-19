@@ -175,7 +175,7 @@
       "secondary_status": "",
       "epoch_scope": "current epoch",
       "evidence_state": "screening",
-      "note": "Trace-level occupancy with warm-season propagation; residual-chain evaluation pending."
+      "note": "Trace-level occupancy with warm-season propagation; chain evaluated: kept-frame floor and correlation time both pending measurement."
     },
     {
       "channels": [18, 21, 23, 25],
@@ -183,7 +183,7 @@
       "secondary_status": "",
       "epoch_scope": "current epoch",
       "evidence_state": "screening",
-      "note": "Survey-level trace occupancy; residual-chain evaluation pending."
+      "note": "Trace occupancy; chain evaluated: verdicts controlled by refused correlation times and, on 23 and 25, unmeasured kept-frame floors; channel 21 carries the archive's largest null population."
     },
     {
       "channels": [17, 22],
@@ -191,7 +191,7 @@
       "secondary_status": "",
       "epoch_scope": "current measured epoch",
       "evidence_state": "screening",
-      "note": "Near-continuous occupancy at the survey rule; lower-band residual-chain rows pending."
+      "note": "Near-continuous occupancy at the survey rule; chain confirms occupancy-pinned excision."
     },
     {
       "channels": [24],
@@ -207,7 +207,7 @@
       "secondary_status": "excision_candidate",
       "epoch_scope": "off-epoch|on-epoch",
       "evidence_state": "screening",
-      "note": "Transmitter sign-off measured to the month; off-epoch floors available; residual-chain evaluation pending."
+      "note": "Transmitter sign-off measured to the month; off-epoch chain rows evaluated at conservative era floors; verdicts controlled by off-epoch coherence (19, 26) or the kept-frame floor basis (20)."
     },
     {
       "channels": [27],
