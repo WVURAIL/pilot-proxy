@@ -97,3 +97,17 @@ These read the per-pilot survey products (`*.npz`) directly rather than the
 These moved here from bao-noise-tolerance's `scripts/`, which keeps the
 tolerance-side figures: a figure computed from survey products is a
 pilot-proxy deliverable regardless of which package first drew it.
+
+## Artifact pages (need per-pilot survey products + baonoise)
+
+The published trawl-report and masking-policy pages are data-inlined HTML.
+The make_* scripts read `$PP_PER_PILOT` (or `--products`) and both need the
+released `baonoise` package; `render_artifacts.py` inlines their JSON into
+the committed page templates under `templates/`. The JSON behind the
+currently published pages is committed under `exports/artifacts/`.
+
+| script | writes | notes |
+|---|---|---|
+| make_report_data.py | report_data.json, threshold_sweeps.json | threshold_sweeps.json also feeds the bao two-walls figure regeneration |
+| make_policy_data.py | policy_data.json | the locked policy-methodology constants live here |
+| render_artifacts.py | pilot_proxy_trawl.html, dtv_masking_policy.html | templates + placeholders in `templates/` |
