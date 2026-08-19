@@ -92,8 +92,10 @@ def _iter_files():
 def main() -> int:
     failures: list[str] = []
     gate_path = Path(__file__).resolve()
+    # the one designated home for the archive's historical key names
+    exempt = {ROOT / "src" / "pilot_proxy" / "archived_product_keys.py"}
     for path in _iter_files():
-        if path.resolve() == gate_path:
+        if path.resolve() == gate_path or path in exempt:
             continue
         try:
             text = path.read_text(encoding="utf-8")

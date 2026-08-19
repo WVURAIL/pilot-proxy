@@ -28,6 +28,11 @@ import zoneinfo
 from pathlib import Path
 
 import numpy as np
+
+import _paths  # noqa: F401  -- puts <repo>/src on sys.path
+from pilot_proxy.archived_product_keys import (
+    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO,
+    ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB)
 from baonoise import residual as res
 
 import _products as P
@@ -91,7 +96,7 @@ def channel_record(z):
     """Every per-channel report field from one product archive."""
     fid = int(z["freq_id"][0])
     mu0 = float(z["mu0"][0])
-    fstat = z["fstat_raw"][:, 0]
+    fstat = z[ARCHIVED_COARSE_POWER_RATIO][:, 0]
     fui = z["frame_unit_index"]
     ev_id = z["unit_event_id"]
     t0 = z["unit_time0_ctime"]
@@ -134,7 +139,7 @@ def channel_record(z):
 
     # averaged fine spectrum: natural order for the envelope fit,
     # fftshifted dB for display
-    fine = np.nanmean(z["fstat_fine"], axis=0)
+    fine = np.nanmean(z[ARCHIVED_FINE_POWER_RATIO], axis=0)
     fine_db = (10 * np.log10(np.maximum(np.fft.fftshift(fine), 1e-3))).round(2)
 
     # off-nominal carrier envelope: nominal pilot offset within the comb,
@@ -157,7 +162,7 @@ def channel_record(z):
         env_meas = env_station = None
 
     valid = z["valid"][:, 0].astype(bool)
-    lvl_all = z["fstat_level_db"][:, 0]
+    lvl_all = z[ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB][:, 0]
     lva = lvl_all[np.isfinite(lvl_all) & valid]
 
     # per-frame level histogram, clipped into the fixed edges

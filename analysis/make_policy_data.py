@@ -37,6 +37,10 @@ import json
 from pathlib import Path
 
 import numpy as np
+
+import _paths  # noqa: F401  -- puts <repo>/src on sys.path
+from pilot_proxy.archived_product_keys import (
+    ARCHIVED_COARSE_POWER_RATIO)
 from baonoise import api, channels as chn, residual as res, scenarios
 
 import _products as P
@@ -261,7 +265,7 @@ def recommendations(paths, by_ch):
 def apply_to_archive(pd, paths):
     """Stage 2: the recommended thresholds recomputed over every archived frame.
 
-    The products store fstat_raw per frame, so the retuned masks are exact
+    The archived products store the raw coarse power ratio per frame, so the retuned masks are exact
     post-hoc recomputations, not approximations. Adds monthly masked
     fractions under the deployed rule and under the recommended policy,
     plus kept-frame leakage statistics.
@@ -275,7 +279,7 @@ def apply_to_archive(pd, paths):
             ch = str(int(z["physical_channel"][0]))
             rec = pd["channels"][ch]
             action = rec["recommendation"]["action"]
-            F = z["fstat_raw"][:, 0]
+            F = z[ARCHIVED_COARSE_POWER_RATIO][:, 0]
             mu0 = float(np.asarray(z["mu0"]).ravel()[0])
             valid = z["valid"][:, 0].astype(bool)
             t0 = z["unit_time0_ctime"]

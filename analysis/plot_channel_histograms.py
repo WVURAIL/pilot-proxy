@@ -13,7 +13,8 @@ show where they sit relative to one another:
                the deployed rule is reject <=> F > mu0.
 
     F = 1      where the *level* estimator becomes defined. The product sets
-               pnr_bin_db = 10 log10(F - 1) exactly, so it references the null
+               the archived pilot-excess level 10 log10(F - 1) exactly,
+               so it references the null
                to unity rather than to mu0.
 
 Those are not the same number, and on some channels they are in the opposite
@@ -45,6 +46,9 @@ from matplotlib.patches import Patch
 
 from baonoise import residual as R
 
+import _paths  # noqa: F401  -- puts <repo>/src on sys.path
+from pilot_proxy.archived_product_keys import (
+    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_DATA_SHELF_SNR_DB)
 import _products as P
 
 DEFAULT_CHANNELS = (32, 33, 34, 35, 36)
@@ -219,8 +223,8 @@ def channel_row(path) -> dict:
     d = P.load_npz(path)
     v = d["valid"][:, 0].astype(bool)
     rej = d["reject_mask"][:, 0].astype(bool)
-    F = d["fstat_raw"][:, 0]
-    shelf = d["snr_shelf_db"][:, 0]
+    F = d[ARCHIVED_COARSE_POWER_RATIO][:, 0]
+    shelf = d[ARCHIVED_DATA_SHELF_SNR_DB][:, 0]
     mu0 = prov.mu0
 
     kept, hit = v & ~rej, v & rej
