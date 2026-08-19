@@ -111,3 +111,10 @@ currently published pages is committed under `exports/artifacts/`.
 | make_report_data.py | report_data.json, threshold_sweeps.json | threshold_sweeps.json also feeds the bao two-walls figure regeneration |
 | make_policy_data.py | policy_data.json | the locked policy-methodology constants live here |
 | render_artifacts.py | pilot_proxy_trawl.html, dtv_masking_policy.html | templates + placeholders in `templates/` |
+
+## Channel dispositions and drafting tables
+
+| script | writes | notes |
+|---|---|---|
+| channel_dispositions.py | chime_dtv_channel_dispositions.csv, chime_dtv_bad_channels.wiki | keep/discard per CHIME channel over 470-608 MHz; the excised set derives from `exports/artifacts/policy_data.json`, so regenerate after a policy revision |
+| latex_channel_table.py | (stdout) | the dissertation's unified channel-table rows from the committed artifact JSONs; era/status columns are editorial and live in the script |
