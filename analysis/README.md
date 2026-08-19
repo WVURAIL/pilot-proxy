@@ -78,3 +78,22 @@ Run order — (1) first, the rest in any order:
 Sweep protocol: every evaluate-snr command pins --num-input-streams 4
 and --noise-source explicitly, and every new host is qualified with a
 100-trial anchor smoke before bulk runs.
+
+## Survey-plate figures (need per-pilot survey products)
+
+These read the per-pilot survey products (`*.npz`) directly rather than the
+`~/paper` dumps. Point `PP_PER_PILOT` at the products directory (default
+`~/pilot_proxy_runs/chime-pilots/_per_pilot`). Style is shared through
+`_style.py` (the manuscript palette), product discovery through
+`_products.py`.
+
+| script | writes | notes |
+|---|---|---|
+| plot_census_psd.py | fig_census_psd | archive-averaged spectrum around every pilot |
+| plot_channel_histograms.py | fig5_channel_histograms | needs the released `baonoise` package for its floor-provenance checks |
+| plot_worked_example.py | fig_worked_example | reads `data/worked_example_ch506.csv` (committed, provenance in its header) |
+| plot_coherence_aids.py | fig_phasor_walk, fig_hypothesis_bank | no data: seeded simulation of the real geometry |
+
+These moved here from bao-noise-tolerance's `scripts/`, which keeps the
+tolerance-side figures: a figure computed from survey products is a
+pilot-proxy deliverable regardless of which package first drew it.
