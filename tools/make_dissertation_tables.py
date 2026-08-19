@@ -35,6 +35,9 @@ from pathlib import Path
 
 import numpy as np
 
+from pilot_proxy.archived_product_keys import (
+    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO)
+
 SPECTRUM_KEY = "integrated_spectrum_before_mask"
 NFFT = 16384
 WINDOW_KHZ = 15.0
@@ -131,9 +134,10 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
         raise SystemExit(f"no product for channel {WORKED_EXAMPLE_CHANNEL} "
                          f"under {products_dir}")
     with np.load(path, allow_pickle=False) as archive:
-        fstat = np.asarray(archive["fstat_raw"], dtype=float).reshape(-1)
+        fstat = np.asarray(archive[ARCHIVED_COARSE_POWER_RATIO],
+                           dtype=float).reshape(-1)
         mu0 = float(np.ravel(archive["mu0"])[0])
-        fine = np.asarray(archive["fstat_fine"], dtype=float)
+        fine = np.asarray(archive[ARCHIVED_FINE_POWER_RATIO], dtype=float)
         unit_index = np.asarray(archive["frame_unit_index"],
                                 dtype=int).reshape(-1)
         unit_t0 = np.asarray(archive["unit_time0_ctime"],
