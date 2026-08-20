@@ -50,7 +50,7 @@ jobs:
           repository: WVURAIL/datatrawl
           # Required integration tests use a reviewed upstream revision. The
           # scheduled canary below tests datatrawl's moving head separately.
-          ref: 49dddb4c6d039da827e990005e653a5d716451d2
+          ref: c0a3b21fd58f7b096b6b97247edc6dadd4dfb588
           path: datatrawl
       - uses: actions/setup-python@v5
         with:

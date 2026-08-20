@@ -224,6 +224,47 @@ vary by pilot have shape `(num_chunks, num_pilots)`.
 when a chunk contains no such frame. The term “cleaned” is a product-field name,
 not a claim that all interference has been removed.
 
+## Control-Band NPZ
+
+### `<freq_id>.npz` (`pilotproxy_control_product_v1`, analyzer `pilot-proxy-control`)
+
+One resumable product per selected non-pilot `freq_id` (null-control,
+mid-allocation transfer, and canary bins). The detector is not defined on
+these channels; this product records what the control science needs and
+nothing that could be mistaken for a mask decision.
+
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `baseband_power_linear` | `(n_frames,)` | `float64` | Mean `abs(x)**2` per frame over samples and feeds, native offset-binary units (same convention as the detector product) |
+| `coarse_marginal` | `(n_frames, 128)` | `float64` | Rectangular 128-point window power marginal, mean over windows and feeds, native (unshifted) bin order in the reader's baseband orientation |
+| `frame_unit_index` | `(n_frames,)` | `int32` | Row into `unit_keys` / `files` |
+| `frame_in_unit` | `(n_frames,)` | `int32` | Frame position within the source file |
+| `integrated_spectrum_sum`, `integrated_spectrum_count` | `(nfft,)`, scalar | `float64`, int | Rectangular full-resolution `abs(FFT)**2`, feed-averaged, resumable sum/count |
+| `source_event_keys` | `(n_units,)` | `str` | Event identity with this product's `freq_id` token removed — joins pilot products event-by-event |
+
+Scalars: `freq_id`, `f_center_hz`, `fs_hz`, `nyquist_zone`, `nfft`,
+`configured_nfft`, `detector_window_samples` (= 128), `reference_offset_bins`
+(= 2), `n_feeds`, `n_frames`, `max_frames_per_file`, `analyzer_version`,
+`schema_version`, `created`.
+
+Two contracts worth stating:
+
+- **Deployed-geometry F at any bin.** The 128-point rectangular DFT bin is the
+  unit-modulus (float) analogue of the deployed detector's 128-sample weighted
+  dot product, so `F(b) = 2*S[b] / (S[b-2] + S[b+2])` (indices mod 128)
+  reproduces the coarse statistic's geometry at any target — including a
+  virtual-pilot bin on a channel with no transmitter — with `mu0 = 1` exactly.
+  The deployed weights are int-quantized; agreement with a detector product is
+  a family statement, quantified by running this analyzer on a pilot `freq_id`
+  and comparing, not assumed.
+- **Parseval self-check.** Per frame,
+  `coarse_marginal.sum() == 128**2 * baseband_power_linear` to float64
+  roundoff. A product violating this is corrupt.
+
+Absolute times are deliberately absent: epoch dating flows through
+`source_event_keys` (inventory event dates, or a paired pilot product's time
+axis).
+
 ## Frame Identity NPZ
 
 ### `chime_frame_identity.npz`

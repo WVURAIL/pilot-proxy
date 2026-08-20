@@ -91,6 +91,8 @@ def _make_inventory(inv_path, *, common_path, event, channels, extra_rows=()):
     with open(inv_path, "w") as fh:
         for ch in channels:
             fh.write(json.dumps({"common_path": common_path, "event": event,
+                                 "scope": "test.scope",
+                                 "name": f"baseband_{event}_{int(ch)}.h5",
                                  "freq_id": int(ch), "size_bytes": 1}) + "\n")
         for row in extra_rows:
             fh.write(json.dumps(row) + "\n")

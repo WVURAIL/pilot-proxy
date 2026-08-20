@@ -180,6 +180,8 @@ def _ragged_archive(tmp_path, monkeypatch, events_by_channel):
                                 f_tone_bb=1300.0, seed=ch + int(event))
             synth[(str(event), ch)] = p
             rows.append({"common_path": "cadc:TEST", "event": str(event),
+                         "scope": "test.scope",
+                         "name": f"baseband_{event}_{int(ch)}.h5",
                          "freq_id": int(ch), "size_bytes": 1})
     inv = tmp_path / "inventory.jsonl"
     with open(inv, "w") as fh:
@@ -221,9 +223,11 @@ def test_scan_ragged_inventory_combines_intersection(tmp_path, monkeypatch):
     drops = {p["freq_id"]: p["n_frames_dropped"] for p in align["by_pilot"]}
     assert drops == {844: 2, 829: 2, 752: 0}
     with np.load(out / "chime_frame_identity.npz") as ident:
-        assert set(ident["frame_event_key"].tolist()) == {
-            "cadc:TEST/baseband_100.h5"
-        }
+        # Full-schema rows key units by the source's logical unit key
+        # (scope/event/name triple), freq_id token stripped per pilot.
+        expected_key = "cadc-datatrail:" + json.dumps(
+            ["test.scope", "100", "baseband_100.h5"], separators=(",", ":"))
+        assert set(ident["frame_event_key"].tolist()) == {expected_key}
 
     # report + subset knob over the same work dir
     work = sorted((out / "_per_pilot").glob("*.npz"))

@@ -84,20 +84,19 @@ def fig_census_psd(out: Path) -> Path:
 
 def fig_census_psd_lower(out: Path) -> Path:
     rows=read_csv("census_psd.csv")
-    # Same fixed-GridSpec design as fig_census_psd: the first nine lower-band
-    # channels fill a 3x3 grid; channels 25 and 26 and a compact key share the
-    # fourth row.
-    fig=plt.figure(figsize=(style.TEXT_WIDTH,7.05))
+    # Same fixed-GridSpec design as fig_census_psd: the first twelve
+    # lower-band channels fill a 4x3 grid; channel 26 and the key share the
+    # fifth row.
+    fig=plt.figure(figsize=(style.TEXT_WIDTH,8.75))
     gs=fig.add_gridspec(
-        4,3,left=.075,right=.985,bottom=.065,top=.945,
-        wspace=.30,hspace=.34,
+        5,3,left=.075,right=.985,bottom=.055,top=.950,
+        wspace=.30,hspace=.36,
     )
     axes=[]
-    for idx in range(9):
+    for idx in range(12):
         axes.append(fig.add_subplot(gs[idx//3,idx%3]))
-    axes.append(fig.add_subplot(gs[3,0]))
-    axes.append(fig.add_subplot(gs[3,1]))
-    for i,ch in enumerate(range(16,27)):
+    axes.append(fig.add_subplot(gs[4,0]))
+    for i,ch in enumerate(range(14,27)):
         sub=[r for r in rows if int(r["channel"])==ch]
         x=np.asarray([float(r["offset_khz"]) for r in sub]); y=np.asarray([float(r["db_rel_median"]) for r in sub])
         order=np.argsort(x); x=x[order]; y=y[order]; ax=axes[i]
@@ -108,18 +107,18 @@ def fig_census_psd_lower(out: Path) -> Path:
         ax.set_xlim(-15,15); ax.grid(True,color=style.GRID,lw=.42)
         ax.spines["top"].set_visible(False); ax.spines["right"].set_visible(False); ax.tick_params(labelsize=6.8)
         if i%3==0: ax.set_ylabel(r"dB rel. median",fontsize=7.3)
-        if i in (8,9,10): ax.set_xlabel(r"offset [kHz]",fontsize=7.3)
-    key=fig.add_subplot(gs[3,2]); key.set_axis_off()
-    key.text(.04,.92,r"\textbf{Key}",transform=key.transAxes,fontsize=7.6,va="top")
-    key.add_patch(Rectangle((.06,.64),.14,.11,transform=key.transAxes,facecolor=style.LIGHT_BLUE,edgecolor="none"))
-    key.text(.26,.695,r"fine span $\pm1.526$ kHz",transform=key.transAxes,va="center",fontsize=6.7)
-    key.plot([.06,.20],[.50,.50],transform=key.transAxes,color=style.CONDITIONAL,ls=(0,(3,2)),lw=1.1)
-    key.text(.26,.50,r"references at $\pm6.10$ kHz",transform=key.transAxes,va="center",fontsize=6.7)
-    key.plot([.06,.20],[.35,.35],transform=key.transAxes,color=style.INK,lw=1)
-    key.text(.26,.35,r"archive-averaged spectrum",transform=key.transAxes,va="center",fontsize=6.7)
-    key.text(.04,.10,r"Direct archive-result export" + "\n" + r"(August 2026 survey products).",
-             transform=key.transAxes,va="bottom",fontsize=6.3,color=style.MUTED)
-    fig.suptitle(r"The lower band's spectral face: archive-averaged spectrum around each pilot, channels 16--26",fontsize=9.7,y=.988)
+        if i in (10,11,12): ax.set_xlabel(r"offset [kHz]",fontsize=7.3)
+    key=fig.add_subplot(gs[4,1:]); key.set_axis_off()
+    key.text(.02,.90,r"\textbf{Detector geometry and provenance}",transform=key.transAxes,fontsize=8.0,va="top")
+    key.add_patch(Rectangle((.03,.62),.10,.12,transform=key.transAxes,facecolor=style.LIGHT_BLUE,edgecolor="none"))
+    key.text(.17,.68,r"fine span $\pm1.526$ kHz",transform=key.transAxes,va="center",fontsize=7.1)
+    key.plot([.03,.13],[.47,.47],transform=key.transAxes,color=style.CONDITIONAL,ls=(0,(3,2)),lw=1.2)
+    key.text(.17,.47,r"references at $\pm6.10$ kHz",transform=key.transAxes,va="center",fontsize=7.1)
+    key.plot([.03,.13],[.30,.30],transform=key.transAxes,color=style.INK,lw=1)
+    key.text(.17,.30,r"archive-averaged spectrum",transform=key.transAxes,va="center",fontsize=7.1)
+    key.text(.02,.07,r"Direct archive-result export from the August 2026 survey products.",
+             transform=key.transAxes,va="bottom",fontsize=6.5,color=style.MUTED)
+    fig.suptitle(r"The lower band's spectral face: archive-averaged spectrum around each pilot, channels 14--26",fontsize=9.7,y=.990)
     return style.save(fig,out/"fig_census_psd_lower.pdf",title="Archive-averaged spectra around lower-band DTV pilots")
 
 

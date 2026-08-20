@@ -7,7 +7,7 @@ Snapshots of the JSON inlined into the two published artifact pages:
 | report_data.json | Pilot Proxy Trawl (pilot_proxy_trawl.html) | analysis/make_report_data.py |
 | policy_data.json | DTV Masking Policy (dtv_masking_policy.html) | analysis/make_policy_data.py |
 
-Snapshot state: the complete 21-channel per-pilot products of 2026-08-18.
+Snapshot state: the complete 23-channel per-pilot products of 2026-08-19.
 
 Regenerate on a new products snapshot and render the pages:
 

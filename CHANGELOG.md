@@ -10,6 +10,19 @@ pre-2.0 Python aliases, duplicated command entry points, and receiver-specific
 names from receiver-neutral contracts. Existing products must be regenerated;
 the stricter validators do not reinterpret incomplete legacy products.
 
+### Added
+
+- `pilot-proxy-control`, a datatrawl analyzer for non-pilot control freq_ids
+  (`pilotproxy_control_product_v1`): per-frame `baseband_power_linear` in the
+  detector's native units, a per-frame K=128 rectangular coarse power marginal
+  (the unit-modulus analogue of the deployed statistic, so
+  `F(b) = 2*S[b] / (S[b-2] + S[b+2])` is recoverable offline at any bin,
+  including a virtual-pilot bin on channels with no transmitter), one
+  full-resolution integrated spectrum, and the same freq_id-stripped
+  `source_event_keys` the combine step joins on. CPU-only by default
+  (`--set gpu=1` optional and excluded from the resume fingerprint); the
+  deployed detector remains the only mask authority.
+
 ### Changed
 
 - Reference-placement diagnostics now say what the `edge_wrapped` bookkeeping
@@ -44,6 +57,15 @@ the stricter validators do not reinterpret incomplete legacy products.
   finite data-shelf SNR estimates among detector-valid frames.
 
 ### Fixed
+
+- `chime-baseband-packed` now classifies open/schema failures as an
+  unreadable unit via datatrawl's `unreadable_file()` (quarantine + continue),
+  matching the built-in `chime-baseband` reader, instead of crashing an entire
+  archive scan on one corrupt file.
+- `tests/datatrawl` inventory fixtures write full current-schema rows
+  (`scope`, `name`) required by datatrawl's fail-closed inventory validation,
+  and the event-keyed combine test expects the source's logical unit key
+  (scope/event/name triple) rather than the legacy URI form.
 
 - Propagated CUDA API failures to Python callers.
 - Prevented debug CUDA builds from being reused as release artifacts.
