@@ -58,6 +58,15 @@ the stricter validators do not reinterpret incomplete legacy products.
 
 ### Fixed
 
+- `chime-baseband-packed` now classifies open/schema failures as an
+  unreadable unit via datatrawl's `unreadable_file()` (quarantine + continue),
+  matching the built-in `chime-baseband` reader, instead of crashing an entire
+  archive scan on one corrupt file.
+- `tests/datatrawl` inventory fixtures write full current-schema rows
+  (`scope`, `name`) required by datatrawl's fail-closed inventory validation,
+  and the event-keyed combine test expects the source's logical unit key
+  (scope/event/name triple) rather than the legacy URI form.
+
 - Propagated CUDA API failures to Python callers.
 - Prevented debug CUDA builds from being reused as release artifacts.
 - Preserved receiver-specific sample rates throughout combined products.

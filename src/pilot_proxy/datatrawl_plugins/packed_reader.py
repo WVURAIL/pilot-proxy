@@ -28,13 +28,14 @@ except Exception:  # pragma: no cover - registry shape guard
         return cls
 
 from datatrawl.plugins.readers import _baseband_format as fmt
+from datatrawl.plugins.readers._unreadable import unreadable_file
 
 from .stream_kinds import STREAM_PACKED_COMPLEX_INT4_BASEBAND
 
 
 def _iter_packed_chunks(path: str, nfft: int) -> Iterator:
     """Yield raw uint8 [nfft, n_feeds] blocks (final partial frame dropped)."""
-    with h5py.File(path, "r") as h:
+    with unreadable_file(), h5py.File(path, "r") as h:
         bb = h["baseband"]
         n_chunks = int(bb.shape[0]) // int(nfft)
         for c in range(n_chunks):
@@ -57,6 +58,13 @@ class ChimeBasebandPackedReader(Reader):
     )
 
     def probe(self, path: str) -> Mapping[str, object]:
+        # Classify open/schema failures as an unreadable unit (quarantine)
+        # instead of crashing the scan, matching the 'chime-baseband' reader.
+        with unreadable_file():
+            return self._probe(path)
+
+    @staticmethod
+    def _probe(path: str) -> Mapping[str, object]:
         f_center_hz = fmt.channel_center_hz(path)
         meta: dict = {"f_center_hz": f_center_hz,
                       "f_center_mhz": f_center_hz / 1e6,

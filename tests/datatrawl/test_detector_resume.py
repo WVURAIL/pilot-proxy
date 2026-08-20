@@ -122,6 +122,8 @@ def _write_inventory(inv: Path, n_events: int) -> None:
     with open(inv, "w") as fh:
         for i in range(n_events):
             fh.write(json.dumps({"common_path": "cadc:TEST", "event": f"evt{i}",
+                                 "scope": "test.scope",
+                                 "name": f"baseband_evt{i}_{FREQ_ID}.h5",
                                  "freq_id": FREQ_ID, "size_bytes": 1}) + "\n")
 
 
