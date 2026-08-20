@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 
 STATUS = {
+    14: r"\stBound", 15: r"\stBound",
     16: r"\stBound",
     17: r"\stExc", 18: r"\stBound", 19: r"\stBound/\stExc",
     20: r"\stBound/\stExc", 21: r"\stBound", 22: r"\stExc",
@@ -27,6 +28,8 @@ STATUS = {
 }
 
 ERA = {
+    14: "trace; episodic faint carrier",
+    15: "steady faint excess, no transition",
     16: "trace; warm-season swell",
     17: "persistent; two on-epochs",
     18: "trace, rising since 2024",
