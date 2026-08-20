@@ -117,10 +117,10 @@
   <p class="eyebrow">CHIME/FRB baseband &middot; ATSC pilot survey &middot; status report &middot; 2026-08-18</p>
   <h1>Pilot Proxy Trawl</h1>
   <p class="lede">
-    Twenty-one CHIME frequency channels, each containing the 8-VSB pilot tone of one ATSC digital-TV
-    channel (physical channels 16&ndash;36, 482&ndash;602&nbsp;MHz), trawled across the full CHIME/FRB baseband
-    archive with the <span class="mono">pilot-proxy</span> detector. All twenty-one channels are
-    complete against their archive holdings (channels 14&ndash;15 are queued in the scan). The processed set spans
+    Twenty-three CHIME frequency channels, each containing the 8-VSB pilot tone of one ATSC digital-TV
+    channel (physical channels 14&ndash;36, 470&ndash;602&nbsp;MHz), trawled across the full CHIME/FRB baseband
+    archive with the <span class="mono">pilot-proxy</span> detector. The trawl is complete: all 23 channels are
+    complete against their archive holdings. The processed set spans
     7.6&nbsp;years and resolves the local DTV transmitter history &mdash; sign-ons, sign-offs, and
     warm-season anomalous propagation &mdash; channel by channel.
   </p>
@@ -896,7 +896,7 @@ function drawProgress() {
   document.getElementById("progressCap").innerHTML =
     `${done.toLocaleString()} event-channel files processed of at most ${(CH.length * total).toLocaleString()} ` +
     `(${CH.length} channels × ${total.toLocaleString()} events) — <b>${(100 * done / (CH.length * total)).toFixed(1)}%</b>. ` +
-    `All 21 channels are complete against their archive holdings. Channels 30 and 24 look thin — ` +
+    `All 23 channels are complete against their archive holdings. Channels 30 and 24 look thin — ` +
     `the archive is thin for the two strongest carriers because CHIME curtails collection on them, ` +
     `and ch 30 was dropped from collection entirely in Sep 2023 due to the contamination itself. ` +
     `${RD.coverage_hist.slice(15).reduce((a, b) => a + b, 0).toLocaleString()} events are done in 15 or more channels.`;
