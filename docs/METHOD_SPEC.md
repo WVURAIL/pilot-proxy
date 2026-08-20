@@ -219,15 +219,26 @@ The resolver starts with `reference_offset_bins = 2` and changes placement
 only when the receiver geometry requires it:
 
 - a valid requested reference remains at its requested offset;
-- an edge reference wraps around the circular coarse-channel FFT;
+- a reference requested past the baseband-frame origin (nu = 0) wraps
+  modulo 1 in the periodic coarse-channel FFT coordinate (recorded as
+  `edge_wrapped`; under a center-at-DC profile nu = 0 is the coarse-channel
+  center/DC, not the channel edge, and the manifest's
+  `frame_origin_description` states which);
 - a reference that would land on the forbidden coarse-channel DC tone moves
   away from that tone; and
 - a target/DC collision fails because the target signal cannot be moved.
 
+A reference requested beyond +-fs/2 of the channel center is not moved; it
+aliases to the opposite channel edge and is reported by the manifest's
+`*_crosses_channel_edge` fields because it samples the channelizer roll-off.
+
 The manifest records the selected placement. In the shipped ATSC 14--36 bank
 (rebuilt for the verified DC-centered frame convention), DTV 14 is the only
-adaptive case: its lower reference wraps across the coarse-channel edge. No
-shipped channel collides with, or shifts around, the forbidden DC tone.
+adaptive case: its pilot sits one fine bin above the coarse-channel center, so
+its lower reference lands one bin below DC with the forbidden DC tone in the
+skipped guard between them. No shipped channel collides with, or shifts
+around, the forbidden DC tone. DTV 21's upper reference crosses the physical
+coarse-channel half-width and is reported as such.
 
 ## Supported `K` family
 

@@ -12,6 +12,14 @@ the stricter validators do not reinterpret incomplete legacy products.
 
 ### Changed
 
+- Reference-placement diagnostics now say what the `edge_wrapped` bookkeeping
+  flag means physically (`frame_origin_description`: under a center-at-DC
+  profile the wrap crosses the coarse-channel center/DC, not the channel edge)
+  and report references requested beyond +-fs/2 of the channel center
+  (`*_crosses_channel_edge`, `channel_edge_notes`); `list-channels` prints the
+  corresponding `NOTE`s, including for manifests written before these fields
+  existed. Weight values and placements are unchanged; regenerating a manifest
+  changes its hash only.
 - Tightened receiver, stream-map, detector-core, runtime-bundle, and product
   compatibility validation.
 - Replaced the receiver-specific CHIME detector-contract identity with the

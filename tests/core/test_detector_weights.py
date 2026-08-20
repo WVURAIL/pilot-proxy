@@ -520,3 +520,47 @@ def test_weight_bank_rejects_v2_manifest_without_input_preprocessing(
 
     with pytest.raises(ValueError, match="requires input_preprocessing"):
         DetectorWeightBank(explicit_path=copied)
+
+
+def test_frame_origin_and_channel_edge_diagnostics_on_chime_profile() -> None:
+    """Under the center-at-DC CHIME profile the channel-14 ``edge_wrapped`` flag
+    is a wrap across DC (the forbidden tone sits in the skipped guard), while
+    channel 21 is the channel whose reference crosses the physical +-fs/2
+    coarse-channel half-width. Neither event changes the placement."""
+    profile = load_receiver_profile(
+        CONFIGS_DIR / "receiver_profiles" / "chime_dtv_fengine.json"
+    )
+    core = load_detector_core_profile(
+        CONFIGS_DIR / "detector_core" / "pilotproxy_cuda_local_reference_power_ratio.json"
+    )
+    half_width_hz = REFERENCE_COARSE_CHANNEL_WIDTH_HZ / 2.0
+
+    ch14 = target_layout(physical_channel=14, profile=profile, core=core)
+    assert ch14["lower_reference_edge_wrapped"] is True
+    assert ch14["forbidden_tone_in_skipped_guard"] is True
+    assert ch14["reference_crosses_channel_edge"] is False
+    assert "coarse-channel center / DC" in ch14["frame_origin_description"]
+    assert "coarse-channel center / DC" in ch14["placement_warnings"]
+    assert "not the channel edge" in ch14["placement_warnings"]
+    assert ch14["coarse_channel_half_width_hz"] == pytest.approx(half_width_hz)
+    assert abs(ch14["lower_reference_unwrapped_offset_hz"]) < 4_000.0
+    assert ch14["target_channel_edge_margin_hz"] > 190_000.0
+
+    ch21 = target_layout(physical_channel=21, profile=profile, core=core)
+    assert ch21["reference_placement_status"] == "nominal"
+    assert ch21["upper_reference_crosses_channel_edge"] is True
+    assert ch21["lower_reference_crosses_channel_edge"] is False
+    assert abs(ch21["upper_reference_unwrapped_offset_hz"]) > half_width_hz
+    assert ch21["target_channel_edge_margin_hz"] == pytest.approx(
+        half_width_hz - abs(ch21["target_offset_hz"])
+    )
+    assert "beyond the coarse-channel half-width" in ch21["channel_edge_notes"]
+    # The aliased (stored) offset is the unwrapped request reduced into +-fs/2.
+    assert ch21["upper_reference_offset_hz"] == pytest.approx(
+        ch21["upper_reference_unwrapped_offset_hz"] - REFERENCE_COARSE_CHANNEL_WIDTH_HZ
+    )
+
+    for channel in (32, 35):
+        layout = target_layout(physical_channel=channel, profile=profile, core=core)
+        assert layout["reference_crosses_channel_edge"] is False
+        assert layout["channel_edge_notes"] == ""

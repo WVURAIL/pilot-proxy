@@ -309,17 +309,32 @@ pilot-proxy chime-run --weights-path weights/chime_dtv_weights_k128.bin --help
 Adaptive cases also print an explanatory `NOTE` without changing the CSV
 output. The shipped banks use `reference_offset_bins=2` and
 `skipped_guard_bins=1`. We skip one fine bin on each side of the target and use
-the next fine bin as the lower or upper reference. A reference that crosses a
-coarse-channel edge wraps around the circular coarse-channel FFT. A reference
-that collides with the forbidden coarse-channel DC tone moves one bin farther
-from the target, and the manifest records a placement warning. A target-DC
-collision stops weight generation because the target cannot be moved.
+the next fine bin as the lower or upper reference. Placement works in the
+periodic normalized-frequency coordinate of the coarse-channel FFT, so a
+reference requested past the baseband-frame origin (nu = 0) wraps modulo 1;
+the wrapped weights are bit-identical to the unwrapped ones. The manifest
+records this as `edge_wrapped`, a name inherited from the earlier
+center-at-Nyquist frame convention: under the verified center-at-DC CHIME
+profile, nu = 0 is the coarse-channel *center* (the forbidden DC tone), not the
+channel edge, and the manifest's `frame_origin_description` says which. A
+reference that collides with the forbidden coarse-channel DC tone moves one bin
+farther from the target, and the manifest records a placement warning. A
+target-DC collision stops weight generation because the target cannot be moved.
+Separately, the manifest's `*_crosses_channel_edge` fields (and a
+`list-channels` `NOTE`) report a reference requested beyond +-fs/2 of the
+channel center: it aliases to the opposite channel edge and samples the
+channelizer roll-off. Placement and detection arithmetic are unchanged by that
+note.
 
 For the shipped ATSC 14-36 CHIME bank, physical channel 14 is the only adaptive
-case: its lower reference wraps across the coarse-channel edge, and
+case: its pilot sits one fine bin above the coarse-channel center (DC), so its
+lower reference lands one bin below DC with the forbidden DC tone in the
+skipped guard between them (`forbidden_tone_in_skipped_guard`), and
 `list-channels` prints the corresponding placement `NOTE`. No shipped channel
 collides with the forbidden DC tone or requires a DC shift; the remaining
-channels use the nominal reference placement.
+channels use the nominal reference placement. Channel 21's upper reference is
+the one that crosses the physical coarse-channel half-width (+196.7 kHz against
+195.3 kHz); `list-channels` prints a `NOTE` for it.
 
 For deployment, export the profiles and weights as a compact runtime bundle,
 then validate that bundle:

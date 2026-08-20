@@ -673,6 +673,14 @@ def _print_adaptive_reference_diagnostics(
             details.append("lower_reference=edge_wrapped")
         if bool(layout.get("upper_reference_edge_wrapped", False)):
             details.append("upper_reference=edge_wrapped")
+        if details and "frame_origin_description" not in layout:
+            # Manifests written before the origin description was recorded:
+            # say what the wrap means rather than letting "edge" stand alone.
+            details.append(
+                "edge_wrapped=wrap across the baseband-frame origin nu=0 "
+                "(the coarse-channel center/DC for a center-at-DC profile, "
+                "not the channel edge)"
+            )
         if bool(layout.get("lower_reference_dc_shifted", False)):
             details.append("lower_reference=dc_shifted")
         if bool(layout.get("upper_reference_dc_shifted", False)):
@@ -687,6 +695,56 @@ def _print_adaptive_reference_diagnostics(
             f"lower_reference_offset_bins={lower}, "
             f"upper_reference_offset_bins={upper}"
             f"{detail_text}{warning_text}",
+            file=sys.stderr,
+        )
+    _print_channel_edge_diagnostics(layouts)
+
+
+def _reference_crosses_channel_edge(
+    layout: Mapping[str, Any], side: str
+) -> bool:
+    """True when a reference was requested beyond +-fs/2 of the channel center.
+
+    Recorded manifests carry ``*_crosses_channel_edge`` directly. Older
+    manifests still expose the test: the stored reference offset is the
+    circular (aliased) offset, so it differs from ``target_offset_hz`` plus the
+    reference's relative offset only when the request crossed the physical
+    coarse-channel edge.
+    """
+    key = f"{side}_reference_crosses_channel_edge"
+    if key in layout:
+        return bool(layout[key])
+    try:
+        target = float(layout["target_offset_hz"])
+        relative = float(layout[f"{side}_reference_relative_to_target_hz"])
+        stored = float(layout[f"{side}_reference_offset_hz"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    return abs((target + relative) - stored) > 1.0
+
+
+def _print_channel_edge_diagnostics(
+    layouts: Sequence[Mapping[str, Any]],
+) -> None:
+    for layout in layouts:
+        crossing = [
+            side
+            for side in ("lower", "upper")
+            if _reference_crosses_channel_edge(layout, side)
+        ]
+        if not crossing:
+            continue
+        channel = layout.get("physical_channel", "?")
+        coarse = layout.get("coarse_channel_index", "?")
+        note = str(layout.get("channel_edge_notes", "")).strip()
+        note_text = f"; {note}" if note else ""
+        print(
+            "NOTE reference beyond coarse-channel half-width: "
+            f"physical_channel={channel}, coarse_channel_index={coarse}, "
+            f"references={','.join(crossing)}; the reference aliases to the "
+            "opposite channel edge and samples the channelizer roll-off "
+            "(placement unchanged; detection arithmetic unaffected)"
+            f"{note_text}",
             file=sys.stderr,
         )
 

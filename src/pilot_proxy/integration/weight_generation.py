@@ -65,6 +65,41 @@ REFERENCE_PLACEMENT_REASON_NOMINAL = "nominal"
 REFERENCE_PLACEMENT_REASON_EDGE_WRAPPED = "edge_reference_wrapped"
 REFERENCE_PLACEMENT_REASON_DC_SHIFTED = "dc_reference_shifted_away"
 BASEBAND_FRAME_MODE_EXPLICIT = "explicit_profile_frame"
+# ``edge_wrapped`` is a bookkeeping event: the requested reference frequency
+# left the normalized interval [0, 1) and was reduced modulo 1. Because the
+# K-tap projection is periodic in normalized frequency, the wrapped weights
+# are bit-identical to the unwrapped ones; what the flag records is that the
+# reference crossed the baseband-frame ORIGIN (nu = 0). What that origin is
+# physically depends on the receiver profile:
+#   channel_center_normalized = 0.0 -> nu = 0 is the coarse-channel center
+#                                      (the forbidden DC tone);
+#   channel_center_normalized = 0.5 -> nu = 0 is the coarse-channel edge.
+# The physical coarse-channel edge (+-fs/2 from the channel center) is
+# reported separately by the ``*_crosses_channel_edge`` fields below.
+FRAME_ORIGIN_DESCRIPTION_GENERIC = "the baseband-frame origin (nu = 0)"
+FRAME_ORIGIN_DESCRIPTION_CENTER = (
+    "the baseband-frame origin nu = 0 (the coarse-channel center / DC under "
+    "this profile, not the channel edge)"
+)
+FRAME_ORIGIN_DESCRIPTION_EDGE = (
+    "the baseband-frame origin nu = 0 (the coarse-channel edge under this "
+    "profile)"
+)
+
+
+def frame_origin_description(frame_center_normalized: float) -> str:
+    """Say what nu = 0 is physically for a profile's frame convention."""
+    center = float(frame_center_normalized) % 1.0
+    if math.isclose(center, 0.0, abs_tol=1e-12) or math.isclose(
+        center, 1.0, abs_tol=1e-12
+    ):
+        return FRAME_ORIGIN_DESCRIPTION_CENTER
+    if math.isclose(center, 0.5, abs_tol=1e-12):
+        return FRAME_ORIGIN_DESCRIPTION_EDGE
+    return (
+        f"{FRAME_ORIGIN_DESCRIPTION_GENERIC}; the coarse-channel center sits at "
+        f"nu = {center:.6f}"
+    )
 
 
 def _signed_circular_delta(a: float, b: float) -> float:
@@ -282,6 +317,7 @@ def _reference_placement(
     detector_window_samples: int,
     reference_offset_bins: int,
     dc_normalized: float,
+    origin_description: str = FRAME_ORIGIN_DESCRIPTION_GENERIC,
 ) -> dict[str, Any]:
     lower = _resolve_one_reference_offset(
         target_normalized_frequency,
@@ -331,9 +367,13 @@ def _reference_placement(
         reasons.append(REFERENCE_PLACEMENT_REASON_DC_SHIFTED)
     warnings: list[str] = []
     if bool(lower["edge_wrapped"]):
-        warnings.append("lower reference wrapped across coarse-channel edge")
+        warnings.append(
+            f"lower reference wrapped across {origin_description}"
+        )
     if bool(upper["edge_wrapped"]):
-        warnings.append("upper reference wrapped across coarse-channel edge")
+        warnings.append(
+            f"upper reference wrapped across {origin_description}"
+        )
     if bool(lower["dc_shifted"]):
         warnings.append("lower reference shifted away from coarse-channel DC")
     if bool(upper["dc_shifted"]):
@@ -402,6 +442,7 @@ def target_layout(
         detector_window_samples=int(core.detector_window_samples),
         reference_offset_bins=int(core.reference_offset_bins),
         dc_normalized=float(forbidden_dc),
+        origin_description=frame_origin_description(frame_center),
     )
     lower = placement["lower"]
     upper = placement["upper"]
@@ -434,6 +475,34 @@ def target_layout(
             f"{channel}."
         )
     min_selected_offset = min(abs(lower_offset), abs(upper_offset))
+    # Physical coarse-channel edge diagnostics. The placement above works in
+    # the periodic normalized-frequency coordinate, so a reference requested
+    # beyond +-fs/2 of the channel center simply aliases to the opposite
+    # channel edge; detection arithmetic is unaffected, but the reference then
+    # samples the channelizer's roll-off region (both channel edges fold
+    # there). These fields make that visible without changing any placement.
+    half_width_hz = 0.5 * float(profile.coarse_channel_width_hz)
+    lower_unwrapped_hz = float(target_offset_hz) + lower_offset * fine_bin_width_hz
+    upper_unwrapped_hz = float(target_offset_hz) + upper_offset * fine_bin_width_hz
+    lower_crosses_edge = bool(abs(lower_unwrapped_hz) > half_width_hz)
+    upper_crosses_edge = bool(abs(upper_unwrapped_hz) > half_width_hz)
+    channel_edge_notes: list[str] = []
+    if lower_crosses_edge:
+        channel_edge_notes.append(
+            f"lower reference at {lower_unwrapped_hz:+.1f} Hz from the channel "
+            f"center lies beyond the coarse-channel half-width "
+            f"({half_width_hz:.1f} Hz); it aliases to "
+            f"{lower_reference_offset_hz:+.1f} Hz and samples the "
+            "channelizer roll-off"
+        )
+    if upper_crosses_edge:
+        channel_edge_notes.append(
+            f"upper reference at {upper_unwrapped_hz:+.1f} Hz from the channel "
+            f"center lies beyond the coarse-channel half-width "
+            f"({half_width_hz:.1f} Hz); it aliases to "
+            f"{upper_reference_offset_hz:+.1f} Hz and samples the "
+            "channelizer roll-off"
+        )
     return {
         "physical_channel": channel,
         "dtv_pilot_hz": float(pilot_hz),
@@ -489,6 +558,19 @@ def target_layout(
         "forbidden_tone_in_skipped_guard": bool(
             placement["forbidden_tone_in_skipped_guard"]
         ),
+        "frame_origin_description": frame_origin_description(frame_center),
+        "coarse_channel_half_width_hz": float(half_width_hz),
+        "target_channel_edge_margin_hz": float(
+            half_width_hz - abs(float(target_offset_hz))
+        ),
+        "lower_reference_unwrapped_offset_hz": float(lower_unwrapped_hz),
+        "upper_reference_unwrapped_offset_hz": float(upper_unwrapped_hz),
+        "lower_reference_crosses_channel_edge": lower_crosses_edge,
+        "upper_reference_crosses_channel_edge": upper_crosses_edge,
+        "reference_crosses_channel_edge": bool(
+            lower_crosses_edge or upper_crosses_edge
+        ),
+        "channel_edge_notes": "; ".join(channel_edge_notes),
         "lower_reference_edge_wrapped": bool(lower["edge_wrapped"]),
         "upper_reference_edge_wrapped": bool(upper["edge_wrapped"]),
         "lower_reference_dc_shifted": bool(lower["dc_shifted"]),
