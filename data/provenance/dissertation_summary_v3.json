@@ -301,10 +301,10 @@
       {
         "policy_key": "keep_everything",
         "label": "keep everything",
-        "residual_multiple": 316,
-        "time_multiple": 1.5,
+        "residual_multiple": 1566,
+        "time_multiple": 3.35,
         "evidence_state": "measured+modeled",
-        "note": "Incurs no masking penalty but leaves a large residual."
+        "note": "Incurs no masking penalty but leaves a large residual; evaluated on the same acquisitions>=8 population as the other policies."
       },
       {
         "policy_key": "mad_1p8",
@@ -326,7 +326,7 @@
         "policy_key": "pilot_proxy",
         "label": "pilot proxy",
         "residual_multiple": 24,
-        "time_multiple": 5.3,
+        "time_multiple": 3.4,
         "evidence_state": "measured+modeled",
         "note": "Best of the compared keep-and-mask policies, but still above the stated bias tolerance."
       }
