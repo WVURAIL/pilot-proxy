@@ -561,6 +561,36 @@ precedence over the flag.
 
 ---
 
+## Control freq_ids (no pilot)
+
+`pilot-proxy-detector` is undefined on a coarse channel without a pilot: it
+marks every frame invalid or refuses at `begin()`. Control bins (the protected
+608–614 MHz null band, mid-allocation transfer bins, canary bins) go through
+the `pilot-proxy-control` analyzer instead, via raw `datatrawl scan` against a
+surveyed control inventory:
+
+```bash
+datatrawl scan \
+  --inventory ~/datatrawl-inventories/chime-controls/inventory.jsonl \
+  --analyzer pilot-proxy-control \
+  --select 484,491,515,545,591,745 \
+  --max-files 2 --max-frames-per-file 4     # drop the caps for the full pass
+```
+
+No GPU is needed (these scans are network-bound; a CPU-only session is fine),
+and one resumable `<freq_id>.npz` is written per selected bin — see
+`docs/DATA_PRODUCTS.md`, "Control-Band NPZ", for the schema, the
+deployed-geometry `F(b)` recipe, and the Parseval self-check. A capped
+smoke-test product is stamped and cannot be resumed by an uncapped pass;
+point the full run at a fresh `--out`.
+
+Before trusting control-bin `F` values, run the same analyzer once on a pilot
+`freq_id` and compare against the detector product (powers should match
+per-frame in native units; `F` at the pilot bin agrees at the
+weight-quantization level, not bit-exactly).
+
+---
+
 ## Failure modes
 
 | Symptom | Likely cause | Fix |

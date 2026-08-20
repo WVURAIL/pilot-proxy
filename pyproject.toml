@@ -66,6 +66,7 @@ pilot-proxy = "pilot_proxy.cli:main"
 # value is the module to import (its decorator registers the plugin).
 pilot-proxy-detector = "pilot_proxy.datatrawl_plugins.detector"
 pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader"
+pilot-proxy-control = "pilot_proxy.datatrawl_plugins.control"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
