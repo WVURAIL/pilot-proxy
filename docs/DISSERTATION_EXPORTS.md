@@ -21,12 +21,19 @@ PYTHONPATH=src python tools/export_dissertation_data.py \
 
 The default export is intentionally **partial**. It always includes:
 
-- the complete 500-mile transmitter census derived from
-  `data/census/census.csv`;
+- the inclusive 500-mile transmitter-census envelope derived from
+  `data/census/census.csv`, preserving its `schema_version` and per-row
+  `evidence_status` so licence-only candidates are not presented as observed
+  carriers;
 - the inner-120-mile subset used for the detailed map panel;
 - the current epoch-operating-point summary;
 - the current 23-channel evidence-status matrix; and
 - the current channel-33 policy comparison.
+
+The default summary is the explicit, versioned
+`data/provenance/dissertation_summary_v3.json`; no mutable duplicate or
+`current` copy is maintained. Pass `--summary` only when deliberately
+reproducing an older frozen draft.
 
 Large archive products and Fisher-forecast curves are included only when their
 authoritative CSV exports are supplied explicitly:
@@ -111,18 +118,19 @@ because they serve different documents and may use different layouts.
 
 ## Curated summary snapshot
 
-`data/provenance/dissertation_summary_v1.json` is the small, reviewable snapshot
-used to emit the epoch, status, and channel-33 policy tables. It is intentionally
-labeled `curated-dissertation-snapshot` in the manifest. Updating it is a
-scientific change and should be accompanied by the analysis evidence that
-justifies the new values or classification.
+`data/provenance/dissertation_summary_v3.json` (snapshot
+`dissertation-draft-2026-08-19`) is the current snapshot and the exporter
+default. It covers all 23 ATSC allocations, including channels 14 and 15, and
+carries the corrected channel-33 policy comparison on the common
+`acquisitions >= 8` population. It is intentionally labeled
+`curated-dissertation-snapshot` in the export manifest. Updating the default to
+a later numbered snapshot is a scientific change and must be accompanied by
+the analysis evidence that justifies the new values or classifications.
 
-`dissertation_summary_v2.json` (snapshot `dissertation-draft-2026-08-18`) is
-the current snapshot: it extends the status matrix to the 21 channels with
-archive products at the August 2026 trawl completion, adds the epoch pairs of
-the dated sign-off channels (19, 20, 26, 27) with their measured survey-rule
-fractions and off-epoch shelf floors noted, and leaves the lower band's
-residual-chain and tolerance rows pending. Select it with `--summary`.
+`dissertation_summary_v1.json` and `dissertation_summary_v2.json` remain as
+immutable historical inputs for reproducing the 2026-08-12 and 2026-08-18
+drafts. Select one explicitly with `--summary` only for that purpose; neither is
+the current export source.
 
 ## Large products
 

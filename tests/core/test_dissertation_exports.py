@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from collections import Counter
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from pilot_proxy.dissertation_exports import (
     ExportError,
     create_export,
+    main,
     verify_export,
 )
 
@@ -72,6 +74,7 @@ def _mock_repo(tmp_path: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     census = repo / "data/census/census.csv"
     fields = [
+        "schema_version",
         "rf_channel",
         "callsign",
         "service_class",
@@ -83,12 +86,14 @@ def _mock_repo(tmp_path: Path) -> tuple[Path, Path]:
         "nominal_pilot_mhz",
         "city",
         "state_prov",
+        "evidence_status",
     ]
     _write_csv(
         census,
         fields,
         [
             {
+                "schema_version": "dtv_transmitter_census_v1",
                 "rf_channel": 30,
                 "callsign": "NEAR",
                 "service_class": "Relay",
@@ -100,8 +105,10 @@ def _mock_repo(tmp_path: Path) -> tuple[Path, Path]:
                 "nominal_pilot_mhz": 566.3,
                 "city": "Near",
                 "state_prov": "BC",
+                "evidence_status": "reported_on_air_licensed",
             },
             {
+                "schema_version": "dtv_transmitter_census_v1",
                 "rf_channel": 31,
                 "callsign": "FAR",
                 "service_class": "Relay",
@@ -113,8 +120,10 @@ def _mock_repo(tmp_path: Path) -> tuple[Path, Path]:
                 "nominal_pilot_mhz": 572.3,
                 "city": "Far",
                 "state_prov": "BC",
+                "evidence_status": "licensed_candidate",
             },
             {
+                "schema_version": "dtv_transmitter_census_v1",
                 "rf_channel": 29,
                 "callsign": "NEAREST",
                 "service_class": "Full-power",
@@ -126,10 +135,11 @@ def _mock_repo(tmp_path: Path) -> tuple[Path, Path]:
                 "nominal_pilot_mhz": 560.3,
                 "city": "Nearest",
                 "state_prov": "BC",
+                "evidence_status": "reported_on_air_unverified",
             },
         ],
     )
-    summary = repo / "data/provenance/dissertation_summary_v1.json"
+    summary = repo / "data/provenance/test_summary.json"
     summary.parent.mkdir(parents=True, exist_ok=True)
     summary.write_text(json.dumps(_summary()), encoding="utf-8")
     return repo, summary
@@ -154,14 +164,66 @@ def test_partial_export_is_deterministic_and_verifiable(tmp_path: Path) -> None:
     assert [row["callsign"] for row in rows] == ["NEAREST", "NEAR"]
 
     with (output / "census_full_500mi.csv").open(newline="", encoding="utf-8") as handle:
-        rows = list(csv.DictReader(handle))
+        reader = csv.DictReader(handle)
+        rows = list(reader)
+    assert reader.fieldnames is not None
+    assert reader.fieldnames[0] == "schema_version"
+    assert reader.fieldnames[-1] == "evidence_status"
     assert [row["callsign"] for row in rows] == ["NEAREST", "NEAR", "FAR"]
+    assert [row["evidence_status"] for row in rows] == [
+        "reported_on_air_unverified",
+        "reported_on_air_licensed",
+        "licensed_candidate",
+    ]
 
     statuses = {
         record["path"]: record["status"] for record in manifest["artifacts"]
     }
     assert statuses["census_psd.csv"] == "pending"
     assert statuses["channel_status.csv"] == "available"
+
+
+def test_default_export_uses_current_23_channel_summary(tmp_path: Path) -> None:
+    repo = Path(__file__).resolve().parents[2]
+    output = tmp_path / "default-export"
+
+    assert main(
+        [
+            "--repo-root",
+            str(repo),
+            "--output-dir",
+            str(output),
+            "--source-commit",
+            "test-current-default",
+        ]
+    ) == 0
+
+    with (output / "channel_status.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        status_rows = list(csv.DictReader(handle))
+    assert [int(row["channel"]) for row in status_rows] == list(range(14, 37))
+
+    with (output / "bao_policy_case.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        policy_rows = list(csv.DictReader(handle))
+    keep = next(row for row in policy_rows if row["policy_key"] == "keep_everything")
+    assert keep["residual_multiple"] == "1566"
+    assert keep["time_multiple"] == "3.35"
+
+    with (output / "census_full_500mi.csv").open(
+        newline="", encoding="utf-8"
+    ) as handle:
+        census_rows = list(csv.DictReader(handle))
+    assert {row["schema_version"] for row in census_rows} == {
+        "dtv_transmitter_census_v1"
+    }
+    assert Counter(row["evidence_status"] for row in census_rows) == {
+        "reported_on_air_unverified": 421,
+        "reported_on_air_licensed": 67,
+        "licensed_candidate": 11,
+    }
 
 
 def test_optional_table_is_normalised_and_hashed(tmp_path: Path) -> None:

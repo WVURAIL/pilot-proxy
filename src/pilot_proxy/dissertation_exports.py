@@ -107,7 +107,17 @@ OPTIONAL_TABLES: tuple[TableSpec, ...] = (
     ),
 )
 
+CENSUS_SOURCE_SCHEMA = "dtv_transmitter_census_v1"
+CENSUS_EVIDENCE_STATES = frozenset(
+    {
+        "reported_on_air_unverified",
+        "reported_on_air_licensed",
+        "licensed_candidate",
+    }
+)
+
 CENSUS_COLUMNS = (
+    "schema_version",
     "rf_channel",
     "callsign",
     "service_class",
@@ -116,6 +126,7 @@ CENSUS_COLUMNS = (
     "frequency_tolerance",
     "city",
     "state_prov",
+    "evidence_status",
 )
 
 EPOCH_COLUMNS = (
@@ -314,6 +325,17 @@ def _census_rows(source: Path, radius_miles: float) -> list[dict[str, str]]:
     radius_km = radius_miles * KM_PER_MILE
     selected: list[dict[str, str]] = []
     for index, row in enumerate(source_rows, start=2):
+        if row["schema_version"].strip() != CENSUS_SOURCE_SCHEMA:
+            raise ExportError(
+                f"unsupported census schema in {source} line {index}: "
+                f"{row['schema_version']!r}"
+            )
+        evidence_status = row["evidence_status"].strip()
+        if evidence_status not in CENSUS_EVIDENCE_STATES:
+            raise ExportError(
+                f"unsupported census evidence_status in {source} line {index}: "
+                f"{evidence_status!r}"
+            )
         try:
             distance = float(row["distance_km"])
             bearing = float(row["bearing_deg"])
@@ -528,8 +550,9 @@ def create_export(
                 owner="pilot-proxy",
                 authority="authoritative-source-export",
                 description=(
-                    "Complete on-air ATSC 1.0 UHF emitter-channel census within "
-                    f"{FULL_CENSUS_RADIUS_MILES:g} miles of DRAO."
+                    "Conservative maximum-envelope ATSC 1.0 UHF emitter-channel "
+                    f"census within {FULL_CENSUS_RADIUS_MILES:g} miles of DRAO; "
+                    "schema and per-row evidence status are preserved."
                 ),
                 source_inputs=[str(census_source.relative_to(repo_root))],
             )
@@ -546,7 +569,8 @@ def create_export(
                 owner="pilot-proxy",
                 authority="authoritative-source-subset",
                 description=(
-                    f"Transmitter-census rows within {census_radius_miles:g} miles of DRAO."
+                    f"Transmitter-census rows within {census_radius_miles:g} miles "
+                    "of DRAO, preserving schema and per-row evidence status."
                 ),
                 source_inputs=[str(census_source.relative_to(repo_root))],
             )
@@ -744,8 +768,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--summary",
         type=Path,
-        default=Path("data/provenance/dissertation_summary_v1.json"),
-        help="curated summary snapshot relative to --repo-root unless absolute",
+        default=Path("data/provenance/dissertation_summary_v3.json"),
+        help=(
+            "curated summary snapshot relative to --repo-root unless absolute "
+            "(default: current 23-channel v3 snapshot)"
+        ),
     )
     parser.add_argument("--source-commit", help="override the recorded git commit")
     parser.add_argument(

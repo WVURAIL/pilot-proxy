@@ -29,7 +29,11 @@ def masked_mean_excluding(
             f"values={arr.shape}, mask={excluded.shape}"
         )
     included = np.asarray(~excluded, dtype=np.float64)
-    numerator = np.sum(arr * included, axis=axis)
+    # Multiplication is not a safe way to zero excluded non-finite samples:
+    # IEEE-754 defines NaN * 0 as NaN and Inf * 0 as NaN. Select first so an
+    # excluded value cannot contaminate the reduction.
+    included_values = np.where(excluded, 0.0, arr)
+    numerator = np.sum(included_values, axis=axis)
     denominator = np.sum(included, axis=axis)
     out = np.full_like(np.asarray(numerator, dtype=np.float64), np.nan)
     np.divide(numerator, denominator, out=out, where=denominator > 0.0)

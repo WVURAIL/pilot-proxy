@@ -3,12 +3,17 @@
 The source workbook is `TV_Stations_UHF_within500mi_DRAO.xlsx`, retrieved on
 2026-06-09. The workbook, the reduction script, and the upstream source
 material are maintained in the `WVURAIL/dtv-station-census` repository;
-this directory vendors its derived `census.csv`. As of 2026-08-19 that
+this directory vendors its derived `census.csv`. As of 2026-08-20 that
 file is the reduction described below plus dtv-station-census's ISED
 overlay (Canadian rows re-sited to licensed transmitter coordinates,
-licence-status adjudication, and an `erp_kw` column; 499 rows -- see
-that repository's PROVENANCE.md and VERIFICATION.md for the rules and
-verdicts). The reduction narrative below describes the workbook stage. It is a manually compiled listing from FCC LMS and ISED station
+licence-status adjudication, and `erp_kw`); all 499 rows declare
+`schema_version=dtv_transmitter_census_v1` and carry `evidence_status` so the
+11 licence-only candidates remain distinguishable from rows reported on air.
+The vendored file is byte-identical to `WVURAIL/dtv-station-census` commit
+`e217c40dad8ca025f02c07c85790afda41e7202c` and has SHA-256
+`05caae7a509e8a18eb98cb63e8637a985ace4eb503ecf06cc17a6da298dca12f`.
+See that repository's PROVENANCE.md and VERIFICATION.md for the rules and
+verdicts. The reduction narrative below describes the workbook stage. It is a manually compiled listing from FCC LMS and ISED station
 information, not a propagation simulation. The inclusion rule was every UHF
 ATSC television station listed within 500 statute miles of DRAO
 (`49.3208 N`, `119.6239 W`). We used the station class and frequency-tolerance
@@ -32,11 +37,17 @@ dtv-station-census as `sources/rabbitears/dtv_120m.pdf`.
 
 ## Deterministic reduction
 
-Regenerate the CSV in the dtv-station-census repository:
+Regenerate the committed CSV (workbook reduction plus ISED overlay) from the
+root of the dtv-station-census repository:
 
 ```bash
-python census/census_from_xlsx.py census/TV_Stations_UHF_within500mi_DRAO.xlsx census.csv
+python3 ingest/apply_ised_overlay.py
 ```
+
+The overlay command invokes `census/census_from_xlsx.py` for the deterministic
+workbook reduction before applying the licensed Canadian transmitter sites,
+status adjudication, and ERP fields. Running `census_from_xlsx.py` alone
+reproduces only the pre-overlay census, not the 499-row CSV vendored here.
 
 The reduction applies the following rules:
 
