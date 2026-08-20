@@ -46,8 +46,14 @@ from baonoise import api, channels as chn, residual as res, scenarios
 import _products as P
 
 SINCE = "2025-01"
-# channels kept-and-masked under the inclusive-for-now rule (see override below)
-INCLUSIVE_KEEP = {36}
+# channels kept-and-masked under the inclusive-for-now rule (see the
+# override below). 14 and 15 joined 36 at the complete-23 snapshot:
+# both satisfy the same condition (excise picked only at the coherence
+# cap, bracket disagreement immaterial, working threshold frees ~75%
+# of current-epoch frames -- an episodic faint carrier, not a pinned
+# occupancy), and excising a ~75%-recoverable allocation would break
+# the excision-only-where-recoverable-rounds-to-zero posture.
+INCLUSIVE_KEEP = {14, 15, 36}
 # channels whose current-epoch absence is an operations exclusion, not backlog
 COLLECTION_CEASED = {30: "September 2023"}
 ETAS = [1.0, 1.2, 1.4, 2.0, 5.0]
