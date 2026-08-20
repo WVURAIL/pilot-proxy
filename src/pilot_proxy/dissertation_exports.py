@@ -247,18 +247,94 @@ def _display_input(path: Path, repo_root: Path) -> str:
         return str(path.resolve())
 
 
-def _git_commit(repo_root: Path) -> str:
+def _run_git(repo_root: Path, *arguments: str) -> str:
+    """Run one read-only Git query or fail the provenance check closed."""
+
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            ["git", "-C", str(repo_root), *arguments],
             text=True,
             capture_output=True,
-            check=True,
+            check=False,
         )
-    except (OSError, subprocess.CalledProcessError):
-        return "unknown"
-    commit = proc.stdout.strip()
-    return commit if commit else "unknown"
+    except OSError as exc:
+        raise ExportError(
+            f"cannot establish PilotProxy Git provenance in {repo_root}: {exc}"
+        ) from exc
+    if proc.returncode != 0:
+        detail = proc.stderr.strip() or proc.stdout.strip() or "Git command failed"
+        raise ExportError(
+            f"cannot establish PilotProxy Git provenance in {repo_root}: {detail}"
+        )
+    return proc.stdout
+
+
+def _clean_source_commit(repo_root: Path, expected_commit: str | None) -> str:
+    """Return ``HEAD`` only when it honestly describes the source checkout.
+
+    Dissertation exports attribute their producer and tracked scientific inputs
+    to a Git commit. Recording ``HEAD`` from a dirty checkout would silently
+    omit the actual source state, so both staged and unstaged tracked changes
+    are release-blocking. ``expected_commit`` is an assertion, not an escape
+    hatch: it must resolve to the current ``HEAD``.
+    """
+
+    top_level_text = _run_git(repo_root, "rev-parse", "--show-toplevel").strip()
+    if not top_level_text:
+        raise ExportError(f"Git returned no repository root for {repo_root}")
+    top_level = Path(top_level_text).resolve()
+    if top_level != repo_root:
+        raise ExportError(
+            f"--repo-root must be the PilotProxy Git root: got {repo_root}, "
+            f"Git root is {top_level}"
+        )
+
+    head = _run_git(
+        repo_root,
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        "HEAD^{commit}",
+    ).strip()
+    if not head:
+        raise ExportError(f"Git returned no HEAD commit for {repo_root}")
+
+    if expected_commit is not None:
+        try:
+            expected = _run_git(
+                repo_root,
+                "rev-parse",
+                "--verify",
+                "--end-of-options",
+                f"{expected_commit}^{{commit}}",
+            ).strip()
+        except ExportError as exc:
+            raise ExportError(
+                f"--source-commit does not identify a commit in {repo_root}: "
+                f"{expected_commit!r}"
+            ) from exc
+        if expected != head:
+            raise ExportError(
+                f"--source-commit resolves to {expected}, but PilotProxy HEAD is {head}"
+            )
+
+    status = _run_git(
+        repo_root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=no",
+        "--ignore-submodules=none",
+    )
+    if status:
+        changed = [line for line in status.splitlines() if line]
+        preview = ", ".join(changed[:5])
+        if len(changed) > 5:
+            preview += f", ... ({len(changed)} tracked paths total)"
+        raise ExportError(
+            "cannot create a commit-attributed dissertation export from a dirty "
+            f"PilotProxy worktree; commit or restore tracked changes first: {preview}"
+        )
+    return head
 
 
 def _validate_summary(summary: Mapping[str, Any]) -> None:
@@ -527,6 +603,7 @@ def create_export(
     repo_root = repo_root.resolve()
     output_dir = output_dir.resolve()
     summary_path = summary_path.resolve()
+    commit = _clean_source_commit(repo_root, source_commit)
     summary = _read_json(summary_path)
     _validate_summary(summary)
     optional_inputs = dict(optional_inputs or {})
@@ -639,7 +716,9 @@ def create_export(
             )
 
         artifacts.sort(key=lambda record: record["path"])
-        commit = source_commit or _git_commit(repo_root)
+        # Recheck after reading every input. This closes the window in which a
+        # concurrent edit could otherwise be exported under the earlier HEAD.
+        _clean_source_commit(repo_root, commit)
         manifest: dict[str, Any] = {
             "schema": {"name": SCHEMA_NAME, "version": SCHEMA_VERSION},
             "producer": {"module": PRODUCER, "version": PRODUCER_VERSION},
@@ -682,6 +761,9 @@ def create_export(
         (temp_root / "SHA256SUMS").write_text("\n".join(checksums) + "\n", encoding="utf-8")
 
         verify_export(temp_root, require_complete=require_complete)
+        # Keep this immediately before publication: a tracked input or producer
+        # edit during normalization must not inherit the preflight commit.
+        _clean_source_commit(repo_root, commit)
 
         if output_dir.exists():
             if output_dir.is_dir():
@@ -774,7 +856,13 @@ def _build_parser() -> argparse.ArgumentParser:
             "(default: current 23-channel v3 snapshot)"
         ),
     )
-    parser.add_argument("--source-commit", help="override the recorded git commit")
+    parser.add_argument(
+        "--source-commit",
+        help=(
+            "expected PilotProxy commit; the exporter fails unless it resolves "
+            "to HEAD and the tracked worktree is clean"
+        ),
+    )
     parser.add_argument(
         "--census-radius-miles",
         type=float,

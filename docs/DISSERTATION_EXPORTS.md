@@ -19,6 +19,14 @@ PYTHONPATH=src python tools/export_dissertation_data.py \
   --output-dir exports/dissertation/v1
 ```
 
+The exporter must run from a clean PilotProxy Git checkout. It refuses staged
+or unstaged changes to tracked files, and it checks again after reading the
+inputs so a manifest cannot present a dirty worktree as a clean `HEAD`.
+`--source-commit` is an optional assertion for automation: the supplied
+revision must resolve to the current `HEAD`; it cannot override the checkout's
+actual provenance. Generated optional CSV inputs may remain outside Git because
+their normalized exported bytes are recorded by SHA-256 in the manifest.
+
 The default export is intentionally **partial**. It always includes:
 
 - the inclusive 500-mile transmitter-census envelope derived from
