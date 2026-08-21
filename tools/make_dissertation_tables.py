@@ -124,6 +124,63 @@ def census_psd_rows(products_dir: Path) -> list[dict]:
     return rows
 
 
+def census_centre_rows(products_dir: Path) -> list[dict]:
+    """Per channel, where the coarse channel's own centre bin falls.
+
+    The bin at DC in the receiver frame -- the physical centre of the CHIME
+    coarse channel -- carries a line in every one of the twenty-three surveyed
+    channels, including channels whose nearest emitter is hundreds of kilohertz
+    away, and the reference-placement contract designates it a forbidden tone.
+    It is instrumental, not a member of the transmitter population, and the
+    census plate's +/-15 kHz window is narrow enough that on some channels it
+    lands inside the panel where it reads as a companion carrier.
+
+    This table states, for every channel, the RF offset of that bin from the
+    synthesized pilot and its level before and after the health repair, so
+    the identification is data-backed rather than remembered.
+    ``inside_census_window`` marks the channels where the two share a panel.
+    """
+    rows: list[dict] = []
+    for path in sorted(glob.glob(os.path.join(products_dir, "*.npz"))):
+        with np.load(path, allow_pickle=False) as z:
+            if SPECTRUM_KEY not in z:
+                continue
+            health = evaluate_frame_health(z)
+            corrected = health_correct_integrated_spectra(z, health)
+            if not corrected.exact:
+                raise SystemExit(
+                    f"{Path(path).name}: exact health correction is "
+                    f"unavailable: {corrected.unavailable_reason}")
+            ch = int(z["physical_channel"][0])
+            spec = np.asarray(corrected.before, dtype=float).reshape(-1)
+            raw = np.asarray(z[SPECTRUM_KEY], dtype=float).reshape(-1)
+            pilot = float(z["pilot_frequency_hz"][0])
+            centre = float(z["chime_frequency_hz"][0])
+        if spec.size != NFFT or not np.any(spec > 0):
+            continue
+        median = float(np.median(spec[spec > 0]))
+        raw_median = float(np.median(raw[raw > 0]))
+        # Bin 0 of the stored array is the coarse-channel centre in either
+        # spectral sense. The pilot sits at -(pilot - centre) in the receiver
+        # frame, so in the RF sense the centre stands that far from the pilot.
+        offset_hz = -(pilot - centre)
+        rows.append({
+            "channel": ch,
+            "offset_from_pilot_khz": f"{offset_hz / 1000.0:.6g}",
+            "db_rel_median": f"{10.0 * np.log10(spec[0] / median):.6g}",
+            "db_rel_median_uncorrected":
+                f"{10.0 * np.log10(raw[0] / raw_median):.6g}",
+            "inside_census_window":
+                "1" if abs(offset_hz) <= WINDOW_KHZ * 1000.0 else "0",
+        })
+    if not rows:
+        raise SystemExit("no products with integrated spectra found")
+    if not any(r["inside_census_window"] == "1" for r in rows):
+        raise SystemExit("no channel places its centre bin inside the census "
+                         "window; the caption's claim needs rechecking")
+    return rows
+
+
 def worked_example_rows(products_dir: Path) -> list[dict]:
     """(panel, fine_bin, T) for the worked example's two archived frames.
 
@@ -253,6 +310,12 @@ def main() -> int:
                    ("channel", "offset_khz", "db_rel_median"),
                    census_psd_rows(args.products))
     print(f"census_psd.csv: {count} rows")
+
+    count = _write(args.out / "census_centre.csv",
+                   ("channel", "offset_from_pilot_khz", "db_rel_median",
+                    "db_rel_median_uncorrected", "inside_census_window"),
+                   census_centre_rows(args.products))
+    print(f"census_centre.csv: {count} rows")
 
     if args.worked_example:
         count = _write(args.out / "worked_example_spectra.csv",
