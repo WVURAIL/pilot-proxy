@@ -526,6 +526,12 @@ CADC/CANFAR sequences, order constraint, and post-processing commands:
 
 ## Standalone synthetic/testbench workflow
 
+For the dissertation's staged, paired fixed-versus-floating sensitivity
+measurement at the current 2048-stream geometry, see
+[`docs/CURRENT_GEOMETRY_SENSITIVITY.md`](docs/CURRENT_GEOMETRY_SENSITIVITY.md).
+The compact commands below remain useful for waveform and detector smoke
+tests; their reduced examples are not publication sensitivity estimates.
+
 <p align="center">
   <img src="docs/figures/validation_flow.svg" alt="Standalone validation flow: ATSC generation, waveform audit, AWGN injection, reference PFB, packed int4 matrix, CUDA local-reference power ratio kernel, report" width="560">
 </p>
