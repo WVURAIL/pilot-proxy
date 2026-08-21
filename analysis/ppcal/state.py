@@ -60,6 +60,37 @@ class ChannelState:
         return float(v) if isinstance(v, float) else ETA_WORKING
 
     @property
+    def eta_thermal(self):
+        """The same cost optimum evaluated at the optimistic bracket end."""
+        v = self.bao.get("eta_cost_thermal") if self.bao else None
+        return float(v) if isinstance(v, float) else float("nan")
+
+    @property
+    def eta_bracket_ratio(self):
+        """How far eta moves between the two ends of the coherence bracket.
+
+        This is the quantity that decides whether a per-channel threshold is
+        identified at all. Where the correlation time was refused, eta is a
+        function of a bound rather than a measurement, and the two ends of
+        the bracket disagree -- by up to an order of magnitude on this
+        archive. Where tau was measured the bracket collapses and the ratio
+        is exactly 1, which is the clearest statement of what measuring tau
+        actually buys.
+        """
+        import numpy as _np
+        a, b = self.eta_channel, self.eta_thermal
+        if not _np.isfinite(b) or a <= 0:
+            return float("nan")
+        return float(b / a)
+
+    @property
+    def eta_is_identified(self):
+        """True when the bracket does not move the threshold materially."""
+        import numpy as _np
+        r = self.eta_bracket_ratio
+        return bool(_np.isfinite(r) and r < 1.1)
+
+    @property
     def eta_is_per_channel(self):
         return isinstance(self.bao.get("eta_cost_cap") if self.bao else None,
                           float)
