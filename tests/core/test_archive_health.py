@@ -9,7 +9,10 @@ import pytest
 
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO,
+    ARCHIVED_DATA_SHELF_SNR_DB,
     ARCHIVED_FINE_POWER_RATIO,
+    ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB,
+    ARCHIVED_PILOT_EXCESS_DB,
 )
 from pilot_proxy.archive_health import (
     ARCHIVE_HEALTH_SUMMARY_SCHEMA_VERSION,
@@ -77,14 +80,16 @@ def _product(
         "frame_index": np.arange(n, dtype=np.int64),
         "p_target_u64": target[:, None],
         "p_ref_sum_u64": reference[:, None],
-        "fstat_raw": fstat[:, None],
-        "fstat_level_db": (10.0 * np.log10(np.maximum(fstat, 1.0e-12)))[:, None],
-        "pnr_bin_db": np.full((n, 1), -10.0),
-        "snr_shelf_db": np.full((n, 1), -31.0),
+        ARCHIVED_COARSE_POWER_RATIO: fstat[:, None],
+        ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB: (
+            10.0 * np.log10(np.maximum(fstat, 1.0e-12))
+        )[:, None],
+        ARCHIVED_PILOT_EXCESS_DB: np.full((n, 1), -10.0),
+        ARCHIVED_DATA_SHELF_SNR_DB: np.full((n, 1), -31.0),
         "reject_mask": np.asarray(reject, dtype=np.uint8)[:, None],
         "valid": np.asarray(valid, dtype=np.uint8)[:, None],
         "baseband_power_linear": np.asarray(baseband_power, dtype=np.float64)[:, None],
-        "fstat_fine": np.asarray(fine, dtype=np.float32),
+        ARCHIVED_FINE_POWER_RATIO: np.asarray(fine, dtype=np.float32),
         "fine_pad_factor": np.asarray(2, dtype=np.int64),
         "fine_num_bins": np.asarray(FINE_BINS, dtype=np.int64),
         "fine_p_fa": np.asarray(1.0e-3),
