@@ -70,7 +70,24 @@ M0 = 2018 * 12 + 11
 M1 = 2026 * 12 + 6
 NMONTHS = M1 - M0 + 1
 
-# transmitter epochs from the monthly occupancy analysis
+# Transmitter epochs from the monthly occupancy analysis.
+#
+# The two epoch slots encode "the transmitter was off before this month"
+# (off_through, a sign-on channel) and "off from this month" (off_from, a
+# sign-off or step-down channel). Between them they cover every transition
+# where one side of the boundary is a transmitter-off state -- which is what
+# the residual machinery needs, because the off epoch is where a sensitivity
+# floor can be measured.
+#
+# Channel 17's transition is of a third kind: both sides are on, at +12.6 dB
+# through 2022-09 and +16.4 dB from 2022-10, which reads as a change of
+# transmitter configuration rather than a sign-on or a sign-off. Neither slot
+# can express it without asserting an off epoch that does not exist, so both
+# are left empty and only the text is carried. The consequence is worth
+# stating: ch17 has no epoch mask here, so any era-blind quantity computed
+# for it -- its measured carrier offset in particular -- averages two
+# configurations. Its disposition does not depend on this; it is excised on
+# occupancy either way.
 EPOCH = {  # ch -> (off_through, off_from, transition text)
     35: ("2021-08", None, "sign-on Nov 2021"),
     19: (None, "2024-12", "sign-off Dec 2024"),
@@ -78,6 +95,7 @@ EPOCH = {  # ch -> (off_through, off_from, transition text)
     20: (None, "2022-09", "step down Sep 2022"),
     27: (None, "2022-10", "sign-off in 2021-22 archive gap"),
     32: (None, "2022-10", "sign-off in 2021-22 archive gap"),
+    17: (None, None, "level step Oct 2022, on-to-on"),
 }
 CLASS = {17: "persistent", 22: "persistent", 24: "persistent", 30: "persistent",
          31: "persistent", 35: "persistent",
