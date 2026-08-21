@@ -10,6 +10,7 @@ import numpy as np
 import pytest
 
 from pilot_proxy.detector_reference import (
+    matched_filter_row_projections_cpu_reference_packed,
     packed_dtype_for_component_bits,
     quantize_complex_numpy,
     unpack_packed_complex,
@@ -110,3 +111,33 @@ def test_packed_dtype_invalid_bits_raises() -> None:
             np.zeros(TEST_MATRIX_SHAPE, dtype=np.int8),
             INVALID_COMPONENT_BITS,
         )
+
+
+def test_exact_row_projection_reference_matches_direct_complex_dot() -> None:
+    samples = np.asarray(
+        [[1 + 2j, -3 + 1j, 2 - 2j], [-2 + 0j, 1 - 1j, 3 + 2j]],
+        dtype=np.complex64,
+    )
+    weights = np.asarray(
+        [
+            [1 + 0j, 2 - 1j, -1 + 2j],
+            [-2 + 1j, 1 + 1j, 0 - 1j],
+            [1 - 2j, -1 + 0j, 2 + 1j],
+        ],
+        dtype=np.complex64,
+    )
+    packed_samples = quantize_complex_numpy(samples, INT4_COMPONENT_BITS, 1.0)
+    packed_weights = quantize_complex_numpy(weights, INT4_COMPONENT_BITS, 1.0)
+
+    got = matched_filter_row_projections_cpu_reference_packed(
+        packed_samples, packed_weights, INT4_COMPONENT_BITS
+    )
+    x = unpack_packed_complex(packed_samples, INT4_COMPONENT_BITS)
+    w = unpack_packed_complex(packed_weights, INT4_COMPONENT_BITS)
+    expected_complex = x @ np.conjugate(w).T
+    expected = np.stack(
+        (expected_complex.real, expected_complex.imag), axis=0
+    ).transpose(2, 1, 0)
+
+    assert got.dtype == np.int32
+    np.testing.assert_array_equal(got, expected.astype(np.int32))

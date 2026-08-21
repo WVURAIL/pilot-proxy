@@ -147,6 +147,13 @@ available.
 
 ## 2. Detection-rate curves at publication trial counts
 
+For the dissertation's current 2048-stream geometry and the staged
+fixed-versus-floating sensitivity-loss measurement, use the resumable method
+in [`CURRENT_GEOMETRY_SENSITIVITY.md`](CURRENT_GEOMETRY_SENSITIVITY.md). The
+older `evaluate-snr` workflow below remains useful for historical regression
+and response plots, but reduced-stream examples do not substitute for that
+paired, current-geometry experiment.
+
 This test measures `P_d` as a function of shelf SNR for each frequency offset.
 We evaluate both the -32 dB science threshold and the positive-excess rule,
 and we report Wilson 95% intervals. The summary already emits

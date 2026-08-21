@@ -107,3 +107,53 @@ def coarse_power_ratio_cpu_reference_packed(
     samples = unpack_packed_complex(packed_samples, bits)
     weights = unpack_packed_complex(packed_weights, bits)
     return coarse_power_ratio_cpu_reference(samples, weights)
+
+
+def matched_filter_row_projections_cpu_reference_packed(
+    packed_samples: np.ndarray,
+    packed_weights: np.ndarray,
+    bits: int,
+) -> np.ndarray:
+    """Return the kernel's exact integer matched-filter row projections.
+
+    The result has shape ``[terms, rows, 2]`` and dtype ``int32``.  Its
+    arithmetic and layout are the CPU specification for
+    ``FStat_Compute_RowSums_I32``: packed signed components are sign-extended,
+    each row is dotted with the conjugated weight vector, and the real and
+    imaginary integer sums are retained separately.  This public reference is
+    used by the synthetic sensitivity ablations as the boundary between
+    input/weight quantization and the frozen fixed-point fine transform.
+    """
+    samples = np.asarray(packed_samples)
+    weights = np.asarray(packed_weights)
+    if samples.ndim != 2:
+        raise ValueError(
+            f"packed_samples must be 2D (rows, K). Got shape {samples.shape}."
+        )
+    if weights.ndim != 2:
+        raise ValueError(
+            f"packed_weights must be 2D (terms, K). Got shape {weights.shape}."
+        )
+    if weights.shape[0] != REFERENCE_WEIGHT_TERMS:
+        raise ValueError("packed_weights must have N=3 (target, ref+, ref-).")
+    if samples.shape[1] != weights.shape[1]:
+        raise ValueError("packed sample and weight K dimensions must match.")
+
+    x = unpack_packed_complex(samples, bits, dtype=np.int64)
+    w = unpack_packed_complex(weights, bits, dtype=np.int64)
+    xr = np.asarray(x.real, dtype=np.int64)
+    xi = np.asarray(x.imag, dtype=np.int64)
+    wr = np.asarray(w.real, dtype=np.int64)
+    wi = np.asarray(w.imag, dtype=np.int64)
+
+    # z[n, m] = sum_k x[m, k] * conj(w[n, k]).  Integer inputs keep the
+    # einsums exact in int64; the detector's int4/K<=128 bound fits int32.
+    real = np.einsum("mk,nk->nm", xr, wr, optimize=True)
+    real += np.einsum("mk,nk->nm", xi, wi, optimize=True)
+    imag = np.einsum("mk,nk->nm", xi, wr, optimize=True)
+    imag -= np.einsum("mk,nk->nm", xr, wi, optimize=True)
+    out = np.stack((real, imag), axis=-1)
+    info = np.iinfo(np.int32)
+    if np.any(out < info.min) or np.any(out > info.max):
+        raise OverflowError("matched-filter row projection exceeds int32.")
+    return np.ascontiguousarray(out.astype(np.int32))
