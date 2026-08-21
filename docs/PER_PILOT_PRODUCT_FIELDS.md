@@ -202,12 +202,32 @@ detector pass:
 - masked fraction from `reject_mask` and `valid`;
 - baseband before/after summaries from `baseband_power_linear` and a selected
   frame mask;
-- per-frame wall time, and then LST where the timing attributes and telescope
-  longitude are available.
+- per-frame wall time, and then LMST where the timing attributes and telescope
+  longitude are available. The completed-archive v1 audit uses DRAO longitude
+  -119.6175 degrees east-positive, publishes its UTC-as-UT1 GMST polynomial,
+  and records frames whose sample period prevents time/exposure recovery.
+
+The fine array supports two distinct retrospective roles. Geometry predicts a
+broad +/-30-bin acquisition neighborhood. Within that neighborhood, the v1
+archive audit may accept a narrow +/-2-bin line anchor independently in each
+provisional UTC quarter when its health-filtered persistence and uniqueness
+tests pass. It records refusals and external-line sentinels. Neither derived
+object changes the stored coarse `reject_mask`, and the broad acquisition
+window must not be called a final calibrated designation.
 
 The stored integrated spectra support the spectrum before/after comparison for
 the mask used during the run. They do not preserve enough information to apply a
 new frame threshold or FFT window after the fact.
+
+The completed-survey health repair is one narrow, proven exception rather than
+a general remasking capability. A frame with `baseband_power_linear == 128`
+must consist entirely of decoded `(-8,-8)` samples: native CHIME offset-binary
+raw byte `0x00`, equivalently detector-input/post-repack two's-complement byte
+`0x88`. Its rectangular-FFT contribution is therefore reconstructible and can
+be subtracted from the accumulated spectra. Detector-invalid rows were never
+accumulated. See [`ARCHIVE_HEALTH_REPAIR.md`](ARCHIVE_HEALTH_REPAIR.md). Any
+other new frame exclusion still requires the original HDF5 data for a spectral
+correction.
 
 Full 6 MHz DTV-channel mask expansion is not part of this product. It requires a
 larger pass over the neighboring coarse channels after the pilot detector has

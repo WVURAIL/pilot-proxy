@@ -37,6 +37,10 @@ import numpy as np
 
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO)
+from pilot_proxy.archive_health import (
+    evaluate_frame_health,
+    health_correct_integrated_spectra,
+)
 
 SPECTRUM_KEY = "integrated_spectrum_before_mask"
 NFFT = 16384
@@ -81,16 +85,21 @@ def census_psd_rows(products_dir: Path) -> list[dict]:
     """
     rows: list[dict] = []
     for path in sorted(glob.glob(os.path.join(products_dir, "*.npz"))):
-        z = np.load(path)
-        if SPECTRUM_KEY not in z:
-            z.close()
-            continue
-        ch = int(z["physical_channel"][0])
-        spec = np.asarray(z[SPECTRUM_KEY], dtype=float).reshape(-1)
-        pilot = float(z["pilot_frequency_hz"][0])
-        center = float(z["chime_frequency_hz"][0])
-        fs = 390625.0
-        z.close()
+        with np.load(path, allow_pickle=False) as z:
+            if SPECTRUM_KEY not in z:
+                continue
+            health = evaluate_frame_health(z)
+            corrected = health_correct_integrated_spectra(z, health)
+            if not corrected.exact:
+                raise SystemExit(
+                    f"{Path(path).name}: exact health correction is unavailable: "
+                    f"{corrected.unavailable_reason}"
+                )
+            ch = int(z["physical_channel"][0])
+            spec = np.asarray(corrected.before, dtype=float).reshape(-1)
+            pilot = float(z["pilot_frequency_hz"][0])
+            center = float(z["chime_frequency_hz"][0])
+            fs = 390625.0
         if spec.size != NFFT or not np.any(spec > 0):
             continue
         bin_hz = fs / NFFT
@@ -142,6 +151,7 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
                                 dtype=int).reshape(-1)
         unit_t0 = np.asarray(archive["unit_time0_ctime"],
                              dtype=float).reshape(-1)
+        health = evaluate_frame_health(archive)
     frame_t = unit_t0[unit_index]
     days = np.array([datetime.datetime.fromtimestamp(
         x, datetime.timezone.utc).strftime("%Y-%m-%d") for x in frame_t])
@@ -150,7 +160,7 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
     rows: list[dict] = []
     for panel, day, target in WORKED_EXAMPLE_PANELS:
         verified = []
-        for i in np.where((days == day)
+        for i in np.where(health.include & (days == day)
                           & (np.abs(ratio - target) < WORKED_RATIO_TOL))[0]:
             T = fine[i]
             if panel == "a":

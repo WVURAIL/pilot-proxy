@@ -33,6 +33,13 @@ import _paths  # noqa: F401  -- puts <repo>/src on sys.path
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO,
     ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB)
+from pilot_proxy.archive_health import (
+    FRAME_HEALTH_GATE_SCHEMA_VERSION,
+    evaluate_frame_health,
+    health_correct_integrated_spectra,
+    recompute_corrected_fine_diagnostics,
+    temporary_baonoise_health_views,
+)
 from baonoise import residual as res
 
 import _products as P
@@ -101,10 +108,14 @@ def channel_record(z):
     ev_id = z["unit_event_id"]
     t0 = z["unit_time0_ctime"]
     nunits = len(ev_id)
+    health = evaluate_frame_health(z)
+    healthy = health.include
 
     sums = np.zeros(nunits); cnts = np.zeros(nunits, dtype=np.int64)
-    np.add.at(sums, fui, fstat); np.add.at(cnts, fui, 1)
-    maxs = np.full(nunits, -np.inf); np.maximum.at(maxs, fui, fstat)
+    np.add.at(sums, fui[healthy], fstat[healthy])
+    np.add.at(cnts, fui[healthy], 1)
+    maxs = np.full(nunits, -np.inf)
+    np.maximum.at(maxs, fui[healthy], fstat[healthy])
     keep = cnts > 0
     mean_f = sums[keep] / cnts[keep]
     max_f = maxs[keep]
@@ -139,7 +150,7 @@ def channel_record(z):
 
     # averaged fine spectrum: natural order for the envelope fit,
     # fftshifted dB for display
-    fine = np.nanmean(z[ARCHIVED_FINE_POWER_RATIO], axis=0)
+    fine = np.nanmean(z[ARCHIVED_FINE_POWER_RATIO][healthy], axis=0)
     fine_db = (10 * np.log10(np.maximum(np.fft.fftshift(fine), 1e-3))).round(2)
 
     # off-nominal carrier envelope: nominal pilot offset within the comb,
@@ -161,9 +172,16 @@ def channel_record(z):
     else:
         env_meas = env_station = None
 
-    valid = z["valid"][:, 0].astype(bool)
+    valid = healthy
     lvl_all = z[ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB][:, 0]
     lva = lvl_all[np.isfinite(lvl_all) & valid]
+    corrected_fine = recompute_corrected_fine_diagnostics(z, health)
+    spectra = health_correct_integrated_spectra(z, health)
+    if not spectra.exact:
+        raise ValueError(
+            f"freq_id {fid}: health-corrected integrated spectra unavailable: "
+            f"{spectra.unavailable_reason}"
+        )
 
     # per-frame level histogram, clipped into the fixed edges
     below = int((lva < HIST_EDGES[0]).sum())
@@ -187,9 +205,34 @@ def channel_record(z):
         lvl_db_p95=round(float(np.percentile(lva, 95)), 2),
         lvl_db_p99=round(float(np.percentile(lva, 99)), 2),
         lvl_db_max=round(float(np.max(lva)), 2),
-        frac_excess_pos=round(float(((fstat > mu0) & valid).mean()), 4),
+        frac_excess_pos=round(float((fstat[valid] > mu0).mean()), 4),
         hot_frac=round(float(hot.mean()), 4),
-        det_bins_per_frame=round(float(z["fine_detected_count"][valid, 0].mean()), 1),
+        det_bins_per_frame=round(
+            float(corrected_fine.detected_count_all_bins[valid].mean()), 1),
+        fine_predicted_acquisition_frame_fraction=round(
+            float(
+                (
+                    corrected_fine.detected_count_predicted_acquisition[valid]
+                    > 0
+                ).mean()
+            ),
+            4,
+        ),
+        fine_epoch_window_frame_fraction=round(
+            float(
+                (
+                    corrected_fine.detected_count_selected_epoch_window[valid]
+                    > 0
+                ).mean()
+            ),
+            4,
+        ),
+        fine_measured_anchor_frame_fraction=round(
+            float(corrected_fine.measured_anchor_used_by_frame[valid].mean()), 4
+        ),
+        fine_anchor_epoch_records=[
+            dict(row) for row in corrected_fine.epoch_anchor_records
+        ],
         monthly_med=med, monthly_p90=p90, monthly_n=nn, monthly_hot=hotfrac,
         moy_hot=moy, hod_hot=hod,
         fine_db=fine_db.tolist(),
@@ -197,9 +240,16 @@ def channel_record(z):
         env_nom_hz=round(float(nom), 1),
         env_meas_hz=env_meas, env_station_hz=env_station,
         hist=h.astype(int).tolist(), hist_clipped=below + above,
-        psd_before=pool_db(z["integrated_spectrum_before_mask"][:]),
-        psd_after=pool_db(z["integrated_spectrum_after_mask"][:]),
+        psd_before=pool_db(spectra.before),
+        psd_after=pool_db(spectra.after),
         pilot_rx_khz=round(eff / 1000, 3),
+        health_gate_schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
+        n_frames_health_included=int(valid.sum()),
+        n_frames_health_excluded=int(health.excluded.sum()),
+        health_reason_counts=health.reason_counts,
+        spectra_health_correction_exact=True,
+        spectra_ceiling_frames_subtracted_before=spectra.ceiling_count_before,
+        spectra_ceiling_frames_subtracted_after=spectra.ceiling_count_after,
     )
     return rec, ev, np.unique(ev_id)
 
@@ -207,8 +257,14 @@ def channel_record(z):
 def spec_demo(path):
     """Before/after-mask integrated spectrum zoomed on the demo channel's peak."""
     with np.load(path, allow_pickle=False) as z:
-        sb = z["integrated_spectrum_before_mask"][:]
-        sa = z["integrated_spectrum_after_mask"][:]
+        health = evaluate_frame_health(z)
+        spectra = health_correct_integrated_spectra(z, health)
+        if not spectra.exact:
+            raise ValueError(
+                f"health-corrected spectrum unavailable: {spectra.unavailable_reason}"
+            )
+        sb = spectra.before
+        sa = spectra.after
     pk = int(np.argmax(sb))
     half = 120
     sl = slice(pk - half, pk + half + 1)
@@ -234,7 +290,23 @@ def run_sweeps(by_fid):
     (order of survivors is preserved, so the report's panel order is stable).
     """
     results = {}
+    unavailable = {}
     for fid, name, off in SWEEP_CASES:
+        with np.load(by_fid[fid], allow_pickle=False) as health_view:
+            valid = health_view["valid"][:, 0].astype(bool)
+            rejected = health_view["reject_mask"][:, 0].astype(bool)
+            n_health_kept = int(np.count_nonzero(valid & ~rejected))
+        if n_health_kept == 0:
+            results[name] = None
+            unavailable[name] = dict(
+                fid=fid,
+                reason=(
+                    "no health-included stored-mask kept/null frame remains; "
+                    "an empirical residual floor and threshold sweep require "
+                    "new clean/off data or an independently justified floor"
+                ),
+            )
+            continue
         try:
             sweep = res.threshold_sweep(by_fid[fid], off_through=off)
             results[name] = (dict(sweep=sweep,
@@ -246,6 +318,22 @@ def run_sweeps(by_fid):
     results = {k: v for k, v in results.items() if v}
 
     for fid, name in FLOOR_CASES:
+        if name in unavailable:
+            continue
+        with np.load(by_fid[fid], allow_pickle=False) as health_view:
+            valid = health_view["valid"][:, 0].astype(bool)
+            rejected = health_view["reject_mask"][:, 0].astype(bool)
+            n_health_kept = int(np.count_nonzero(valid & ~rejected))
+        if n_health_kept == 0:
+            unavailable[name] = dict(
+                fid=fid,
+                reason=(
+                    "no health-included stored-mask kept/null frame remains; "
+                    "an empirical residual floor and threshold sweep require "
+                    "new clean/off data or an independently justified floor"
+                ),
+            )
+            continue
         try:
             fp = res.floor_provenance(by_fid[fid])
             floor_db = float(fp.sigma_implied_db)
@@ -256,7 +344,14 @@ def run_sweeps(by_fid):
                                      floor_db=floor_db, floor_substituted=True)
         except Exception as e:
             print(f"  {name}: floor-substituted sweep failed: {e}")
-    return results
+            unavailable[name] = dict(fid=fid, reason=str(e))
+    for fid, name, _ in SWEEP_CASES:
+        if name not in results and name not in unavailable:
+            unavailable[name] = dict(
+                fid=fid,
+                reason="health-filtered threshold sweep returned no usable rows",
+            )
+    return results, unavailable
 
 
 def merged_sweeps(results, by_fid):
@@ -324,13 +419,28 @@ def main(argv=None):
     report["coverage_hist"] = np.bincount(cov, minlength=21).tolist()
     report["total_units"] = int(sum(c["n_units"] for c in report["channels"]))
     report["total_frames"] = int(sum(c["n_frames"] for c in report["channels"]))
+    report["health_gate"] = dict(
+        schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
+        included_frames=int(sum(c["n_frames_health_included"]
+                                for c in report["channels"])),
+        excluded_frames=int(sum(c["n_frames_health_excluded"]
+                                for c in report["channels"])),
+        spectra_exactly_corrected_for_v1_exclusions=True,
+    )
     report["spec598"] = spec_demo(by_fid[SPEC_DEMO_FID])
     report["events_union_usable"] = len(usable_events)
 
-    results = run_sweeps(by_fid)
-    with open(args.out / "threshold_sweeps.json", "w", encoding="utf-8") as fh:
-        json.dump(results, fh, indent=1)
-    report["sweeps"] = merged_sweeps(results, by_fid)
+    # The baonoise path-only APIs otherwise reload the unfiltered originals.
+    # Transient minimal views enforce the same v1 gate used above for every
+    # threshold sweep, floor estimate, and correlation-time calculation.
+    with temporary_baonoise_health_views([Path(path) for path in files]) as views:
+        health_by_fid = {int(Path(path).stem): str(path) for path in views}
+        results, sweep_unavailable = run_sweeps(health_by_fid)
+        with open(args.out / "threshold_sweeps.json", "w", encoding="utf-8") as fh:
+            json.dump(results, fh, indent=1)
+        report["sweeps"] = merged_sweeps(results, health_by_fid)
+        report["sweep_unavailable"] = sweep_unavailable
+        report["health_gate"]["applied_to_all_baonoise_inputs"] = True
     report["hist_edges"] = [round(float(x), 2) for x in HIST_EDGES.tolist()]
 
     out_path = args.out / "report_data.json"

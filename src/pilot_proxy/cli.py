@@ -352,6 +352,42 @@ def _cmd_chime_combine(args: argparse.Namespace) -> None:
         print(f"  {label}: {path}")
 
 
+def _cmd_audit_archive_health(args: argparse.Namespace) -> None:
+    from pilot_proxy.archive_health import main as archive_health_main
+
+    argv: list[str] = [
+        "--output-dir",
+        str(args.output_dir),
+        "--glob",
+        str(args.glob),
+        "--fine-chunk-rows",
+        str(args.fine_chunk_rows),
+    ]
+    if args.products_dir is not None:
+        argv.extend(["--products-dir", str(args.products_dir)])
+    else:
+        for product in args.products or []:
+            argv.extend(["--product", str(product)])
+    if args.no_plots:
+        argv.append("--no-plots")
+    if args.dissertation_style:
+        argv.append("--dissertation-style")
+    for flag, value in (
+        ("--product-archive", args.product_archive),
+        ("--inventory-archive", args.inventory_archive),
+        ("--kernel-library", args.kernel_library),
+        ("--source-repository", args.source_repository),
+        ("--expect-products", args.expect_products),
+        ("--expect-excluded-frames", args.expect_excluded_frames),
+        ("--expect-invalid-frames", args.expect_invalid_frames),
+        ("--expect-ceiling-frames", args.expect_ceiling_frames),
+    ):
+        _add_optional_arg(argv, flag, value)
+    for commit in args.source_commits:
+        argv.extend(["--source-commit", str(commit)])
+    raise SystemExit(archive_health_main(argv))
+
+
 def _cmd_inject_pilot_tone(args: argparse.Namespace) -> None:
     from pilot_proxy.chime.injection import inject_directory
 
@@ -1216,6 +1252,88 @@ def build_parser() -> argparse.ArgumentParser:
                                     "intersection, greedy drop-curve) and "
                                     "exit without combining.")
     chime_combine.set_defaults(func=_cmd_chime_combine)
+
+    archive_health = _add_command(
+        "audit-archive-health",
+        "Apply the versioned fail-closed frame-health gate to archived "
+        "per-pilot NPZs; separate the predicted fine acquisition neighborhood "
+        "from evidence-gated measured epoch anchors; emit a summary, reason-"
+        "coded exclusion ledger, exactly supported spectrum correction, and "
+        "optional diagnostics.",
+    )
+    archive_source = archive_health.add_mutually_exclusive_group(required=True)
+    archive_source.add_argument(
+        "--products-dir",
+        type=Path,
+        help="Directory containing archived per-pilot NPZ products.",
+    )
+    archive_source.add_argument(
+        "--product",
+        type=Path,
+        action="append",
+        dest="products",
+        help="Explicit per-pilot NPZ path (repeatable).",
+    )
+    archive_health.add_argument("--glob", default="*.npz")
+    archive_health.add_argument("--output-dir", type=Path, required=True)
+    archive_health.add_argument("--fine-chunk-rows", type=int, default=4096)
+    archive_health.add_argument(
+        "--no-plots",
+        action="store_true",
+        help="Write only machine-readable evidence and corrected spectra.",
+    )
+    archive_health.add_argument(
+        "--dissertation-style",
+        action="store_true",
+        help=(
+            "Fail closed unless LaTeX can embed Latin Modern/T1 fonts in the "
+            "PDF diagnostics. Use this for dissertation release assets."
+        ),
+    )
+    archive_health.add_argument(
+        "--product-archive",
+        type=Path,
+        default=None,
+        help="Optional ZIP whose NPZ member hashes must reproduce the inputs.",
+    )
+    archive_health.add_argument(
+        "--inventory-archive",
+        type=Path,
+        default=None,
+        help="Optional inventory ZIP used to verify source-unit coverage.",
+    )
+    archive_health.add_argument(
+        "--kernel-library",
+        type=Path,
+        default=None,
+        help="Optional kernel binary whose SHA-256 must match every product.",
+    )
+    archive_health.add_argument(
+        "--source-repository",
+        type=Path,
+        default=None,
+        help=(
+            "Optional Git repository used to reproduce product-recorded "
+            "package source hashes. Requires --source-commit."
+        ),
+    )
+    archive_health.add_argument(
+        "--source-commit",
+        action="append",
+        dest="source_commits",
+        default=[],
+        help=(
+            "Clean Git commit whose src/pilot_proxy tree must reproduce a "
+            "source hash recorded by the products (repeatable)."
+        ),
+    )
+    archive_health.add_argument("--expect-products", type=int, default=None)
+    archive_health.add_argument(
+        "--expect-excluded-frames", type=int, default=None
+    )
+    archive_health.add_argument("--expect-invalid-frames", type=int, default=None)
+    archive_health.add_argument("--expect-ceiling-frames", type=int, default=None)
+    archive_health.set_defaults(func=_cmd_audit_archive_health)
 
     inject = _add_command(
         "inject-pilot-tone",

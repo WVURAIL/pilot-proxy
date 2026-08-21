@@ -80,7 +80,7 @@
 
 <div class="wrap">
 <header>
-  <p class="eyebrow">CHIME 21 cm &times; ATSC DTV &middot; pilot-proxy survey &middot; 2026-08-18</p>
+  <p class="eyebrow">CHIME 21 cm &times; ATSC DTV &middot; completed pilot-proxy survey &middot; 2026-08-20</p>
   <h1>DTV Masking Policy</h1>
   <p class="lede">
     The deployed mask rejects any frame with positive pilot excess (F&nbsp;&gt;&nbsp;&mu;<sub>0</sub>) &mdash;
@@ -131,7 +131,7 @@
   <h2>The policy, run against every archived frame</h2>
   <p class="cap">
     The products store the raw statistic per frame, so the recommended thresholds are applied
-    <i>exactly</i>, post hoc, to the full 2018&ndash;2026 archive &mdash; no reprocessing. Monthly masked
+    <i>exactly</i>, post hoc, to every health-included frame in the full 2018&ndash;2026 archive &mdash; no reprocessing. Monthly masked
     fraction under the deployed rule (top) and under this policy (bottom): dark = masked. In the
     current epoch the deployed rule keeps <b id="keptDep"></b> of valid frames on the
     <span id="nRetunedCap"></span> clean channels; the working threshold keeps <b id="keptPol"></b>. Frames the working
@@ -186,15 +186,18 @@
       <span class="mono">floor_provenance</span> &sigma;-implied substitute (flagged per row). Ch&nbsp;30
       has no current-epoch data because CHIME stopped collecting that channel in Sep 2023 due to the
       contamination itself &mdash; the instrument's own operational exclusion independently corroborates
-      the excision verdict. The same curtailment explains the thin ch&nbsp;24 archive.</li>
+      the excision verdict. The same curtailment explains the thin ch&nbsp;24 archive. After the v1
+      health gate, channels 22 and 24 have no stored-mask kept/null frame; their floor and sweep are
+      therefore unavailable, and the policy conservatively excises them pending independent clean/off
+      evidence rather than claiming a coherence-bracket result.</li>
   </ul>
 </section>
 
 <section class="sec">
-  <p class="eyebrow">Open items</p>
-  <h2>Before this goes final</h2>
+  <p class="eyebrow">Remaining evidence and operations</p>
+  <h2>What the completed archive cannot decide by itself</h2>
   <div class="todo"><ul>
-    <li><b>Channels 14&ndash;15</b> (freq_ids 844/829) are next in the scan queue; two CADC-truncated files re-fetch or stay quarantined. Regenerating this brief on any new snapshot is one script run.</li>
+    <li><b>The archive trawl is complete:</b> all 23 channels were processed. The 170,377-row source inventory is exactly accounted for by 170,374 product units and three quarantined source units (two truncated HDF5 files and one unreadable object header). No channel remains in a scan queue, and the quarantine does not remove an event from the processed event union.</li>
     <li><b>Control-frequency null trawl:</b> one pilot-free freq_id through the same pipeline pins the &mu;<sub>0</sub> null (ch&nbsp;29 sits 63.7% above &mu;<sub>0</sub> at 0.01&nbsp;dB) and puts an error bar under every low-&eta; fraction.</li>
     <li><b>Burst-channel coherence:</b> the ch&nbsp;34/36 rows rest on the bracket. The cadence
       campaigns that would measure &tau;<sub>c</sub> are specified (a few half-day scheduled runs at
@@ -204,13 +207,13 @@
       jackknife in the final BAO analysis, and the spectral sentinel. Inclusion stays safe because the
       mask is software &mdash; every kept channel can be dropped post hoc; excision is the only
       irreversible act, which is why it is now applied only where nothing is recoverable.</li>
-    <li><b>Adopt the per-channel thresholds operationally</b> (the predicted-designation defaults are already in pilot-proxy master) and re-trawl or post-process the archive at the recommended &eta; per channel.</li>
+    <li><b>Adopt the coarse per-channel &eta; thresholds operationally</b> and re-trawl or post-process the archive at the recommended value per channel. Do not promote the broad predicted fine acquisition neighborhood to a deployed designation: the archive-health audit&rsquo;s narrow measured anchors use provisional UTC-quarter evidence and remain retrospective until a prospective anchor/null contract is frozen.</li>
     <li><b>Periodic spot-collection on excluded channels:</b> three transmitters died during this survey, but a channel CHIME stops collecting (ch&nbsp;30 since Sep 2023) can never report its own sign-off. A low-cadence probe &mdash; a few baseband dumps per quarter on the excised freq_ids &mdash; is cheap insurance against permanently writing off recovered spectrum.</li>
   </ul></div>
 </section>
 
 <footer>
-  Generated 2026-08-19 from the completed <span class="mono">_per_pilot</span> products
+  Generated 2026-08-20 from the completed <span class="mono">_per_pilot</span> products
   (all 23 channels, 14&ndash;36; the trawl is complete).
   Costs are ratios of required integration time to a fixed BAO target versus an RFI-free survey;
   absolute times inherit the Fisher forecast's idealizations. Worst bin = z&nbsp;1.40&ndash;1.50.
@@ -421,7 +424,8 @@ function drawApplied() {
       c.floor_substituted ? "floor: σ-implied" : null,
       c.tau && !c.tau.measured && (c.cls === "persistent" || c.cls === "burst")
         ? "τ at bound" : null,
-      !c.recommendation.agrees ? "bracket split (<1%)" : null,
+      c.health_floor_status ? "floor unavailable after v1 health gate" : null,
+      c.recommendation.agrees === false ? "bracket split (<1%)" : null,
     ].filter(Boolean).join(" · ");
     const isCleanRow = c.recommendation.action.startsWith("clean") || c.recommendation.action.startsWith("retune");
     const ke = c.applied && c.applied.kept_excess_db;

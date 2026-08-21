@@ -41,6 +41,11 @@ import numpy as np
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO)
+from pilot_proxy.archive_health import (
+    FRAME_HEALTH_GATE_SCHEMA_VERSION,
+    evaluate_frame_health,
+    temporary_baonoise_health_views,
+)
 from baonoise import api, channels as chn, residual as res, scenarios
 
 import _products as P
@@ -126,9 +131,18 @@ def recommendations(paths, by_ch):
 
         # sweeps at both bracket ends
         path = info["path"]
+        with np.load(path, allow_pickle=False) as health_view:
+            health_valid = health_view["valid"][:, 0].astype(bool)
+            health_rejected = health_view["reject_mask"][:, 0].astype(bool)
+            health_kept = int(np.count_nonzero(health_valid & ~health_rejected))
+            rec["health_included_frames"] = int(health_valid.sum())
+            rec["health_included_stored_keep_frames"] = health_kept
         kw = dict(off_through=ot, off_from=of)
         sweeps = {}
         for tag, tau in (("cap", None), ("thermal", FRAME_S)):
+            if health_kept == 0:
+                sweeps[tag] = []
+                continue
             try:
                 s = res.threshold_sweep(path, tau_intraday=tau, **kw)
                 if not s:
@@ -168,7 +182,31 @@ def recommendations(paths, by_ch):
         f1 = rec["window_frac"]["1.0"]
         f14 = rec["window_frac"]["1.4"]
         prices = {}
-        if f14 is None:
+        if not any(sweeps.values()):
+            if health_kept != 0:
+                raise RuntimeError(
+                    f"ch{ch}: both health-filtered residual sweeps are empty "
+                    f"despite {health_kept} stored-mask kept frames; refusing "
+                    "to manufacture a policy recommendation"
+                )
+            action = "excise"
+            why = (
+                "conservative health-gate decision: every frame kept by the "
+                "stored coarse rule was a v1-excluded full-scale artifact, so "
+                "no health-included kept/null frame remains to calibrate a "
+                "residual floor or threshold sweep; excise pending new clean "
+                "or transmitter-off calibration data"
+            )
+            prices["excise"] = round(price_excise(ch), 4)
+            chosen = ("excised", 1.0, 0.0)
+            agrees = None
+            rec["health_floor_status"] = "unavailable_no_health_included_kept_frames"
+        elif not all(sweeps.values()):
+            raise RuntimeError(
+                f"ch{ch}: only one coherence-bracket sweep succeeded; refusing "
+                "to manufacture a policy recommendation"
+            )
+        elif f14 is None:
             if ch in COLLECTION_CEASED:
                 action = "excise"
                 why = ("no current-epoch frames because CHIME ceased baseband "
@@ -271,10 +309,11 @@ def recommendations(paths, by_ch):
 def apply_to_archive(pd, paths):
     """Stage 2: the recommended thresholds recomputed over every archived frame.
 
-    The archived products store the raw coarse power ratio per frame, so the retuned masks are exact
-    post-hoc recomputations, not approximations. Adds monthly masked
-    fractions under the deployed rule and under the recommended policy,
-    plus kept-frame leakage statistics.
+    The archived products store the raw coarse power ratio per frame, so the
+    retuned masks are exact post-hoc recomputations, not approximations. Every
+    denominator and distribution is restricted by the v1 frame-health gate.
+    Adds monthly masked fractions under the deployed rule and under the
+    recommended policy, plus kept-frame leakage statistics.
     """
     pd["month_labels"] = [f"{(M0+i)//12}-{(M0+i)%12+1:02d}"
                           for i in range(NMONTHS)]
@@ -287,7 +326,8 @@ def apply_to_archive(pd, paths):
             action = rec["recommendation"]["action"]
             F = z[ARCHIVED_COARSE_POWER_RATIO][:, 0]
             mu0 = float(np.asarray(z["mu0"]).ravel()[0])
-            valid = z["valid"][:, 0].astype(bool)
+            health = evaluate_frame_health(z)
+            valid = health.include
             t0 = z["unit_time0_ctime"]
             months = np.array([
                 dt.datetime.fromtimestamp(float(t), dt.timezone.utc).year * 12
@@ -311,6 +351,8 @@ def apply_to_archive(pd, paths):
             monthly_deployed=monthly(dep),
             monthly_policy=(monthly(new) if retuned else None),
             excised=not retuned,
+            health_included_frames=int(valid.sum()),
+            health_excluded_frames=int(health.excluded.sum()),
         )
         # leakage: excess distribution of frames the retuned rule KEEPS (window)
         if retuned:
@@ -393,18 +435,47 @@ def main(argv=None):
         raise SystemExit(f"no per-pilot products (*.npz) under {per_pilot}; "
                          "set PP_PER_PILOT or pass --products")
 
-    by_ch = {}
+    source_by_ch = {}
+    total_frames = total_health_included = 0
     for p in paths:
         with np.load(p, allow_pickle=False) as z:
             ch = int(z["physical_channel"][0])
-            by_ch[ch] = dict(path=p, fid=int(z["freq_id"][0]),
-                             pilot_mhz=float(z["pilot_frequency_hz"][0]) / 1e6,
-                             mu0=round(float(z["mu0"][0]), 5))
+            health = evaluate_frame_health(z)
+            total_frames += int(health.include.size)
+            total_health_included += int(health.include.sum())
+            source_by_ch[ch] = dict(
+                source_path=p,
+                fid=int(z["freq_id"][0]),
+                pilot_mhz=float(z["pilot_frequency_hz"][0]) / 1e6,
+                mu0=round(float(z["mu0"][0]), 5),
+            )
 
-    pd = recommendations(paths, by_ch)
-    print("\npolicy:", pd["policy"])
-    apply_to_archive(pd, paths)
-    add_ladder(pd, by_ch)
+    # baonoise owns the residual/forecast machinery but its public APIs accept
+    # paths and load frame arrays internally. Transient minimal views make the
+    # v1 inclusion explicit at that boundary; no dissertation-facing policy
+    # number is computed from the unfiltered originals.
+    with temporary_baonoise_health_views([Path(path) for path in paths]) as views:
+        view_by_name = {view.name: str(view) for view in views}
+        by_ch = {
+            ch: {
+                **metadata,
+                "path": view_by_name[Path(metadata["source_path"]).name],
+            }
+            for ch, metadata in source_by_ch.items()
+        }
+        pd = recommendations([str(view) for view in views], by_ch)
+        print("\npolicy:", pd["policy"])
+        apply_to_archive(pd, paths)
+        add_ladder(pd, by_ch)
+
+    pd["health_gate"] = dict(
+        schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
+        policy="fail_closed",
+        applied_to_all_baonoise_inputs=True,
+        stored_frames=total_frames,
+        included_frames=total_health_included,
+        excluded_frames=total_frames - total_health_included,
+    )
 
     out_path = args.out / "policy_data.json"
     with open(out_path, "w", encoding="utf-8") as fh:

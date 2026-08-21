@@ -114,7 +114,7 @@
 
 <div class="wrap">
 <header>
-  <p class="eyebrow">CHIME/FRB baseband &middot; ATSC pilot survey &middot; status report &middot; 2026-08-18</p>
+  <p class="eyebrow">CHIME/FRB baseband &middot; ATSC pilot survey &middot; completed-archive report &middot; 2026-08-20</p>
   <h1>Pilot Proxy Trawl</h1>
   <p class="lede">
     Twenty-three CHIME frequency channels, each containing the 8-VSB pilot tone of one ATSC digital-TV
@@ -220,7 +220,10 @@
     (verified against <span class="mono">fine_reduction.py</span>; the axis is sense-flipped relative to RF).
     The dashed marker is where the nominal ATSC pilot should sit; the measured line lands 27&ndash;340&nbsp;Hz
     away, a per-station carrier-frequency offset the trawl measures to a few&nbsp;Hz. Designated bin&nbsp;0
-    (zero envelope offset) is the v3 convention; the current pipeline anchors on the measured line bin instead.
+    (zero envelope offset) is the historical run field. The archive-health audit now reports the broad
+    geometry-predicted &plusmn;30-bin acquisition neighborhood separately from narrow &plusmn;2-bin line anchors
+    accepted only in provisional UTC quarters with sufficient health-filtered persistence and uniqueness.
+    These retrospective anchors do not rewrite the stored coarse mask or constitute a deployed fine policy.
   </p>
   <div class="card"><div class="grid2" id="finespectra"></div></div>
 </section>
@@ -249,10 +252,12 @@
     net effective-sensitivity multiplier net&nbsp;=&nbsp;(1+r<sub>unmasked</sub>)/(1+r<sub>masked</sub>)&thinsp;&times;&thinsp;(1&minus;f):
     above 1 the threshold pays, below 1 it discards more signal than contamination. The best point is
     marked; sweeps start where enough frames survive. &tau;<sub>c</sub> is measured where the estimator&rsquo;s
-    gates pass (ch&nbsp;35: 46&nbsp;min, ch&nbsp;31: 34&nbsp;min, ch&nbsp;24: 62&nbsp;min) and held at the
+    gates pass (ch&nbsp;35: 46&nbsp;min and ch&nbsp;31: 34&nbsp;min) and held at the
     sidereal-day bound elsewhere &mdash; the bound maximizes the apparent benefit of masking, so
-    bound-based nets are upper limits. Channels without a measurable off-epoch floor use the
-    <span class="mono">floor_provenance</span> &sigma;-implied substitute. The sign-off channels are
+    bound-based nets are upper limits. Channels with a health-included null population but no
+    measurable off-epoch floor use the <span class="mono">floor_provenance</span> &sigma;-implied
+    substitute. Channels 22 and 24 have no health-included stored-mask kept frames, so their
+    residual floors and threshold sweeps are unavailable rather than substituted. The sign-off channels are
     calibrated per-epoch (<span class="mono">off_from</span> support is in baonoise master); their
     operating points live in the companion policy brief.
   </p>
@@ -263,21 +268,22 @@
 </section>
 
 <section class="sec">
-  <p class="eyebrow">Trawl progress</p>
-  <h2>What remains to process</h2>
+  <p class="eyebrow">Archive coverage</p>
+  <h2>Completed processing inventory</h2>
   <p class="cap" id="progressCap"></p>
   <div class="card"><div id="progress"></div></div>
   <div class="qbox">
-    <b>Quarantined at the archive (2 files):</b>
+    <b>Quarantined source units (3 files, all accounted for):</b>
     <div class="qrow"><code>baseband_41615268_614.h5</code> &mdash; truncated at CADC (EOF 37.7&nbsp;MB, stored EOF 68.2&nbsp;MB) &mdash; 2026-08-09</div>
     <div class="qrow"><code>baseband_143875213_706.h5</code> &mdash; truncated at CADC (EOF 4.2&nbsp;MB, stored EOF 27.3&nbsp;MB) &mdash; 2026-08-13</div>
-    <div class="qrow">Channel 16 (<code>freq_id 813</code>) completed 2026-08-18; freq_ids <code>829</code>/<code>844</code> (channels 15/14) are next in the scan queue.</div>
+    <div class="qrow"><code>baseband_20230601064341_844.h5</code> &mdash; unreadable HDF5 object header &mdash; 2026-08-20</div>
+    <div class="qrow">No channel remains in the scan queue. The 170,377-row inventory is partitioned into 170,374 processed units and these three quarantined units; every one of the 9,214 inventoried events still joins a processed product.</div>
   </div>
 </section>
 
 <section class="sec">
   <p class="eyebrow">Channel table</p>
-  <h2>All twenty channels</h2>
+  <h2>All twenty-three channels</h2>
   <div class="card" id="tablecard"></div>
 </section>
 
@@ -285,16 +291,16 @@
   <p class="eyebrow">Provenance &amp; integrity</p>
   <h2>Detector configuration</h2>
   <ul class="notes">
-    <li>Schema <code>pilotproxy_detector_datatrawl_v3</code>, detector <code>pilot-proxy/0.3.0.dev0</code>, kernel 2.1.0, contract <code>pilotproxy_chime_detector_contract_v1</code>.</li>
+    <li>Schema <code>pilotproxy_detector_datatrawl_v3</code>; two recorded PilotProxy build identities (<code>0.3.0.dev0</code> in 2 products and <code>1.0.0</code> in 21); kernel 2.1.0, with one binary SHA-256 matching all 23 products; contract <code>pilotproxy_chime_detector_contract_v1</code>.</li>
     <li>Statistic F&nbsp;=&nbsp;2&thinsp;P<sub>target</sub>&thinsp;/&thinsp;(P<sub>ref,lower</sub>&thinsp;+&thinsp;P<sub>ref,upper</sub>), references at &plusmn;2 coarse bins with 1 guard bin. Each frame sums 2048 input streams &times; 128 detector windows of 128 samples (41.9&nbsp;ms per frame); &mu;<sub>0</sub> from exact integer weight norms. Fine reduction: time-coherent FFT along the window axis, 256 envelope bins of 11.92&nbsp;Hz (pad&nbsp;2), CFAR p<sub>FA</sub>&nbsp;=&nbsp;10<sup>&minus;3</sup>, int64-exact marginal identity enforced per frame.</li>
-    <li>uint64 power accumulators: <b>zero overflows</b> recorded in all 20 files. Reference placement nominal in all 20 (no DC-shifted, edge-wrapped, or forbidden-tone collisions).</li>
+    <li>uint64 power accumulators: <b>zero overflows</b> recorded in all 23 files. Reference placement nominal in all 23 (no DC-shifted, edge-wrapped, or forbidden-tone collisions).</li>
     <li>Per-channel weight-bank and manifest SHA-256 recorded in every file; source hash pinned in the detector version string.</li>
-    <li>Median 3 frames per event-channel file (max 33); a few hundred units per channel contribute zero valid frames and are excluded from per-event statistics.</li>
+    <li>Median 3 frames per event-channel file (max 33); 4,692 of 170,374 processed units contribute zero stored frames. The versioned fail-closed health gate excludes 182 of 750,461 stored frames before report statistics are formed.</li>
   </ul>
 </section>
 
 <footer>
-  Generated 2026-08-18 from the completed <span class="mono">_per_pilot</span> products (21 channel files + quarantine log).
+  Generated 2026-08-20 from the completed <span class="mono">_per_pilot</span> products (23 channel files plus the three-row quarantine ledger).
   Pilot excess is 10&thinsp;log<sub>10</sub>(F/&mu;<sub>0</sub>); &ldquo;detected&rdquo; means per-event max F&nbsp;&gt;&nbsp;5.
   Times in UTC except seasonality panels (America/Vancouver).
 </footer>
@@ -396,14 +402,14 @@ function gapPath(xs, ys, sx, sy) {
 // ---------- tiles ----------
 (function () {
   const total = RD.total_units, frames = RD.total_frames;
-  const maxUnits = 20 * RD.events_union;
+  const maxUnits = CH.length * RD.events_union;
   const tiles = [
     { v: RD.events_union.toLocaleString(), k: "distinct baseband events probed", sub: RD.events_union_usable.toLocaleString() + " with usable frames · Dec 2018 – Jul 2026" },
     { v: total.toLocaleString(), k: "event-channel files processed", sub: (100 * total / maxUnits).toFixed(1) + "% of " + maxUnits.toLocaleString() + " possible" },
     { v: frames.toLocaleString(), k: "detector frames", sub: "41.9 ms each · ≈" + (frames * 16384 * 2.56e-6 / 3600).toFixed(1) + " h total integration" },
-    { v: "21", k: "pilot channels", sub: "DTV ch 16–36 · 482–602 MHz" },
+    { v: CH.length.toLocaleString(), k: "pilot channels", sub: "DTV ch 14–36 · 470–602 MHz" },
     { v: "6", k: "transmitter transitions resolved", sub: "3 sign-offs · 1 sign-on · 1 step-down · 1 mid-gap" },
-    { v: "2", k: "files quarantined", sub: "truncated at CADC" },
+    { v: "3", k: "source units quarantined", sub: "2 truncated · 1 unreadable header" },
   ];
   document.getElementById("tiles").innerHTML = tiles.map(t =>
     `<div class="tile"><div class="v">${t.v}</div><div class="k">${t.k}</div><div class="sub">${t.sub}</div></div>`).join("");

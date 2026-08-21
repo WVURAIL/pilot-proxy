@@ -49,6 +49,7 @@ from baonoise import residual as R
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_DATA_SHELF_SNR_DB)
+from pilot_proxy.archive_health import temporary_baonoise_health_views
 import _products as P
 
 DEFAULT_CHANNELS = (32, 33, 34, 35, 36)
@@ -259,7 +260,10 @@ def main(argv=None):
     products = (args.products if args.products is not None
                 else list(P.paths(channels=DEFAULT_CHANNELS).values()))
 
-    rows = [channel_row(p) for p in products]
+    with temporary_baonoise_health_views(
+        [Path(product) for product in products]
+    ) as health_views:
+        rows = [channel_row(path) for path in health_views]
     args.out.mkdir(parents=True, exist_ok=True)
 
     out = fig_channel_histograms(rows, args.out / "fig5_channel_histograms.png")

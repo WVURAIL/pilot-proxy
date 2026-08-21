@@ -90,7 +90,10 @@ then supplied to the exporter through `--census-psd`,
 
 `tools/make_chain_table.py` generates the per-channel residual-chain table
 (the dissertation's Table 9.6 and its lower-band extension) from the same
-products via the released `baonoise` residual machinery. Its built-in
+products via the released `baonoise` residual machinery. It passes only
+versioned v1 health-filtered frame views to `baonoise`, so its floor,
+variance, correlation-time, and masked-fraction terms cannot silently restore
+excluded archive rows. Its built-in
 self-test reproduces the published first-measured-block constants from raw
 products and aborts on any drift: the table's provenance is the
 reproduction, not a remembered analysis. The remaining optional tables
@@ -140,12 +143,48 @@ immutable historical inputs for reproducing the 2026-08-12 and 2026-08-18
 drafts. Select one explicitly with `--summary` only for that purpose; neither is
 the current export source.
 
+The archive-health command also does **not** rewrite
+`data/provenance/dissertation_summary_v3.json`,
+`analysis/dissertation/data/channel_status.csv`, or
+`analysis/dissertation/data/epoch_operating_points.csv`. Figures built from
+those files remain legacy/provisional epoch-status products. The dedicated
+`tools/make_dissertation_status_v4.py` integration consumes the immutable v3
+snapshot, health summary, rebuilt policy data, and rebuilt chain table and
+writes portable `dissertation_summary_v4.json`, `channel_status_v4.csv`, and
+`epoch_operating_points_v4.csv` files. It corrects invalidated prose claims
+without pretending that the legacy numeric epoch operating points or their
+figures were health-recomputed. Do not describe the old rows or figures as
+health-corrected by implication. By contrast, rerunning
+`tools/make_dissertation_tables.py` from the repaired source produces the final
+health-filtered `census_psd.csv` and `bao_time_vs_masking.csv`; its optional
+worked-example table also refuses any excluded frame.
+
 ## Large products
 
 The exporter does not move raw captures, result bundles, NPZ dumps, or Fisher
 workspaces into git. Those remain in the archive channel. Their small tabular
 exports can be supplied to the exporter and are then fingerprinted in the
 resulting dissertation export.
+
+Before generating dissertation-facing archive tables or figures, run the
+versioned health repair in [`ARCHIVE_HEALTH_REPAIR.md`](ARCHIVE_HEALTH_REPAIR.md).
+Its scalar summaries and fine-F heatmaps exclude the reason-coded unhealthy
+rows. Its relative spectra use the exactly reconstructible v1 DC subtraction.
+The portable summary also carries per-channel health-filtered exposure by UTC
+month/hour, Vancouver civil month/hour, meteorological season, and DRAO LMST
+hour. Inventory-backed triggered-versus-scheduled counts and exposure are
+reported separately; missing sample periods make the completed temporal
+exposure explicitly partial rather than silently shrinking its denominator.
+The broad predicted +/-30-bin fine neighborhood is labelled only as an
+acquisition diagnostic. Narrow measured +/-2-bin anchors are provisional
+UTC-quarter estimates with persistence/uniqueness evidence and refusal
+reasons; an outside-neighborhood line is only a sentinel and cannot move the
+pilot anchor.
+The report, policy, residual-chain, and histogram generators create transient
+minimal v1-filtered views for all path-only `baonoise` calls; the census-PSD
+table uses the same exact spectrum correction.
+Do not call the fine-F heatmaps raw-voltage spectrograms, and do not call the
+relative spectra absolute PSDs.
 
 ## Frozen dissertation inputs still requiring replacement
 
