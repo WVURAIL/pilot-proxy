@@ -88,3 +88,15 @@ def test_masked_mean_excludes_samples_instead_of_zero_filling() -> None:
 
     assert masked_mean_excluding(values, mask) == pytest.approx(20.0)
     assert not math.isclose(float(np.mean(values * (1 - mask))), 20.0)
+
+
+@pytest.mark.parametrize("excluded_value", [np.nan, np.inf, -np.inf])
+def test_masked_mean_excludes_nonfinite_samples(excluded_value: float) -> None:
+    values = np.asarray([[1.0, excluded_value], [3.0, excluded_value]])
+    mask = np.asarray([[0, MASK_VALUE_EXCLUDED], [0, MASK_VALUE_EXCLUDED]])
+
+    assert masked_mean_excluding(values, mask) == pytest.approx(2.0)
+    np.testing.assert_allclose(
+        masked_mean_excluding(values, mask, axis=1),
+        np.asarray([1.0, 3.0]),
+    )
