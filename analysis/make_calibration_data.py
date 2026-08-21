@@ -104,6 +104,9 @@ def main(argv=None):
             mask_band_suppression_db=round(mstats["band_suppression_db"], 3),
             wide_pair_is_latest_era=wide_ok,
             eta_channel=round(s.eta_channel, 4),
+            eta_thermal=round(s.eta_thermal, 4),
+            eta_bracket_ratio=round(s.eta_bracket_ratio, 4),
+            eta_is_identified=s.eta_is_identified,
             eta_is_per_channel=s.eta_is_per_channel,
             occ_at_eta_channel=round(s.occ_working, 6),
             occ_at_eta_global=round(s.occ_global, 6),
@@ -183,6 +186,22 @@ def main(argv=None):
         json.dump(doc, fh, indent=1, sort_keys=True, default=float)
         fh.write("\n")
 
+    tau_rows = []
+    for s_ in sorted(st, key=lambda z: -(z.eta_bracket_ratio
+                                         if z.eta_bracket_ratio == z.eta_bracket_ratio
+                                         else 0)):
+        tau_rows.append(dict(
+            ch=s_.ch,
+            tau_measured=s_.bao.get("tau_measured", ""),
+            tau_seconds=s_.bao.get("tau_seconds", ""),
+            eta_cap=round(s_.eta_channel, 4),
+            eta_thermal=round(s_.eta_thermal, 4),
+            bracket_ratio=round(s_.eta_bracket_ratio, 4),
+            identified=s_.eta_is_identified,
+            verdict=s_.verdict,
+            masked_at_eta_cap=round(s_.occ_working, 4)))
+    write_csv(os.path.join(tables, "tau_priority.csv"), tau_rows)
+
     write_csv(os.path.join(tables, "channel_inventory.csv"), inv)
     write_csv(os.path.join(tables, "eras.csv"), era_rows)
     write_csv(os.path.join(tables, "calibration.csv"), cal_rows)
@@ -198,6 +217,12 @@ def main(argv=None):
           "individually"
           % (t["eta_min"], t["eta_max"], t["eta_median"],
              t["eta_per_channel"], t["channels"]))
+    ident = [x for x in st if x.eta_is_identified]
+    ratios = sorted(x.eta_bracket_ratio for x in st
+                    if x.eta_bracket_ratio == x.eta_bracket_ratio)
+    print("eta identified (bracket ratio < 1.1) on %d of %d channels; "
+          "ratio median %.2f, max %.2f"
+          % (len(ident), len(st), ratios[len(ratios) // 2], ratios[-1]))
     print("kept channels, median masked fraction: %.1f%% under F > 1, "
           "%.1f%% under F > eta*mu"
           % (100 * t["kept_median_occ_provisional"],

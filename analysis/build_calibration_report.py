@@ -213,13 +213,16 @@ def main(argv=None):
                     "tiers behind it. The growth-rate tier varies by only "
                     "1.3&times; across the whole band, so it is not what "
                     "makes &eta; differ between channels."),
-        fig_bracket=img("fig12_bao_bracket.png",
+        fig_bracket_old=img("fig12_bao_bracket.png",
                         "Residual against tolerance at both bracket ends",
                         "The coherence bracket spans four to six orders of "
                         "magnitude. The red end is the adopted basis: every "
                         "residual on it is an upper bound, so a channel "
                         "outside tolerance there is uncertified, not "
                         "disqualified."),
+        fig_bracket=img("fig15_bracket_stability.png",
+                        "Coherence-bracket stability of eta",
+                        "Each channel's threshold at both ends of the coherence bracket. Where the two coincide the threshold is identified by the data; where they do not, it is identified only by the choice of basis."),
         fig_mask=img("fig14_mask_effect.png",
                      "Latest-era fine spectrum before and after masking",
                      "What the threshold actually removes. On the kept "
@@ -547,6 +550,27 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   </div>
   ${fig_eta}
 
+  <div class="note warn">
+    <span class="h">These thresholds are identified by the adopted basis, not
+    by measurement.</span>
+    <p>A per-channel &eta; is only well defined if it does not depend on which
+    end of the coherence bracket you evaluate it at. On this archive it
+    mostly does: the ratio between the thermal-end and cap-end optimum has a
+    median of <strong>2.08&times;</strong> and reaches
+    <strong>9.92&times;</strong> on ch14. The bracket collapses to exactly
+    1.00&times; on ch24, ch31 and ch35 &mdash; the three channels with a
+    measured coherence time &mdash; which is the cleanest statement available
+    of what measuring &tau; actually buys.</p>
+    <p>So the &eta; values above are identified <em>because the bounded basis
+    was adopted</em>, not because the data pins them. That is a legitimate
+    position and it is the one taken here, but it is a decision rather than a
+    measurement, and it is worth reading the ordering below with that in
+    mind: <strong>&eta; is pinned on five channels and all five are
+    excised</strong>. On the seventeen kept channels &mdash; the ones where
+    the threshold actually governs anything &mdash; it is not.</p>
+  </div>
+  ${fig_bracket}
+
   <div class="note">
     <span class="h">Adopted basis: the bound, not the measurement.</span>
     <p>The residual depends on how long contamination stays coherent, and only
@@ -569,7 +593,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
     already specified. Until it runs these bounds stand, and every number
     downstream of them inherits the same one-sided qualification.</p>
   </div>
-  ${fig_bracket}
+  ${fig_bracket_old}
 </section>
 
 <section>

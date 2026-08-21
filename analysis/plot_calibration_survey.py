@@ -538,6 +538,47 @@ def fig_mask_effect(st, out):
     return save_fig(fig, os.path.join(out, "fig14_mask_effect.png"))
 
 
+def fig_bracket_stability(st, out):
+    """How far eta moves between the two ends of the coherence bracket."""
+    have = [x for x in st if x.eta_bracket_ratio == x.eta_bracket_ratio]
+    if not have:
+        return None
+    order = sorted(have, key=lambda x: -x.eta_bracket_ratio)
+    y = np.arange(len(order))
+    fig, ax = plt.subplots(figsize=(11.2, 7.8))
+    for k, x in enumerate(order):
+        col = EXCISE_COLOR if x.verdict == "excise" else KEEP_COLOR
+        ax.plot([x.eta_channel, x.eta_thermal], [k, k], color=MUTED, lw=1.6,
+                zorder=1, solid_capstyle="round")
+        ax.scatter([x.eta_channel], [k], s=46, color=col, zorder=3,
+                   edgecolor=SURFACE, linewidth=0.6)
+        ax.scatter([x.eta_thermal], [k], s=46, color=col, zorder=3,
+                   marker="D", edgecolor=SURFACE, linewidth=0.6)
+        if x.eta_is_identified:
+            ax.annotate("identified", (max(x.eta_thermal, x.eta_channel), k),
+                        textcoords="offset points", xytext=(9, -3),
+                        fontsize=8.2, color=INK2)
+    ax.set_xscale("log")
+    ax.set_yticks(y)
+    ax.set_yticklabels(
+        ["ch %d%s" % (x.ch, "  $\\tau$ meas." if x.bao.get("tau_measured")
+                      else "") for x in order], fontsize=9.5)
+    ax.set_xlabel("$\\eta$   (circle: adopted cap end;  diamond: thermal end)")
+    handles = [plt.Line2D([], [], marker="o", ls="", color=KEEP_COLOR,
+                          label="kept channel"),
+               plt.Line2D([], [], marker="o", ls="", color=EXCISE_COLOR,
+                          label="excised channel")]
+    ax.legend(handles=handles, loc="upper right")
+    n_id = sum(1 for x in have if x.eta_is_identified)
+    ax.set_title("Is the per-channel threshold identified?\n"
+                 "the bracket collapses on %d of %d channels -- and every one "
+                 "of them is excised, so $\\eta$ is pinned exactly where it "
+                 "no longer matters" % (n_id, len(have)),
+                 fontsize=12.5, loc="left")
+    fig.tight_layout()
+    return save_fig(fig, os.path.join(out, "fig15_bracket_stability.png"))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--products", default=None)
@@ -566,7 +607,8 @@ def main(argv=None):
             fig_ladder_summary(st, args.out),
             fig_bao(st, args.out),
             fig_eta(st, args.out),
-            fig_mask_effect(st, args.out)]
+            fig_mask_effect(st, args.out),
+            fig_bracket_stability(st, args.out)]
     for p in made:
         if p:
             print("wrote", p)
