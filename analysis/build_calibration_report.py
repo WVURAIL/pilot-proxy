@@ -630,7 +630,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   actually takes out; the medians used for the spectrograms answer a
   different question, about persistence, and the two part company on a bursty
   channel.</p>
-  <p>Across the kept channels the threshold removes 0.4 to 3.1 dB of
+  <p>Across the kept channels the threshold removes 0.13 to 3.07 dB of
   band-integrated power and up to 13.7 dB at the carrier itself. Across the
   excised ones it removes essentially nothing &mdash; 0.02 to 0.07 dB on
   ch24, ch30, ch31 and ch35 &mdash; because the carrier is present in
