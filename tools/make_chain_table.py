@@ -31,12 +31,17 @@ from pathlib import Path
 
 import numpy as np
 
+from pilot_proxy.archive_health import (
+    FRAME_HEALTH_GATE_SCHEMA_VERSION,
+    temporary_baonoise_health_views,
+)
+
 # Transmitter-era boundaries from the monthly occupancy analysis.
 OFF_THROUGH = {35: "2021-10"}
 OFF_FROM = {19: "2024-12", 20: "2022-09", 26: "2023-04", 27: "2022-10",
             32: "2022-10"}
 # Channels whose science-relevant chain row is the transmitter-off era.
-OFF_EPOCH_CANONICAL = {19, 20, 26}
+OFF_EPOCH_CANONICAL = {19, 20, 26, 27}
 THIN_FLOOR_FRAMES = 30      # parenthesize floors from fewer null frames
 BINDING_RTOL = 1.5e-3       # binding growth-rate tolerance (Table 9.4)
 
@@ -51,6 +56,9 @@ SELF_TEST = {  # channel: (floor_db, n_null, x_over_binding) published values
 def chain_row(res, path, off_through=None, off_from=None):
     _, st, ct = res.budget_from_products(path, off_through=off_through,
                                          off_from=off_from)
+    with np.load(path, allow_pickle=False) as view:
+        health_included = int(view["health_included_frame_count"])
+        health_excluded = int(view["health_excluded_frame_count"])
     n_intra = res.n_coh_from_correlation_time(ct.tau_for_budget)
     gain = st.intraday_fraction * n_intra + st.fast_fraction
     r_keep = 10.0 ** (st.on_shelf_db / 10.0) * gain
@@ -74,6 +82,14 @@ def chain_row(res, path, off_through=None, off_from=None):
         r_proxy=(None if r_proxy is None else float(f"{r_proxy:.4g}")),
         x_over_binding=(None if r_proxy is None
                         else float(f"{r_proxy / BINDING_RTOL:.4g}")),
+        health_gate_schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
+        health_included_frames=health_included,
+        health_excluded_frames=health_excluded,
+        health_floor_status=(
+            "available"
+            if st.n_off_frames > 0
+            else "unavailable_no_health_included_stored_mask_kept_frames"
+        ),
     )
 
 
@@ -89,24 +105,33 @@ def main() -> int:
 
     from baonoise import residual as res
 
-    paths = sorted(glob.glob(os.path.join(str(args.products), "*.npz")))
+    paths = [
+        Path(path)
+        for path in sorted(glob.glob(os.path.join(str(args.products), "*.npz")))
+    ]
+    if not paths:
+        raise SystemExit(f"no per-pilot products under {args.products}")
     rows = []
-    for path in paths:
-        with np.load(path) as z:
-            ch = int(z["physical_channel"][0])
-        views = []
-        if ch in OFF_EPOCH_CANONICAL:
-            views.append(dict(off_from=OFF_FROM[ch]))
-            views.append(dict())            # era-mixture view, flagged by user
-        elif ch in OFF_THROUGH:
-            # published first-block row is the full-archive view; the
-            # transmitter-off era rides along as the supplementary epoch row
-            views.append(dict())
-            views.append(dict(off_through=OFF_THROUGH[ch]))
-        else:
-            views.append(dict())
-        for kw in views:
-            rows.append(chain_row(res, path, **kw))
+    # baonoise owns the residual calculation but accepts only paths. Derived
+    # minimal views apply the archive gate before any floor, variance, or
+    # correlation-time statistic reaches that package.
+    with temporary_baonoise_health_views(paths) as health_views:
+        for path in health_views:
+            with np.load(path, allow_pickle=False) as z:
+                ch = int(z["physical_channel"][0])
+            epochs = []
+            if ch in OFF_EPOCH_CANONICAL:
+                epochs.append(dict(off_from=OFF_FROM[ch]))
+                epochs.append(dict())       # era-mixture view, flagged by user
+            elif ch in OFF_THROUGH:
+                # published first-block row is the full-archive view; the
+                # transmitter-off era rides along as the supplementary epoch row
+                epochs.append(dict())
+                epochs.append(dict(off_through=OFF_THROUGH[ch]))
+            else:
+                epochs.append(dict())
+            for kw in epochs:
+                rows.append(chain_row(res, path, **kw))
 
     if not args.skip_self_test:
         got = {r["channel"]: r for r in rows if r["epoch"] == "full"}

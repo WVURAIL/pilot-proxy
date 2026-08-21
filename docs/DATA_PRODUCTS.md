@@ -265,6 +265,13 @@ Absolute times are deliberately absent: epoch dating flows through
 `source_event_keys` (inventory event dates, or a paired pilot product's time
 axis).
 
+"Native offset-binary units" describes the decoded integer coordinate, not a
+raw byte value. In particular, a mean power of exactly 128 proves every decoded
+sample is `(-8,-8)`: native raw byte `0x00`, or `0x88` only after the detector's
+two's-complement repack. The completed-archive gate and the resulting exact
+DC-only integrated-spectrum subtraction are specified in
+[`ARCHIVE_HEALTH_REPAIR.md`](ARCHIVE_HEALTH_REPAIR.md).
+
 ## Frame Identity NPZ
 
 ### `chime_frame_identity.npz`
