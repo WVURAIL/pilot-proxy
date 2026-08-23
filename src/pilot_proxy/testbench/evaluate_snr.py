@@ -429,6 +429,62 @@ def _ideal_float_weights_from_layout(
     return np.ascontiguousarray(np.stack(rows).astype(np.complex128))
 
 
+def assert_clean_pilot_lands_on_target(
+    clean_streams: np.ndarray,
+    *,
+    selected_weight_layout: dict[str, Any],
+    detector_window_samples: int,
+    samples_per_block: int,
+    spectral_sense: str,
+    minimum_target_excess: float = 8.0,
+) -> dict[str, Any]:
+    """Fail loudly when the noise-free pilot is not in the detector's target bin.
+
+    Every quantity downstream is a ratio of that bin to its neighbours, so a
+    stream whose line sits elsewhere yields F ~= 1 at every SNR and produces a
+    detection curve made entirely of noise -- silently, and with the requested
+    SNR still tracking perfectly. That is what a wrong ``--spectral-sense``
+    does: it mirrors the line into the bin below the channel centre while the
+    weight bank targets the bin above it. Checking the clean signal once at
+    startup costs nothing and turns a plausible-looking curve into an error.
+    """
+    rows = np.asarray(
+        _float_streams_for_reference(
+            clean_streams,
+            samples_per_block=int(samples_per_block),
+            detector_window_samples=int(detector_window_samples),
+            spectral_sense=str(spectral_sense),
+        )
+    ).reshape(-1, int(detector_window_samples))
+    spectrum = (np.abs(np.fft.fft(rows, axis=1)) ** 2).mean(axis=0)
+    target_bin = int(
+        round(
+            float(selected_weight_layout["target_normalized_frequency"])
+            * int(detector_window_samples)
+        )
+    ) % int(detector_window_samples)
+    median = float(np.median(spectrum))
+    excess = float(spectrum[target_bin] / median) if median > 0.0 else float("inf")
+    observed = int(np.argmax(spectrum))
+    report = {
+        "target_bin": target_bin,
+        "observed_peak_bin": observed,
+        "target_bin_excess_over_median": excess,
+        "spectral_sense": str(spectral_sense),
+    }
+    if observed != target_bin or excess < float(minimum_target_excess):
+        raise SystemExit(
+            "evaluate-snr: the clean pilot is not in the detector's target "
+            f"bin. Target bin {target_bin} carries {excess:.2f}x the median "
+            f"bin power, and the strongest bin is {observed}. With "
+            f"--spectral-sense {spectral_sense} the channelized line does not "
+            "align with the selected weight layout, so every detection rate "
+            "below would describe noise. Try the opposite --spectral-sense, "
+            "or check --physical-channel against the weight bank."
+        )
+    return report
+
+
 def _float_streams_for_reference(
     streams: np.ndarray,
     *,
@@ -1402,7 +1458,16 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser.add_argument(
         "--spectral-sense",
         choices=["normal", "inverted"],
-        default="normal",
+        default="inverted",
+        help=(
+            "Sense of the channelized stream relative to the deployed weight "
+            "bank. The reference PFB emits the opposite sense to the bank, so "
+            "'normal' mirrors the pilot into the bin below the channel centre "
+            "while the bank targets the bin above it, and the detector then "
+            "measures noise at every SNR. Measured on channel 14: 'normal' "
+            "puts the clean line in bin 127 of 128 and leaves the target bin "
+            "at 3.9x the median, 'inverted' puts it in bin 1 at 262x."
+        ),
     )
     parser.add_argument(
         "--reference-archive-phase",

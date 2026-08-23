@@ -485,3 +485,50 @@ def test_detector_backend_flag_parses() -> None:
     )
     assert args.detector_backend == "cpu-reference"
     assert build_parser().parse_args(["--input-iq", "x.cfile"]).detector_backend == "cuda"
+
+
+def test_spectral_sense_defaults_to_inverted() -> None:
+    """The reference PFB emits the opposite sense to the deployed weight bank.
+
+    With the historical `normal` default the channelized pilot landed one bin
+    below the channel centre while the bank targeted one bin above, so every
+    detection rate the sweep produced described noise -- with the requested SNR
+    still tracking perfectly, which is why it went unnoticed.
+    """
+    args = evaluate_snr.build_parser().parse_args(["--input-iq", "x.cfile"])
+    assert args.spectral_sense == "inverted"
+
+
+def _tone_stream(normalized_frequency: float, *, window: int, windows: int):
+    n = np.arange(window * windows, dtype=np.float64)
+    return np.exp(2j * np.pi * float(normalized_frequency) * n).astype(
+        np.complex64
+    ).reshape(1, -1)
+
+
+def test_clean_pilot_guard_accepts_a_line_on_the_target_bin() -> None:
+    window, windows, target_bin = 128, 8, 1
+    streams = _tone_stream(target_bin / window, window=window, windows=windows)
+    report = evaluate_snr.assert_clean_pilot_lands_on_target(
+        streams,
+        selected_weight_layout={"target_normalized_frequency": target_bin / window},
+        detector_window_samples=window,
+        samples_per_block=window * windows,
+        spectral_sense="normal",
+    )
+    assert report["observed_peak_bin"] == target_bin
+    assert report["target_bin_excess_over_median"] > 8.0
+
+
+def test_clean_pilot_guard_rejects_a_mirrored_line() -> None:
+    """A line in the mirrored bin must be an error, not a curve made of noise."""
+    window, windows, target_bin = 128, 8, 1
+    streams = _tone_stream(-target_bin / window, window=window, windows=windows)
+    with pytest.raises(SystemExit, match="not in the detector's target"):
+        evaluate_snr.assert_clean_pilot_lands_on_target(
+            streams,
+            selected_weight_layout={"target_normalized_frequency": target_bin / window},
+            detector_window_samples=window,
+            samples_per_block=window * windows,
+            spectral_sense="normal",
+        )
