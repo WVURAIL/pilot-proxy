@@ -206,7 +206,9 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("per_pilot_dir", type=Path)
-    ap.add_argument("--repo", type=Path, default=Path("/home/claude/pilot-proxy"))
+    ap.add_argument(
+        "--repo", type=Path, default=Path(__file__).resolve().parents[1]
+    )
     args = ap.parse_args()
 
     bank = args.repo / "weights/chime_dtv_weights_k128.bin"

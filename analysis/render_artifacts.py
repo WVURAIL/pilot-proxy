@@ -5,8 +5,8 @@ Inlines report_data.json into templates/report_template.html (placeholder
 __DATA__) producing pilot_proxy_trawl.html, and policy_data.json into
 templates/policy_template.html (placeholder __POLICY__) producing
 dtv_masking_policy.html. The data files come from make_report_data.py and
-make_policy_data.py; the rendered pages are what the published claude.ai
-artifacts serve.
+make_policy_data.py; the rendered pages are what the published companion
+report pages serve.
 
     python3 analysis/render_artifacts.py --data-dir DIR [--out DIR]
 """
