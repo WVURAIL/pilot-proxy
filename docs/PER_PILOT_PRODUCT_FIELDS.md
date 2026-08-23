@@ -67,8 +67,42 @@ integrated spectrum receives the frame.
 | `normalized_pilot_excess` | `(N, 1)` | `float64` | `F/null_power_ratio - 1`, or NaN when invalid |
 | `target_norm_sq` | `(1,)` | `int64` | Exact `||w_target||^2` of the int4 weights |
 | `reference_norm_sum_sq` | `(1,)` | `int64` | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
-| `null_power_ratio` | `(1,)` | `float64` | `2*target_norm_sq/reference_norm_sum_sq` |
 | `baseband_power_linear` | `(N, 1)` | `float64` | Mean non-coherent baseband power for the frame |
+| `psd_db_step_per_code` | `()` | `float64` | dB per `psd_frame_db_i16` code; `0.01` |
+
+`null_power_ratio` was stored through schema v2 and is **no longer written**: it
+is exactly `2*target_norm_sq/reference_norm_sum_sq` from two fields above, so
+storing it added a value that could disagree with its own inputs. The formulas
+below that name it are still correct; compute it rather than reading it.
+
+### Fine-decision contract (scalars, one per product)
+
+Written whenever the fine terms are computed. The scan applies no fine decision
+itself --- these record the contract the terms were produced under, so
+post-processing can decide and replay exactly.
+
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `fine_status` | `()` | `str` | `enabled` when the fine terms were computed this run |
+| `fine_num_bins` | `()` | `int64` | Fine transform length actually used (`256`) |
+| `fine_pad_factor` | `()` | `int64` | Zero-padding factor of the fine transform (`2`) |
+| `fine_guard_fine_bins` | `()` | `int64` | Guard bins excluded either side of the designated window (`1`) |
+| `fine_p_fa` | `()` | `float64` | Declared per-bin false-alarm rate (`0.001`) |
+| `fine_designated_bins` | `(D,)` | `int64` | Designated-window bin indices |
+| `fine_census_excluded_bins` | `(E,)` | `int64` | Bins excluded from the census; empty when none |
+| `decision_contract_json` | `()` | `str` | The whole contract as JSON, for exact replay |
+
+### Per-unit fields (length equal to `unit_order`)
+
+| Array | Shape | Dtype | Meaning |
+|---|---:|---|---|
+| `unit_scope` | `(U,)` | `str` | Source archive disposition of each unit, aligned 1:1 with `unit_order` |
+
+`unit_scope` is **per unit, not per frame** --- do not index it with a frame
+number. It is populated from the source's inventory row, so a `--source local`
+run leaves it empty; only an archive source supplies a meaningful value.
+
+`weight_coefficients_sha256` `()` `str` is listed under Provenance below.
 
 The product stores `p_target_u64` and `p_ref_sum_u64` without converting them to
 a thresholded statistic. We can therefore recompute an alternative F threshold
@@ -223,6 +257,7 @@ exclude those missing values.
 | `weights_hash` | scalar | `str` | SHA-256 of the selected packed weight profile |
 | `weight_bank_sha256` | scalar | `str` | SHA-256 of the complete weight bank, or empty for injected weights |
 | `weight_manifest_sha256` | scalar | `str` | SHA-256 of the adjacent manifest, or empty when unavailable |
+| `weight_coefficients_sha256` | scalar | `str` | SHA-256 of the weight **coefficients alone**, excluding header fields, so a header-only change does not read as a different bank |
 | `detector_version` | scalar | `str` | Package, source-tree, kernel, schema, and `K` identity string |
 | `mask_rule` | scalar | `str` | Integer rejection rule used for this product |
 | `reference_placement_json` | scalar | `str` | Selected reference-placement metadata encoded as JSON |
