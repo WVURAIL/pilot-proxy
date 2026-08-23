@@ -271,6 +271,24 @@ class CombineEmptyIntersectionError(ValueError):
     """No (event, frame) identity is shared by every product handed to combine."""
 
 
+class CombineDuplicateIdentityError(ValueError):
+    """One product carries the same (event, frame) identity more than once.
+
+    Frame identity here is ``(source_event_key, frame_in_unit)`` -- deliberately
+    not the unit index -- so any two units whose keys reduce to the same event
+    key contribute colliding frames. Listing one event under two archive scopes
+    does *not* do this: datatrawl keys a unit by ``(scope, event, name)`` and
+    ``source_event_key`` only strips a trailing freq_id token, so those two
+    units keep distinct event keys and merely stack as separate events.
+
+    The cause is therefore unresolved in the general case, which is exactly why
+    it is worth surfacing rather than crashing on. Treat it as a data-integrity
+    question, not a routine skip: the per-pilot products are unaffected, but the
+    event-keyed stack cannot be trusted until the duplicate is explained.
+    ``unit_scope`` on the per-pilot product is the first thing to check.
+    """
+
+
 def _label(z: Mapping[str, Any]) -> str:
     ch = exact_integer_scalar(
         z, "physical_channel", dtype=np.int32, minimum=14, maximum=69
@@ -457,9 +475,13 @@ def _align_frames(
             raise ValueError(
                 "combine: frame identity length does not match frame_index length")
         if len(set(ids.tolist())) != ids.size:
-            raise ValueError(
+            raise CombineDuplicateIdentityError(
                 f"combine: {_label(z)} contains duplicate (event, frame) "
-                f"identities; one acquisition appears twice in that product")
+                f"identities; one acquisition appears twice in that product. "
+                f"Identity is (source_event_key, frame_in_unit), so two units "
+                f"whose keys reduce to the same event key collide here; check "
+                f"unit_scope and the source keys on that product before "
+                f"stacking")
     sets = [set(ids.tolist()) for ids in identities]
     common = set.intersection(*sets)
     if not common:
@@ -1794,6 +1816,7 @@ def combine_detector_products(
 
 
 __all__ = [
+    "CombineDuplicateIdentityError",
     "CombineEmptyIntersectionError",
     "combine_detector_products",
     "report_products",

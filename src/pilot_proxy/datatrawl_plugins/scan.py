@@ -388,7 +388,11 @@ def run_chime_scan(
     from datatrawl.instruments import load_instrument
     from datatrawl.interfaces import RunContext
 
-    from .combine import CombineEmptyIntersectionError, combine_detector_products
+    from .combine import (
+        CombineDuplicateIdentityError,
+        CombineEmptyIntersectionError,
+        combine_detector_products,
+    )
 
     registry.load_plugins()  # bundled datatrawl plugins + pilot-proxy's entry-point plugins
     if analyzer != _DETECTOR_ANALYZER:
@@ -793,6 +797,18 @@ def run_chime_scan(
             "`pilot-proxy chime-combine --report --work-dir <work>` and stack "
             "it with `chime-combine --work-dir <work> --drop <freq_ids> "
             "--output-dir <run>`.",
+            flush=True,
+        )
+        return {"per_pilot_work_dir": work, "scan_scope": scope_path}
+    except CombineDuplicateIdentityError as exc:
+        print(f"[chime-scan] terminal combine skipped: {exc}", flush=True)
+        print(
+            "[chime-scan] per-pilot products are preserved under "
+            f"{work}; the scan itself succeeded. Unlike an empty intersection "
+            "this is a data-integrity signal, not a routine skip: confirm the "
+            "duplicate is one event under two archive scopes and not the same "
+            "acquisition ingested twice, then stack with `pilot-proxy "
+            "chime-combine --work-dir <work> --output-dir <run>`.",
             flush=True,
         )
         return {"per_pilot_work_dir": work, "scan_scope": scope_path}

@@ -30,6 +30,7 @@ pytest.importorskip("datatrawl.interfaces")
 from datatrawl.plugins.readers import _baseband_format as fmt
 
 from pilot_proxy.datatrawl_plugins.combine import (
+    CombineDuplicateIdentityError,
     CombineEmptyIntersectionError,
     _align_frames,
     combine_detector_products,
@@ -114,11 +115,13 @@ def test_align_empty_intersection_raises_typed_error():
         _align_frames([a, b])
 
 
-def test_align_duplicate_identity_raises():
+def test_align_duplicate_identity_raises_typed_error():
     a = _mem_product(14, 844, [("100", 1), ("100", 1)])
     b = _mem_product(15, 829, [("100", 1)])
-    with pytest.raises(ValueError, match="duplicate"):
+    with pytest.raises(CombineDuplicateIdentityError, match="unit_scope"):
         _align_frames([a, b])
+    # still a ValueError, so existing callers that catch broadly keep working
+    assert issubclass(CombineDuplicateIdentityError, ValueError)
 
 
 # -- scan layer end-to-end (offline) ------------------------------------------
@@ -282,6 +285,41 @@ def test_scan_disjoint_inventory_soft_fails_terminal_combine(tmp_path, monkeypat
     printed = capsys.readouterr().out
     assert "terminal combine skipped" in printed
     assert "chime-combine --report" in printed
+
+
+def test_scan_duplicate_identity_soft_fails_terminal_combine(tmp_path, monkeypatch,
+                                                             capsys):
+    """A duplicate (event, frame) identity must not fail the whole scan.
+
+    Weeks of per-pilot compute must survive a terminal-combine refusal. The
+    duplicate is injected at the combine boundary rather than synthesized from
+    an inventory: the conditions that can produce one are a property of the
+    source keys, and this test is about the scan layer's response to it.
+    """
+    inv = _ragged_archive(tmp_path, monkeypatch, {844: ["100"], 829: ["100"]})
+    out = tmp_path / "out"
+
+    import pilot_proxy.datatrawl_plugins.combine as combine_mod
+
+    def _raise_duplicate(*a, **k):
+        raise CombineDuplicateIdentityError(
+            "combine: ch14/freq_id 844 contains duplicate (event, frame) "
+            "identities; check unit_scope on that product")
+
+    monkeypatch.setattr(combine_mod, "combine_detector_products", _raise_duplicate)
+    result = run_chime_scan(output_dir=out, inventory=inv,
+                            analyzer="pilot-proxy-detector",
+                            analyzer_options=_cpu_detector_options(),
+                            verbose=False)
+    # the scan succeeded and every per-pilot product survived ...
+    for ch in (844, 829):
+        assert (out / "_per_pilot" / f"{ch}.npz").exists()
+    assert result["per_pilot_work_dir"] == out / "_per_pilot"
+    # ... but the stack was withheld and flagged as integrity, not routine
+    assert not (out / "chime_detector_outputs.npz").exists()
+    printed = capsys.readouterr().out
+    assert "terminal combine skipped" in printed
+    assert "data-integrity signal" in printed
 
 
 def _ver(source, kernel="2548aef", version="0.2.0.dev0"):
