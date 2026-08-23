@@ -466,6 +466,33 @@ a hypothetical one.
    commit; record hash, commit, image/CUDA version, and channel list in
    the run ledger at launch, and never mix cohorts inside one output
    directory.
+8. **`cupy` on the node, not just the `.so`.** The detector pre-flight
+   fails closed with "cupy/CUDA is not importable" before any unit is
+   staged. A node can carry a freshly built `cuda/libfstatistic.so` and
+   still be unusable. Check it at hour zero:
+
+   ```bash
+   python -c "import cupy; print(cupy.__version__)"
+   ```
+
+9. **Read the quarantine ledger before accepting the run.** A unit whose
+   bytes cannot yield one complete transform is rejected at probe time and
+   quarantined, so the run survives it rather than aborting --- but
+   quarantine is *persistent*, and a later run will skip that unit without
+   re-examining it. The scan prints each one as `QUARANTINE <name>: ...`
+   and the scope gate reports `quarantined=<n>`. Confirm every entry is a
+   genuinely short acquisition (the file opens cleanly and holds its full
+   declared extent) rather than a staging problem. Observed 2026-08-23 in
+   the CANFAR pilots: two acquisitions of 1953 and 3906 samples against a
+   typical 200000, each appearing on two channels.
+10. **Expect the terminal combine over all channels to be empty.** The
+   stack keeps only `(event, frame)` identities common to *every* selected
+   pilot, and a triggered event lights a few surrounding channels rather
+   than all 23. Measured over 115 events across the 23 DTV channels, no
+   event was present in all of them. That is not a failure --- the
+   per-pilot products are the deliverable, and the scan exits zero --- but
+   decide before launch whether a full-band stack is wanted at all, or
+   whether the run should target channel subsets from the start.
 
 ---
 
