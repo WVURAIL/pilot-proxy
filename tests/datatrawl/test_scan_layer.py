@@ -386,7 +386,18 @@ def test_shorter_than_nfft_unit_is_not_committed(tmp_path, monkeypatch):
     )
     out = tmp_path / "out"
 
-    with pytest.raises(RuntimeError, match="zero complete nfft frames"):
+    # The unit must never be committed -- but it is rejected at probe time as an
+    # unreadable unit, not by the analyzer. A shorter-than-nfft file that opens
+    # cleanly and holds its full declared extent is a genuinely short
+    # acquisition, not a truncated fetch (a truncated fetch fails to open, or
+    # falls short of its declared extent, and quarantines via OSError), so it can
+    # never yield a frame however often it is re-fetched. Raising from the
+    # analyzer instead made this a run-level error: the 2026-08-23 pre-flight lost
+    # eight completed channels to one 3.9 MB stub.
+    # This channel's only unit is unusable, so the scope gate refuses to publish
+    # a partial run -- with the unit accounted as quarantined rather than the run
+    # dying mid-stream. A channel with other good units keeps them and continues.
+    with pytest.raises(SystemExit, match="quarantined=1"):
         run_chime_scan(
             input_dir=data,
             output_dir=out,
@@ -399,7 +410,6 @@ def test_shorter_than_nfft_unit_is_not_committed(tmp_path, monkeypatch):
 
     pilot = json.loads((out / "scan_scope.json").read_text())["pilots"][0]
     assert pilot["completed"] == 0
-    assert pilot["failed"] == 1
     assert not (out / "_per_pilot" / "844.npz").exists()
 
 

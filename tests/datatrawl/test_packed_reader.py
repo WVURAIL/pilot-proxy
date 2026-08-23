@@ -50,3 +50,32 @@ def test_packed_reader_matches_unpacked(tmp_path):
         assert raw.shape == (NFFT, N_FEEDS)
         # unpacking the raw bytes must reproduce the bundled reader's complex chunk
         assert np.array_equal(fmt.unpack_4bit(raw), cplx)
+
+
+def test_probe_rejects_short_file_as_unreadable(tmp_path):
+    """A file too short for one transform must be quarantinable, not run-fatal.
+
+    Found by the 2026-08-23 pre-flight: a 3.9 MB stub in the CANFAR staging
+    aborted a scan that had already completed eight channels, because the
+    analyzer raised on zero frames and datatrawl treats analyzer exceptions as
+    run-level errors by design. Classifying it at probe time hands the engine
+    the one disposition it is allowed to quarantine.
+    """
+    from datatrawl.interfaces import UnreadableUnitError
+
+    short = tmp_path / "too_short.h5"
+    fmt.make_synth_file(str(short), n_time=NFFT - 1, n_feeds=N_FEEDS,
+                        f_center_mhz=470.3125, f_tone_bb=1500.0, seed=5)
+    with pytest.raises(UnreadableUnitError, match="shorter than one transform"):
+        ChimeBasebandPackedReader().probe(str(short))
+
+
+def test_probe_accepts_exactly_one_frame(tmp_path):
+    """The boundary is inclusive: exactly nfft samples is one usable frame."""
+    exact = tmp_path / "exactly_one.h5"
+    fmt.make_synth_file(str(exact), n_time=NFFT, n_feeds=N_FEEDS,
+                        f_center_mhz=470.3125, f_tone_bb=1500.0, seed=6)
+    probe = ChimeBasebandPackedReader().probe(str(exact))
+    assert probe["num_input_streams"] == N_FEEDS
+    ctx = RunContext(instrument=load_instrument("chime"))
+    assert len(list(ChimeBasebandPackedReader().iter_arrays(str(exact), ctx))) == 1

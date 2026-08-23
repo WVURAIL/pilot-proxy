@@ -84,6 +84,19 @@ class ChimeBasebandPackedReader(Reader):
                     f"got {baseband.shape}."
                 )
             meta["num_input_streams"] = int(baseband.shape[1])
+            # A file too short to yield one complete transform is a property of
+            # the staged bytes, not an analyzer fault, so reject it here where
+            # unreadable_file() turns it into UnreadableUnitError and the engine
+            # can quarantine it. Raising it later from the analyzer instead makes
+            # it a run-level error that aborts a multi-week scan over one stub.
+            # ctx.instrument may override nfft upward; the analyzer keeps its own
+            # zero-frame check as the backstop for that narrower case.
+            if int(baseband.shape[0]) < int(fmt.NFFT):
+                raise ValueError(
+                    "CHIME packed baseband is shorter than one transform: "
+                    f"{int(baseband.shape[0])} time samples < nfft {int(fmt.NFFT)}; "
+                    "it cannot yield a complete frame"
+                )
 
             def _f(name: str) -> float:
                 return float(a[name]) if name in a else float("nan")
