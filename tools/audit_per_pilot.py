@@ -110,13 +110,15 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     # ---- per-frame arrays: lengths ---------------------------------------
     F = r("coarse_power_ratio").astype(np.float64)
     n = F.size
+    # Schema v3 removed every derived fine column (the float ratio, the CFAR
+    # location/scale/threshold/mode, the null-bulk exceedance fraction, and the
+    # ragged exceedance list). The scan stores only the exact terms and decides
+    # nothing, so those are recomputed in post-processing and are not audited
+    # here as stored fields.
     per_frame = ["p_target_u64", "p_ref_sum_u64", "valid", "reject_mask",
                  "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
                  "baseband_power_linear", "frame_index", "frame_unit_index",
-                 "frame_in_unit", "normalized_pilot_excess",
-                 "fine_null_bulk_exceedance_fraction",
-                 "fine_cfar_location", "fine_cfar_scale", "fine_cfar_threshold",
-                 "fine_threshold_exceedance_count"]
+                 "frame_in_unit", "normalized_pilot_excess"]
     for k in per_frame:
         a.check(r(k).size == n, f"len({k})=={n}")
     a.check(np.array_equal(r("frame_index"), np.arange(n)), "frame_index == arange")
@@ -130,8 +132,12 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     expected_mask = np.array([bool(vv) and (int(p) * rn > tn * int(q))
                               for vv, p, q in zip(v, pt.tolist(), pr.tolist())])
     a.check(np.array_equal(m, expected_mask), "reject_mask exact integer rule")
-    null_power_ratio = float(scalar("null_power_ratio"))
-    a.check(abs(null_power_ratio - null_power_ratio_from_weight_norms(tn, rn)) < 1e-12, "null_power_ratio == null_power_ratio_from_weight_norms")
+    # v3 stopped storing null_power_ratio because it is exactly recoverable from
+    # the two norms beside it; derive it rather than reading a field that would
+    # only be able to disagree with its own inputs.
+    null_power_ratio = null_power_ratio_from_weight_norms(tn, rn)
+    a.check(np.isfinite(null_power_ratio) and null_power_ratio > 0.0,
+            "null_power_ratio derived from weight norms is finite and positive")
     with np.errstate(divide="ignore", invalid="ignore"):
         f_re = 2.0 * pt.astype(np.float64) / pr.astype(np.float64)
     a.check(np.allclose(F[v], f_re[v], rtol=1e-9, atol=0), "coarse_power_ratio == 2*pt/pr")
@@ -145,28 +151,22 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     a.check(str(scalar("fine_status")) == "enabled", "fine_status enabled")
     bins = int(scalar("fine_num_bins"))
     a.check(bins == fine_bin_count(nfft // K) == 256, f"fine_num_bins={bins}")
-    ff = g("fine_power_ratio")
-    a.check(ff.shape == (n, bins), f"fine_power_ratio shape {ff.shape}")
-    counts = r("fine_threshold_exceedance_count").astype(np.int64)
-    db = r("fine_threshold_exceedance_bin"); df_ = r("fine_threshold_exceedance_frame")
-    a.check(counts.min() >= 0 and counts.sum() == db.size == df_.size,
-            "ragged sizes: sum(counts) == rows")
-    a.check(np.array_equal(df_, np.repeat(np.arange(n), counts)),
-            "fine_threshold_exceedance_frame == repeat(arange, counts)  [fix+repair]")
-    a.check(db.min() >= 0 and db.max() < bins if db.size else True, "detected bins in range")
-    null_bulk_exceedance = r(
-        "fine_null_bulk_exceedance_fraction"
-    ).astype(np.float64)
-    a.check(
-        np.nanmin(null_bulk_exceedance) >= 0.0
-        and np.nanmax(null_bulk_exceedance) <= 1.0,
-        "null-bulk exceedance fraction in [0,1]",
-    )
-    thr = r("fine_cfar_threshold").astype(np.float64)
-    loc = r("fine_cfar_location").astype(np.float64)
-    fin = np.isfinite(thr) & np.isfinite(loc)
-    a.check(np.all(thr[fin] > loc[fin]), "cfar threshold > location")
-    a.check(int(fin.sum()) == int(v.sum()), "cfar finite exactly on valid frames")
+    # The exact terms are the whole stored fine surface under v3:
+    # (frames, [target, lower reference, upper reference], fine bins), uint64.
+    ff = g("fine_power_u64")
+    a.check(ff.shape == (n, 3, bins), f"fine_power_u64 shape {ff.shape}")
+    a.check(ff.dtype == np.uint64, f"fine_power_u64 dtype {ff.dtype}")
+    a.check(bool(np.all(ff[v] > 0)) if v.any() else True,
+            "fine reference terms are non-zero on valid frames")
+    # The deployed ratio is a post-processing quantity; check it is recoverable
+    # from what is stored rather than expecting a stored column.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        fine_ratio = (2.0 * ff[:, 0, :].astype(np.float64)
+                      / (ff[:, 1, :].astype(np.float64) + ff[:, 2, :].astype(np.float64)))
+    a.check(bool(np.all(np.isfinite(fine_ratio[v]))) if v.any() else True,
+            "fine ratio recomputable and finite on valid frames")
+    a.check(str(scalar("decision_contract_json")).strip().startswith("{"),
+            "decision_contract_json present for exact replay")
 
     # ---- integrated spectra ----------------------------------------------
     sb = r("integrated_spectrum_before_mask").astype(np.float64)
@@ -194,8 +194,8 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
         "ch": ch, "fid": fid, "units": U, "frames": n,
         "valid%": 100.0 * v.mean(), "mask%": 100.0 * m.mean(),
         "medF/null_power_ratio": float(np.median(F[v] / null_power_ratio)) if v.any() else float("nan"),
-        "null_bulk_exceedance_median": float(np.nanmedian(null_bulk_exceedance)),
-        "det_rows": int(db.size),
+        # Recomputed from the stored exact terms; v3 stores no fine decision.
+        "med_fine_ratio": float(np.nanmedian(fine_ratio[v])) if v.any() else float("nan"),
         "span": (datetime.datetime.fromtimestamp(t0.min(), datetime.timezone.utc).strftime("%Y-%m")
                  + ".." + datetime.datetime.fromtimestamp(t0.max(), datetime.timezone.utc).strftime("%Y-%m")),
         "source": src,
@@ -233,14 +233,12 @@ def main() -> int:
             print(f"    FAIL: {f}")
     print()
     hdr = f"{'ch':>3} {'fid':>4} {'units':>5} {'frames':>6} {'valid%':>6} " \
-          f"{'mask%':>6} {'medF/null_power_ratio':>8} {'null_exc':>8} " \
-          f"{'det_rows':>8} {'span':>16}"
+          f"{'mask%':>6} {'medF/npr':>10} {'med_fine':>10} {'span':>16}"
     print(hdr)
     for s in rows:
         print(f"{s['ch']:>3} {s['fid']:>4} {s['units']:>5} {s['frames']:>6} "
-              f"{s['valid%']:>6.1f} {s['mask%']:>6.1f} {s['medF/null_power_ratio']:>8.4f} "
-              f"{s['null_bulk_exceedance_median']:>8.3f} "
-              f"{s['det_rows']:>8} {s['span']:>16}")
+              f"{s['valid%']:>6.1f} {s['mask%']:>6.1f} {s['medF/null_power_ratio']:>10.4f} "
+              f"{s['med_fine_ratio']:>10.4f} {s['span']:>16}")
     print("\nOVERALL:", "ALL PASS" if all_ok else "FAILURES PRESENT")
     return 0 if all_ok else 2
 
