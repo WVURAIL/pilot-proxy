@@ -1,0 +1,93 @@
+[build-system]
+requires = ["setuptools>=77", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pilot-proxy"
+dynamic = ["version"]
+description = "PilotProxy pilot-informed CUDA local-reference power-ratio detector with GNU Radio ATSC 1.0 testbench"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+  { name = "Dylan Gormley" },
+  { name = "WVU Radio Astronomy Instrumentation Lab (RAIL)" },
+]
+keywords = ["radio-astronomy", "RFI", "ATSC", "DTV-pilot", "power-ratio", "CUDA", "CHIME"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+  "numpy",
+]
+
+[project.optional-dependencies]
+test = [
+  "h5py",
+  "pytest>=8",
+  "ruff>=0.9",
+]
+cuda = [
+  "cupy-cuda12x",
+]
+plot = [
+  "matplotlib",
+]
+chime = [
+  "h5py",
+  "pandas",
+  "matplotlib",
+]
+# datatrawl-driven real-data / CANFAR streaming path (offset + detector analyzers).
+# datatrawl is the shareable streaming engine: https://github.com/WVURAIL/datatrawl
+# Install it editable alongside (pip install -e path/to/datatrawl). Kept OPTIONAL so
+# the base install and every existing workflow are unchanged when it is absent.
+# datatrawl itself is NOT on PyPI -- install it editable from its repo FIRST
+# (pip install -e path/to/datatrawl), then `pip install -e .[datatrawl]` here only
+# needs to add h5py. Listing a bare "datatrawl" requirement would make pip try to
+# resolve it from PyPI and fail before the local checkout could satisfy it.
+datatrawl = [
+  "h5py",
+]
+
+[project.scripts]
+pilot-proxy = "pilot_proxy.cli:main"
+
+[project.entry-points."datatrawl.plugins"]
+# Discovered by datatrawl's `list`/`scan`/`doctor` once both packages are installed;
+# value is the module to import (its decorator registers the plugin).
+pilot-proxy-detector = "pilot_proxy.datatrawl_plugins.detector"
+pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader"
+pilot-proxy-control = "pilot_proxy.datatrawl_plugins.control"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "pilot_proxy._version.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["pilot_proxy*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+markers = [
+  "cuda: requires CUDA runtime/GPU",
+]
+
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# Start with correctness-oriented checks so legacy analysis scripts can be
+# cleaned incrementally without making style changes a release blocker.
+select = ["F"]
