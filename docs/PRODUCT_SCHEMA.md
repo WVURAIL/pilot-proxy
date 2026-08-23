@@ -2,8 +2,8 @@
 
 ```text
 schema_name = "pilotproxy_per_pilot_product"
-schema_revision = 1
-schema_version = "pilotproxy_per_pilot_product_v1"
+schema_revision = 3
+schema_version = "pilotproxy_per_pilot_product_v3"
 source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 

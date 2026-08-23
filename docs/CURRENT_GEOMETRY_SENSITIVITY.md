@@ -44,11 +44,14 @@ code and parity only and must not be quoted as sensitivity evidence.
 Production does **not** materialize a 2048-by-16384 packed input for every
 Monte Carlo point. A literal run at the default counts would require about
 1.29 million full frames: 46 channel/offset profiles multiplied by 4000 null
-trials plus 16 SNR points multiplied by 1500 H1 trials. Local measurements on
-an RTX 5000 Ada required approximately 6--8 seconds per full frame, so a
-serial literal sweep would take roughly 90--120 GPU-days before reporting
-overhead. That is useful as a parity reference, but it is not a credible
-default dissertation workflow.
+trials plus 16 SNR points multiplied by 1500 H1 trials. Re-measured on an RTX
+5000 Ada on 2026-08-23, a full frame costs **about 3.8 seconds** (20 literal
+null trials in 75.8 s; the 480-trial audit in 1734 s agrees at 3.6 s), so a
+serial literal sweep would take roughly 55--60 GPU-days before reporting
+overhead. The earlier 6--8 second figure quoted here was about twice that, and
+scoping decisions taken against it were correspondingly pessimistic. A full
+literal sweep is still not a credible default dissertation workflow, but a
+*targeted* one is far cheaper than this section used to imply.
 
 The production default is therefore `--simulation-backend
 sufficient-statistic`. It evaluates a deterministic common-noise pool of 256
@@ -288,10 +291,19 @@ with 4000 null trials took 3.3 seconds, and one with 1500 H1 trials took 2.1
 seconds after signal-cache preparation. These are engineering measurements,
 not scientific results. They imply roughly 30--40 minutes for the primary 46
 profile/16-SNR sweep on that host, before the paired bootstrap report. The
-default 480-trial literal audit is approximately another 50--65 minutes at
-the observed 6--8 seconds per frame. The 2000-replicate paired report can add
-tens of minutes. Record the emitted per-shard wall times on the final host
-rather than treating these estimates as guaranteed throughput.
+default 480-trial literal audit is approximately another **29 minutes** at the
+re-measured 3.8 seconds per frame (observed 2026-08-23: 1734 s). The
+2000-replicate paired report adds a further 29 minutes on the same host.
+Record the emitted per-shard wall times on the final host rather than treating
+these estimates as guaranteed throughput.
+
+Two cautions learned on 2026-08-23. The accelerated backend's response is
+**conditional on the finite pool in a way that matters**: re-drawing the
+256-stream pool via `--seed` shifted median responses by −11% to +14%, with the
+sign varying by channel, where the literal full-frame path moved by ~1%. And
+`PFB_GAIN_SEED_BASE` is *not* the pool knob --- it seeds only the converged
+`pfb_noise_gain` normalization, which is common to both paths and cancels out of
+the full-vs-primary comparison. Use `--seed` for a second pool realization.
 
 `--simulation-backend full-frame` remains available for an explicitly bounded
 run. Do not combine it with the default million-frame trial plan. Use it for
