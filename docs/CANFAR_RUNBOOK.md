@@ -349,19 +349,20 @@ assert sv == "pilotproxy_per_pilot_product_v3", sv
 assert ev == "pilotproxy_namespaced_source_event_key_v1", ev
 assert "pilot-proxy/" in dv and "kernel=2.3.0" in dv, dv
 assert fs == "enabled", fs
-assert z["fine_power_ratio"].shape[1] == int(z["fine_num_bins"]), z["fine_power_ratio"].shape
-r = np.asarray(z["fine_null_bulk_exceedance_fraction"]).reshape(-1)
+assert z["fine_power_u64"].shape[1:] == (3, int(z["fine_num_bins"])), z["fine_power_u64"].shape
+assert z["fine_power_u64"].dtype == np.uint64, z["fine_power_u64"].dtype
 print("schema", sv)
 print("event identity", ev)
 print("fine bins", int(z["fine_num_bins"]),
-      "| null-bulk exceedance median",
-      float(np.nanmedian(r)))
+      "| exact fine terms", z["fine_power_u64"].shape)
 PY
 ```
 
-The null-bulk exceedance fraction is an in-sample threshold diagnostic, not an
-independent measured false-alarm rate. Interpret it together with the stored
-fine spectrum. For the resume half of the
+The product stores only the exact fine terms; the null-bulk exceedance
+fraction, like every other derived fine quantity, is recomputed in
+post-processing from `fine_power_u64` rather than read from the product. It is
+an in-sample threshold diagnostic, not an independent measured false-alarm
+rate. Interpret it together with the stored fine terms. For the resume half of the
 gate, run the same `chime-scan` command in a **new** output directory with
 `--max-files 2` and no chunk cap; the smoke product above was built with
 `max_chunks_per_file=1`, and a capped product refuses completion under a
@@ -402,8 +403,11 @@ rather than from a census assumption.
 Run the bounded scan for the census-control channel and for one quiet channel
 with a known pilot. Then:
 
-1. Read `null_power_ratio` from `chime_detector_outputs.npz` or from the authoritative
-   `_per_pilot/<freq_id>.npz` product. The `chime-run` batch path also records
+1. Read `null_power_ratio` from `chime_detector_outputs.npz`. The
+   `_per_pilot/<freq_id>.npz` product does not store it; derive it there from
+   the stored norms as `2*target_norm_sq/reference_norm_sum_sq` (see
+   `null_power_ratio_from_weight_norms` in
+   `src/pilot_proxy/detector_contract.py`). The `chime-run` batch path also records
    `null_power_ratio_by_channel` in `stats.json`, but the combined `chime-scan` statistics do
    not currently duplicate that array.
 2. Over frames with `valid = 1`, compare the mean `coarse_power_ratio` with `null_power_ratio`. Also

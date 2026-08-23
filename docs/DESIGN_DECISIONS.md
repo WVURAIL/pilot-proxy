@@ -210,8 +210,12 @@ needs no contamination fallback mode (order statistics reject the
 measured 0.29% bulk tail by construction), and is calibrated by the
 same null-quantile program --- the campaign picks (rank, multiplier)
 from measured off-epoch nulls to hit the target false-alarm rate, and
-the survey products' per-bin `fine_power_ratio` suffice to compute those
-quantiles. The operating point (anchor, width, bulk mask, rank,
+the survey products' exact `fine_power_u64` terms --- target,
+lower-reference, and upper-reference uint64 per fine bin --- supply
+those quantiles, because `F2[b] = 2 S_t[b] / (S_l[b] + S_u[b])` is
+reproduced from them exactly. Archived schema v1 products, which kept
+only the float32 ratio, cannot supply them. The operating point
+(anchor, width, bulk mask, rank,
 multiplier) is runtime-bundle data with provenance
 (`fine_calibration` block, exported `pending_campaign` and validated
 in both states by the bundle validator); the arithmetic is code. Activation
@@ -341,27 +345,39 @@ its fixed CFAR point dominates the coarse J-optimum exactly where the
 coarse axis struggles: the coherent gain expressed as ROC separation
 rather than dB. And the designated set must anchor at the measured pilot
 line, not the nominal bin --- every detected transmitter sits at a stable
-nonzero offset, and nominal-bin sets collapse. The measurement script
-(`youden_j.py`) is kept with the survey analysis alongside the per-pilot
-products, not in this repository.
+nonzero offset, and nominal-bin sets collapse. The measurement script is
+`analysis/youden_j.py` in this repository; it recomputes the table from
+the released per-pilot products.
 
 ## The source stamp is memoized per process
 
 `detector_version` embeds a hash of every `*.py` under `src/pilot_proxy`.
 The imported code cannot change within a process, so the hash is computed
 once per process (first observation) and reused, rather than re-read from
-disk at each channel's `begin()`. A source-only stamp difference remains
-forgivable on resume when the kernel, `K`, and schema tokens match; the
-stamp-to-commit mapping is recoverable by recomputing the hash at each
-candidate checkout.
+disk at each channel's `begin()`. A source-only stamp difference is
+forgivable for cross-pilot combine and stacking, which compare only the
+geometry tokens; resume is stricter --- it compares the full
+`detector_version` and aborts on any source-tree or package-version
+change, so a new build needs a clean `--output-dir`. The stamp-to-commit
+mapping is recoverable by recomputing the hash at each candidate
+checkout.
 
-## Fine detection rows carry per-frame global indices
+## The stored fine surface is the exact integer terms
 
-The ragged detection list (`fine_threshold_exceedance_frame`, `fine_threshold_exceedance_bin`) is
-partitioned authoritatively by `fine_threshold_exceedance_count`; the frame column must
-equal `repeat(arange(n_frames), counts)`, and the test suite enforces that
-invariant end to end. Products that violate the public contract are unsupported
-development outputs and must be regenerated from authoritative inputs.
+Schema v3 records the fine axis as `fine_power_u64`, shape
+`(N, 3, fine_num_bins)` uint64 --- the target, lower-reference, and
+upper-reference terms per fine bin --- together with the fine-decision
+contract scalars (`fine_status`, `fine_num_bins`, `fine_pad_factor`,
+`fine_guard_fine_bins`, `fine_p_fa`, `fine_designated_bins`,
+`fine_census_excluded_bins`, `decision_contract_json`). Everything derived
+from those terms --- the float ratio, the CFAR location, scale, threshold and
+mode, the null-bulk exceedance fraction, and the ragged exceedance list --- is
+recomputed in post-processing and is not written. The ragged list
+(`fine_threshold_exceedance_frame`, `fine_threshold_exceedance_bin`,
+partitioned by `fine_threshold_exceedance_count`) was a schema v1 diagnostic
+surface and is retired. Products that violate the public contract are
+unsupported development outputs and must be regenerated from authoritative
+inputs.
 
 ## Deferred work
 

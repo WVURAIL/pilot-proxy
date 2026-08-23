@@ -22,20 +22,29 @@ Detailed arrays are listed in
 
 1. `active_decision`: `coarse_normalized_positive_excess`, implemented as
    an exact host integer comparison and stored in `reject_mask`;
-2. `fine_diagnostic`: `per_frame_robust_null_bulk_threshold`, diagnostic only;
+2. `fine_measurement`: `exact_fine_power_terms` --- the scan measures and
+   stores the exact terms and applies no fine decision of its own;
 3. `fine_candidate_decision`: `fine_order_statistic_cfar`, implemented and
-   bit-tested in kernel core 2.3.0 but inactive while runtime calibration is
-   `pending_campaign`.
+   bit-tested in kernel core 2.3.0 but inactive (`"active": false`) while
+   runtime calibration is `pending_campaign`.
 
-A stored fine spectrum or diagnostic threshold exceedance therefore does not
-imply that the fine candidate produced the rejection mask.
+It also records `measurements`, the coarse and fine local-reference power
+ratios that post-processing recomputes.
+
+Only the coarse rule produces the stored `reject_mask`. Nothing in the fine
+surface contributes to it.
 
 ## Fine null-bulk diagnostic
 
-`fine_null_bulk_exceedance_fraction` is the fraction of the same independent
+The null-bulk exceedance fraction is the fraction of the same independent
 null-bulk bins used to estimate a frame's diagnostic threshold that exceed that
 threshold. It is an in-sample diagnostic, not an independently measured
 false-alarm probability or false-alarm rate.
+
+It is **not a stored field**. Schema v3 stores only the exact
+`fine_power_u64` terms, so this fraction --- like every other fine diagnostic
+--- is recomputed in post-processing at whatever operating point is calibrated
+there.
 
 ## Resume and combine boundary
 
@@ -44,8 +53,9 @@ geometry, timing identity, weights, and detector provenance. A mismatch is an
 error. Current runtime code contains no aliases, adapters, repair paths, or
 fallback readers for pre-release products.
 
-The source-event identity version is required even though the enclosing product
-schema remains revision 1. It gates the change from historical basename-only
+The source-event identity version is required and is versioned independently of
+the enclosing product schema, which is at revision 3. It gates the change from
+historical basename-only
 keys to keys that retain the complete archive or campaign namespace. Products
 without this field cannot be combined or resumed because identical basenames in
 different campaigns are not the same acquisition.

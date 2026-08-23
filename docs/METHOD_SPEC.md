@@ -157,11 +157,14 @@ census-excluded bins) with location = median and scale = left-side spread
 (location = P25, scale = (P25 - P2.275)/2) and records the mode. Detections
 are declared on all bins against this calibration (any-bin rule), which
 removes the census dependence of designated-only rules; the flag rate over
-the non-designated independent bins is reported per frame as
-`fine_null_bulk_exceedance_fraction`. Because the same bins fit the threshold,
-this is an in-sample threshold diagnostic rather than an independent measured
-false-alarm rate. On DTV-occupied channels a real pilot at a nonzero frequency
-offset can elevate the fraction; the stored fine spectrum resolves which.
+the non-designated independent bins is returned as
+`null_bulk_exceedance_fraction` on the `CfarCalibration` from `calibrate_cfar`.
+It is not stored in the per-pilot product, which retains only the exact
+`fine_power_u64` terms it is recomputed from. Because the same bins fit the
+threshold, this is an in-sample threshold diagnostic rather than an independent
+measured false-alarm rate. On DTV-occupied channels a real pilot at a nonzero
+frequency offset can elevate the fraction; the stored fine spectrum resolves
+which.
 Stored fields are defined in `PRODUCT_SCHEMA.md`.
 
 ### Decision status
@@ -171,9 +174,11 @@ operational status:
 
 - Current CHIME archive products store `reject_mask` from the exact,
   norm-corrected coarse positive-excess comparison `F > null_power_ratio`.
-- The floating-point fine reduction stores a fine-bin statistic, a robust
-  per-frame null-bulk threshold, and threshold exceedances for analysis. Those
-  fields do not replace `reject_mask`.
+- The floating-point fine reduction is a measurement, not a decision. The scan
+  stores only the exact `fine_power_u64` terms; the fine-bin statistic, the
+  robust per-frame null-bulk threshold, and any threshold exceedances are
+  recomputed from those terms in post-processing and do not replace
+  `reject_mask`.
 - Kernel core 2.3.0 implements the fixed-point designated-set order-statistic
   CFAR decision and has bit-equality tests against the Python reference. Its
   per-channel runtime-bundle calibration remains `pending_campaign`; a pending

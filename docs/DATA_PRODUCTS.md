@@ -12,9 +12,13 @@ Unless stated otherwise, `mask = 1` means that the frame is rejected and
 
 The current per-pilot schema and its explicit active/diagnostic/candidate
 decision contract are defined in `PRODUCT_SCHEMA.md`. Its fine-reduction
-products (`fine_power_ratio`, the robust null-bulk calibration columns,
-and the ragged detection list) live only in the authoritative per-pilot
-`<freq_id>.npz` files. The combined
+products (`fine_power_u64`, the exact `uint64` target, lower, and upper
+terms per fine bin from the frozen `fxfft256`, plus the fine scalars
+`fine_status`, `fine_num_bins`, `fine_pad_factor`, `fine_guard_fine_bins`,
+`fine_p_fa`, `fine_designated_bins`, and `fine_census_excluded_bins`) live
+only in the authoritative per-pilot `<freq_id>.npz` files. The null-bulk
+calibration and the detection list are not stored; they are recomputed
+offline from `fine_power_u64`. The combined
 outputs below carry no fine arrays; analyses of fine detections read the
 per-pilot products directly.
 
@@ -117,7 +121,7 @@ This is the canonical frame-by-pilot detector product.
 | `p_target_u64` | `(num_frames, num_pilots)` | `uint64` | power | Target-bin power |
 | `p_ref_sum_u64` | `(num_frames, num_pilots)` | `uint64` | power | Lower plus upper reference power |
 | `coarse_power_ratio` | `(num_frames, num_pilots)` | `float64` | unitless | `2*p_target/p_ref_sum` |
-| `normalized_coarse_power_ratio_db` | `(num_frames, num_pilots)` | `float64` | dB | `10*log10(F)` |
+| `normalized_coarse_power_ratio_db` | `(num_frames, num_pilots)` | `float64` | dB | `10*log10(F/null_power_ratio)` |
 | `pilot_excess_db` | `(num_frames, num_pilots)` | `float64` | dB | One-bin pilot-excess PNR |
 | `estimated_data_shelf_snr_db` | `(num_frames, num_pilots)` | `float64` | dB | Estimated ATSC data-shelf SNR; finite only where its transform is defined |
 | `valid` | `(num_frames, num_pilots)` | `uint8` | 0/1 | `p_ref_sum != 0` |
@@ -133,10 +137,12 @@ The current mask is the norm-corrected positive-excess comparison:
 valid && (p_target * reference_norm_sum_sq > target_norm_sq * p_ref_sum)
 ```
 
-This is the integer form of `F > null_power_ratio`. The current product
-contract requires the exact powers, all norm-related arrays, schema identity,
-and decision contract. Development snapshots that predate this contract are
-not accepted; regenerate them from authoritative inputs.
+This is the integer form of `F > null_power_ratio`. Because
+`normalized_coarse_power_ratio_db` is referenced to `null_power_ratio`, the
+null and the positive-excess boundary both sit at exactly 0 dB. The current
+product contract requires the exact powers, all norm-related arrays, schema
+identity, and decision contract. Development snapshots that predate this
+contract are not accepted; regenerate them from authoritative inputs.
 
 For `chime-scan`, `num_frames` is the event/frame intersection retained by the
 combine. The source per-pilot products can contain additional frames that were

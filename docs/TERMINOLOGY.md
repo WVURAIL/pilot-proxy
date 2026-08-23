@@ -44,8 +44,11 @@ R_\mathrm{fine}[b]
 \]
 
 Its null is calibrated empirically from the independent non-designated bins.
-The name `fine_power_ratio` therefore states exactly what is stored without
-claiming an exact parametric null distribution.
+The name *fine power ratio* therefore states exactly what is measured without
+claiming an exact parametric null distribution. Since schema v3 the ratio is
+not stored: the scan writes the exact `fine_power_u64` terms and the ratio is
+recomputed from them in post-processing. `fine_power_ratio` survives only as
+the spelling of the corresponding key in the archived survey products.
 
 Under independent complex-Gaussian projections with equal reference scales,
 the corresponding idealized ratio can be written as an F variate.  The shipped

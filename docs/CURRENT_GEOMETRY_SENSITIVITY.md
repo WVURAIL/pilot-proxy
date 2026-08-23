@@ -25,13 +25,14 @@ positive difference therefore means a sensitivity loss in the fixed-point
 candidate.
 
 This is a conditional synthetic result. The ATSC signal passes through the
-reference real-ADC and four-tap, 2048-channel PFB model. Noise at the selected
-PFB output is independent circular complex Gaussian, normalized by a
-deterministic PFB noise-gain calculation. That model isolates implementation
-loss under controlled conditions; it does not reproduce all cross-stream,
-frequency, or time covariance in CHIME baseband. It also does not establish an
-on-sky threshold, an astrophysical completeness function, or the performance
-of a deployed Kotekan path.
+reference real-ADC and four-tap, 2048-point PFB model, retaining the
+positive-frequency 1024 channels. Noise at the selected PFB output is
+independent circular complex Gaussian, normalized by a deterministic PFB
+noise-gain calculation. That model isolates implementation loss under
+controlled conditions; it does not reproduce all cross-stream, frequency, or
+time covariance in CHIME baseband. It also does not establish an on-sky
+threshold, an astrophysical completeness function, or the performance of a
+deployed Kotekan path.
 
 The current scientific geometry is 2048 simultaneous input streams, 128
 detector samples per window, 128 windows per stream, and a two-times-padded

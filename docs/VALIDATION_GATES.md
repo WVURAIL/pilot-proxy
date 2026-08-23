@@ -100,12 +100,16 @@ failure.
    - `detector_version` embeds the installed `pilot-proxy/<version>`,
      kernel 2.3.0, the library sha, and the profile hash via the weight
      bank;
-   - `fine_status == enabled`, `fine_power_ratio.shape == (n_frames, 256)`;
+   - `fine_status == enabled`, `fine_power_u64.shape == (n_frames, 3, 256)`
+     (uint64; frames x [target, lower reference, upper reference] x
+     `fine_num_bins`). The scan stores only these exact terms; the float
+     ratio is recomputed from them in post-processing, not read from the npz;
    - no v1-marginal identity assertion fired (the run raises on
      mismatch);
-   - `fine_null_bulk_exceedance_fraction` is bounded to `[0, 1]` on valid
-     frames and interpreted as an in-sample threshold diagnostic rather than
-     an independent false-alarm-rate measurement;
+   - the null-bulk exceedance fraction, recomputed in post-processing from
+     `fine_power_u64` (it is not a stored field), is bounded to `[0, 1]` on
+     valid frames and interpreted as an in-sample threshold diagnostic rather
+     than an independent false-alarm-rate measurement;
    - resume test: interrupt after a checkpoint, resume, and verify the
      frame count and `unit_order` continue without duplication (run this
      half in an output directory without a chunk cap: a capped product

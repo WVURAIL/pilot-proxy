@@ -38,10 +38,17 @@ While a survey is running:
 - Item 5 can be rehearsed on a completed channel snapshot with
   `analyze-cleaning-tradeoff --run-dir snapshot_combined/<freq_id>`. The
   publication result must still use the declared final survey set.
-- `chime-combine` requires a common event set across channels. It rejects a
-  complete channel combined with a partial channel and prints a frame-grid
-  diagnostic. Combine compatible completed channels, or process one channel
-  at a time.
+- `chime-combine` aligns frames by (source event, frame-in-file) identity. A
+  complete channel combined with a partial one succeeds: it stacks exactly the
+  shared identities and prints a per-pilot drop report. It raises only when the
+  products share no common identity at all (`CombineEmptyIntersectionError`) or
+  when one product carries a duplicate identity
+  (`CombineDuplicateIdentityError`); `chime-scan` treats both as a skipped
+  terminal combine, preserves the per-pilot products, and still exits 0.
+  Because no event is present on all 23 channels, an all-channel terminal
+  combine is empty by construction. Use `chime-combine --report` for the
+  presence histogram and drop-curve, and `--drop <freq_ids>` or a channel
+  subset to get a non-empty stack.
 
 Close item 1 before interpreting downstream on-sky results because it tests
 the corrected mask rule. Item 2 is independent. Items 4 and 5 operate on
@@ -424,8 +431,12 @@ checks produce:
 
 ## Release checklist
 
-1. Freeze the result set. Set the release version in `pyproject.toml`,
-   `src/pilot_proxy/__init__.py`, and `CITATION.cff`, and tag the release.
+1. Freeze the result set. Set the release version in
+   `src/pilot_proxy/_version.py` (the single source of truth; `pyproject.toml`
+   and `src/pilot_proxy/__init__.py` both derive from it) and in
+   `CITATION.cff`, and tag the release. `make release-check` does not verify
+   version consistency, so an unedited `_version.py` will silently stamp the
+   dev version into every product's `detector_version`.
 2. Archive the tagged release. Add the resulting DOI to the `doi` field in
    `CITATION.cff` and to the manuscript software citation. Repeat this step
    for datatrawl.

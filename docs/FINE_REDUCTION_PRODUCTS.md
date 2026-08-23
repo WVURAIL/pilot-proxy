@@ -21,20 +21,20 @@ positive-excess rule recorded by `decision_contract_json`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `fine_power_ratio` | float32 `(N, fine_num_bins)` | Fine-bin local-reference power ratio; NaN rows when unavailable. |
-| `fine_cfar_location` | float64 `(N, 1)` | Diagnostic null-bulk location. |
-| `fine_cfar_scale` | float64 `(N, 1)` | Diagnostic null-bulk scale. |
-| `fine_cfar_threshold` | float64 `(N, 1)` | Diagnostic threshold. |
-| `fine_cfar_mode` | uint8 `(N, 1)` | Encoded diagnostic threshold-estimation method. |
-| `fine_null_bulk_exceedance_fraction` | float64 `(N, 1)` | In-sample fraction of the same independent null-bulk bins used to estimate the frame threshold that exceed that threshold. This is not an independently measured false-alarm rate. |
-| `fine_threshold_exceedance_count` | int32 `(N, 1)` | Number of diagnostic threshold exceedances in the frame. |
+| `fine_power_u64` | uint64 `(N, 3, fine_num_bins)` | Exact deployed-statistic power terms per fine bin — target, lower reference, upper reference — from the frozen fixed-point transform. |
 
-The ragged exceedance list uses `fine_threshold_exceedance_frame` and
-`fine_threshold_exceedance_bin`. Rows are ordered by frame, with
+That row is the whole per-frame fine product: the scan stores the exact terms
+and nothing derived from them. The float power ratio, the null-bulk location,
+scale, threshold and threshold-estimation mode, the null-bulk exceedance
+fraction, and the ragged exceedance list are not written by the scan. They are
+recomputed in post-processing from `fine_power_u64`, at whatever operating point
+is calibrated there; the scan applies no fine decision of its own. Earlier
+schema revisions stored those derived arrays, and `fine_power_ratio` still
+appears under that spelling when reading the archived survey products.
 
-```python
-fine_threshold_exceedance_frame == np.repeat(np.arange(N), fine_threshold_exceedance_count)
-```
+One caveat carries over to the recomputation. The null-bulk exceedance fraction
+is an in-sample fraction of the same independent null-bulk bins used to estimate
+the frame threshold, so it is not an independently measured false-alarm rate.
 
 The exact integer sum of squared matched-filter row projections reproduces the
 coarse power terms bit-for-bit. The padded fixed-point transform is separately
