@@ -34,10 +34,26 @@ from .stream_kinds import STREAM_PACKED_COMPLEX_INT4_BASEBAND
 
 
 def _iter_packed_chunks(path: str, nfft: int) -> Iterator:
-    """Yield raw uint8 [nfft, n_feeds] blocks (final partial frame dropped)."""
+    """Yield raw uint8 [nfft, n_feeds] blocks (final partial frame dropped).
+
+    A file too short for one complete transform at this nfft raises
+    UnreadableUnitError (via unreadable_file). Raised while the reader
+    streams, that type is the engine's one quarantinable iteration error:
+    the unit lands in the quarantine ledger and a rerun resumes without it,
+    whereas letting the analyzer see zero frames turns the same bytes into
+    an unquarantinable run-level ValueError. The check lives here, on the
+    same nfft the framing uses, so the reject and framing criteria cannot
+    diverge the way a probe-time gate at the format default could.
+    """
     with unreadable_file(), h5py.File(path, "r") as h:
         bb = h["baseband"]
         n_chunks = int(bb.shape[0]) // int(nfft)
+        if n_chunks == 0:
+            raise ValueError(
+                "CHIME packed baseband is shorter than one transform: "
+                f"{int(bb.shape[0])} time samples < nfft {int(nfft)}; "
+                "it cannot yield a complete frame"
+            )
         for c in range(n_chunks):
             yield bb[c * nfft:(c + 1) * nfft, :]
 
@@ -87,10 +103,16 @@ class ChimeBasebandPackedReader(Reader):
             # A file too short to yield one complete transform is a property of
             # the staged bytes, not an analyzer fault, so reject it here where
             # unreadable_file() turns it into UnreadableUnitError and the engine
-            # can quarantine it. Raising it later from the analyzer instead makes
-            # it a run-level error that aborts a multi-week scan over one stub.
-            # ctx.instrument may override nfft upward; the analyzer keeps its own
-            # zero-frame check as the backstop for that narrower case.
+            # quarantines it WITHOUT interrupting the run. The framing length is
+            # ctx.instrument.nfft and the engine calls probe without a ctx, so
+            # this gate can only use the format default fmt.NFFT: every shipped
+            # instrument frames at that value, and an instrument configured
+            # below it would see files quarantined here that could still frame
+            # (none exists; the gate is deliberately conservative for the
+            # unattended multi-week scan). _iter_packed_chunks enforces the
+            # per-run length again at the exact nfft it frames with, so an
+            # instrument nfft above the default quarantines at iteration time
+            # (a resumable stop) instead of aborting the run from the analyzer.
             if int(baseband.shape[0]) < int(fmt.NFFT):
                 raise ValueError(
                     "CHIME packed baseband is shorter than one transform: "

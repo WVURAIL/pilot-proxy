@@ -6,7 +6,10 @@ Covers source/plumbing and failure handling:
       enumeration, exercised offline with a fake inventory and a mocked fetch;
   #4  a GPU/cupy preflight for pilot-proxy-detector before any staging;
   #6  an all-units-failed / all-quarantined scan is surfaced rather than silently turned
-      into an absent/empty product fed to combine.
+      into an absent/empty product fed to combine;
+  terminal-combine soft-fail: any combine integrity refusal (ValueError family)
+      preserves the per-pilot products, prints working guidance, and records
+      the skip in scan_scope.json; other exceptions still propagate.
 """
 from __future__ import annotations
 
@@ -149,6 +152,7 @@ def test_cadc_scan_enumerates_by_freq_id(tmp_path, monkeypatch):
         "extra_completed": 0,
         "pilots_requested": 2,
     }
+    assert scope["terminal_combine"] == {"status": "combined"}
 
 
 # -- #3: explicit per-source option validation -------------------------------
@@ -532,6 +536,114 @@ def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):
                        analyzer="pilot-proxy-detector", select="829",
                        analyzer_options=_cpu_detector_options(), verbose=False)
     assert seen["ckpt"] == 50
+
+
+# -- terminal-combine soft-fail: messages + durable record --------------------
+
+def _completed_scan_kwargs(tmp_path):
+    """One local channel that scans to completion, so the terminal combine runs."""
+    data = tmp_path / "data"
+    data.mkdir()
+    fmt.make_synth_file(str(data / "baseband_e_844.h5"), n_time=NFFT * 2,
+                        n_feeds=N_FEEDS, f_center_mhz=CHAN_MHZ[844],
+                        f_tone_bb=1300.0, seed=1)
+    return {
+        "input_dir": data,
+        "output_dir": tmp_path / "out",
+        "source": "local",
+        "analyzer": "pilot-proxy-detector",
+        "select": "844",
+        "analyzer_options": _cpu_detector_options(),
+        "verbose": False,
+    }
+
+
+def test_generic_combine_valueerror_soft_fails_and_records_skip(
+    tmp_path, monkeypatch, capsys
+):
+    """Untyped integrity refusals from combine's validation pass must not kill
+    the run either: ValueError is the soft-fail net, not the two typed members."""
+    monkeypatch.chdir(REPO_ROOT)
+    kwargs = _completed_scan_kwargs(tmp_path)
+
+    import pilot_proxy.datatrawl_plugins.combine as combine_mod
+
+    def _raise_plain(*a, **k):
+        raise ValueError(
+            "combine: frame identity length does not match frame_index length")
+
+    monkeypatch.setattr(combine_mod, "combine_detector_products", _raise_plain)
+    result = run_chime_scan(**kwargs)
+    out = kwargs["output_dir"]
+    # the scan succeeded and the per-pilot product survived ...
+    assert (out / "_per_pilot" / "844.npz").exists()
+    assert result["per_pilot_work_dir"] == out / "_per_pilot"
+    assert not (out / "chime_detector_outputs.npz").exists()
+    printed = capsys.readouterr().out
+    assert "terminal combine skipped" in printed
+    assert "frame identity length" in printed          # the exception text
+    assert "chime-combine --report" in printed
+    # ... and the skip outlives stdout
+    scope = json.loads((out / "scan_scope.json").read_text())
+    assert scope["terminal_combine"] == {
+        "status": "skipped",
+        "error": "ValueError",
+        "message": "combine: frame identity length does not match "
+                   "frame_index length",
+    }
+
+
+def test_duplicate_identity_message_names_working_escape(
+    tmp_path, monkeypatch, capsys
+):
+    """The duplicate-identity guidance must describe what the error means and an
+    escape that works: (event, frame) identity, unit_scope/--report inspection,
+    and --drop -- not the disproven two-archive-scopes cause or a plain
+    chime-combine rerun that re-raises the same error."""
+    monkeypatch.chdir(REPO_ROOT)
+    kwargs = _completed_scan_kwargs(tmp_path)
+
+    import pilot_proxy.datatrawl_plugins.combine as combine_mod
+    from pilot_proxy.datatrawl_plugins.combine import CombineDuplicateIdentityError
+
+    def _raise_duplicate(*a, **k):
+        raise CombineDuplicateIdentityError(
+            "combine: ch14/freq_id 844 contains duplicate (event, frame) "
+            "identities")
+
+    monkeypatch.setattr(combine_mod, "combine_detector_products",
+                        _raise_duplicate)
+    result = run_chime_scan(**kwargs)
+    out = kwargs["output_dir"]
+    assert result["per_pilot_work_dir"] == out / "_per_pilot"
+    assert not (out / "chime_detector_outputs.npz").exists()
+    printed = capsys.readouterr().out
+    assert "terminal combine skipped" in printed
+    assert "data-integrity signal" in printed
+    assert "two archive scopes" not in printed
+    assert "(source_event_key, frame_in_unit)" in printed
+    assert "unit_scope" in printed
+    assert "chime-combine --report" in printed
+    assert "--drop" in printed
+    scope = json.loads((out / "scan_scope.json").read_text())
+    assert scope["terminal_combine"]["status"] == "skipped"
+    assert scope["terminal_combine"]["error"] == "CombineDuplicateIdentityError"
+
+
+def test_non_valueerror_combine_failure_still_propagates(tmp_path, monkeypatch):
+    monkeypatch.chdir(REPO_ROOT)
+    kwargs = _completed_scan_kwargs(tmp_path)
+
+    import pilot_proxy.datatrawl_plugins.combine as combine_mod
+
+    def _raise_runtime(*a, **k):
+        raise RuntimeError("injected combine crash")
+
+    monkeypatch.setattr(combine_mod, "combine_detector_products", _raise_runtime)
+    with pytest.raises(RuntimeError, match="injected combine crash"):
+        run_chime_scan(**kwargs)
+    scope = json.loads((kwargs["output_dir"] / "scan_scope.json").read_text())
+    assert "terminal_combine" not in scope     # a crash is not a recorded skip
 
 
 # -- --source-freq-id-regex reaches the datatrawl local source ----------------

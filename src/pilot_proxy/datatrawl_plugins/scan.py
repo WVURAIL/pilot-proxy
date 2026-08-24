@@ -382,7 +382,9 @@ def run_chime_scan(
     By default every requested pilot must enumerate at least one unit and every
     enumerated unit must complete. ``allow_partial=True`` is the explicit escape
     hatch for capped smoke runs or intentionally incomplete inventories; either
-    way, ``scan_scope.json`` durably records the per-pilot outcome.
+    way, ``scan_scope.json`` durably records the per-pilot outcome, and its
+    ``terminal_combine`` entry records whether the optional terminal combine
+    ran or was soft-failed (with the refusing error class and message).
     """
     from datatrawl import pipeline, registry
     from datatrawl.instruments import load_instrument
@@ -789,29 +791,57 @@ def run_chime_scan(
 
     try:
         outputs = combine_detector_products(product_paths, output_dir)
-    except CombineEmptyIntersectionError as exc:
+    except ValueError as exc:
+        # Combine's validation pass (CombineIntegrityError and its plain
+        # ValueError siblings) refuses the stack, not the scan: every per-pilot
+        # product is already durable, so soft-fail the optional terminal
+        # combine instead of losing the run to it. The two typed refusals get
+        # tailored guidance; anything else gets the generic escape. Non-
+        # ValueError failures are not integrity refusals and still propagate.
         print(f"[chime-scan] terminal combine skipped: {exc}", flush=True)
-        print(
-            "[chime-scan] per-pilot products are preserved under "
-            f"{work}; the scan itself succeeded. Choose a channel subset with "
-            "`pilot-proxy chime-combine --report --work-dir <work>` and stack "
-            "it with `chime-combine --work-dir <work> --drop <freq_ids> "
-            "--output-dir <run>`.",
-            flush=True,
-        )
+        if isinstance(exc, CombineEmptyIntersectionError):
+            print(
+                "[chime-scan] per-pilot products are preserved under "
+                f"{work}; the scan itself succeeded. Choose a channel subset "
+                "with `pilot-proxy chime-combine --report --work-dir <work>` "
+                "and stack it with `chime-combine --work-dir <work> "
+                "--drop <freq_ids> --output-dir <run>`.",
+                flush=True,
+            )
+        elif isinstance(exc, CombineDuplicateIdentityError):
+            print(
+                "[chime-scan] per-pilot products are preserved under "
+                f"{work}; the scan itself succeeded. Unlike an empty "
+                "intersection this is a data-integrity signal, not a routine "
+                "skip: one product carries the same acquisition twice -- "
+                "frame identity is (source_event_key, frame_in_unit) -- so "
+                "inspect unit_scope and the source keys on the flagged "
+                "product, and read the presence histogram with `pilot-proxy "
+                "chime-combine --report --work-dir <work>`. Until the "
+                "duplicate is explained, `chime-combine --work-dir <work> "
+                "--drop <freq_id> --output-dir <run>` stacks without the "
+                "affected channel.",
+                flush=True,
+            )
+        else:
+            print(
+                "[chime-scan] per-pilot products are preserved under "
+                f"{work}; the scan itself succeeded. Inspect the products "
+                "with `pilot-proxy chime-combine --report --work-dir <work>` "
+                "and stack once the refusal is understood.",
+                flush=True,
+            )
+        # stdout scrolls away on a multi-week run; the skip must survive in
+        # the run directory alongside the per-pilot outcome it annotates.
+        scope["terminal_combine"] = {
+            "status": "skipped",
+            "error": type(exc).__name__,
+            "message": str(exc),
+        }
+        _atomic_write_json(scope_path, scope)
         return {"per_pilot_work_dir": work, "scan_scope": scope_path}
-    except CombineDuplicateIdentityError as exc:
-        print(f"[chime-scan] terminal combine skipped: {exc}", flush=True)
-        print(
-            "[chime-scan] per-pilot products are preserved under "
-            f"{work}; the scan itself succeeded. Unlike an empty intersection "
-            "this is a data-integrity signal, not a routine skip: confirm the "
-            "duplicate is one event under two archive scopes and not the same "
-            "acquisition ingested twice, then stack with `pilot-proxy "
-            "chime-combine --work-dir <work> --output-dir <run>`.",
-            flush=True,
-        )
-        return {"per_pilot_work_dir": work, "scan_scope": scope_path}
+    scope["terminal_combine"] = {"status": "combined"}
+    _atomic_write_json(scope_path, scope)
     outputs["scan_scope"] = scope_path
     if verbose:
         print(f"[chime-scan] combined {len(product_paths)} pilot product(s) -> {output_dir}",

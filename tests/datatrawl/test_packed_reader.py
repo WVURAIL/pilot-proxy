@@ -52,6 +52,14 @@ def test_packed_reader_matches_unpacked(tmp_path):
         assert np.array_equal(fmt.unpack_4bit(raw), cplx)
 
 
+def _ctx_with_nfft(nfft):
+    """RunContext with a per-run nfft override, via the same attribute the CLI's
+    --nfft mutates and iter_arrays reads (ctx.instrument.nfft)."""
+    inst = load_instrument("chime")
+    inst.nfft = nfft
+    return RunContext(instrument=inst)
+
+
 def test_probe_rejects_short_file_as_unreadable(tmp_path):
     """A file too short for one transform must be quarantinable, not run-fatal.
 
@@ -59,7 +67,8 @@ def test_probe_rejects_short_file_as_unreadable(tmp_path):
     aborted a scan that had already completed eight channels, because the
     analyzer raised on zero frames and datatrawl treats analyzer exceptions as
     run-level errors by design. Classifying it at probe time hands the engine
-    the one disposition it is allowed to quarantine.
+    the one disposition that quarantines without interrupting the run at all;
+    the iteration-time check below covers the configurations probe cannot see.
     """
     from datatrawl.interfaces import UnreadableUnitError
 
@@ -68,6 +77,45 @@ def test_probe_rejects_short_file_as_unreadable(tmp_path):
                         f_center_mhz=470.3125, f_tone_bb=1500.0, seed=5)
     with pytest.raises(UnreadableUnitError, match="shorter than one transform"):
         ChimeBasebandPackedReader().probe(str(short))
+
+
+def test_nfft_above_default_quarantines_at_iteration(tmp_path):
+    """Instrument nfft above the format default: a file with one default-length
+    frame but zero frames at the run's nfft must raise the quarantinable type
+    from iter_arrays, not reach the analyzer's run-fatal zero-frame check."""
+    from datatrawl.interfaces import UnreadableUnitError
+
+    path = tmp_path / "one_default_frame.h5"
+    fmt.make_synth_file(str(path), n_time=NFFT, n_feeds=N_FEEDS,
+                        f_center_mhz=470.3125, f_tone_bb=1500.0, seed=8)
+    reader = ChimeBasebandPackedReader()
+    reader.probe(str(path))
+    with pytest.raises(UnreadableUnitError, match="shorter than one transform"):
+        list(reader.iter_arrays(str(path), _ctx_with_nfft(2 * NFFT)))
+
+
+def test_nfft_below_default_is_deliberately_conservative(tmp_path):
+    """Instrument nfft below the format default: probe still quarantines.
+
+    Probe never sees the configured nfft, so its gate uses the format default
+    that every shipped instrument frames at. A file that could frame at a
+    smaller configured nfft is therefore quarantined at probe -- the accepted
+    cost of catching stubs without interrupting an unattended multi-week scan;
+    no shipped instrument configures nfft below the default. This test pins
+    that trade so a future below-default instrument revisits it deliberately.
+    """
+    from datatrawl.interfaces import UnreadableUnitError
+
+    small = NFFT // 4
+    path = tmp_path / "two_small_frames.h5"
+    fmt.make_synth_file(str(path), n_time=2 * small, n_feeds=N_FEEDS,
+                        f_center_mhz=470.3125, f_tone_bb=1500.0, seed=9)
+    reader = ChimeBasebandPackedReader()
+    with pytest.raises(UnreadableUnitError, match="shorter than one transform"):
+        reader.probe(str(path))
+    chunks = list(reader.iter_arrays(str(path), _ctx_with_nfft(small)))
+    assert len(chunks) == 2
+    assert all(c.shape == (small, N_FEEDS) for c in chunks)
 
 
 def test_probe_accepts_exactly_one_frame(tmp_path):
