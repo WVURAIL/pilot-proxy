@@ -487,17 +487,18 @@ def assert_clean_pilot_lands_on_target(
         "observed_statistic_peak_bin": observed,
         "spectral_sense": str(spectral_sense),
     }
-    if not normalized >= float(minimum_normalized_ratio):
+    if observed != target_bin or not normalized >= float(minimum_normalized_ratio):
         raise SystemExit(
             "evaluate-snr: the clean pilot is not in the detector's target "
             f"bin. The noise-free waveform yields a normalized coarse power "
             f"ratio of {normalized:.2f} (need >= "
-            f"{float(minimum_normalized_ratio):.1f}); the statistic's "
+            f"{float(minimum_normalized_ratio):.1f}) and the statistic's "
             f"strongest bin is {observed} while the weight layout targets bin "
-            f"{target_bin}. Every detection rate below would describe noise. "
-            "Try the opposite --spectral-sense, toggle "
-            "--reference-archive-phase, or check --physical-channel against "
-            "the weight bank."
+            f"{target_bin}; both must agree, or a straddling, attenuated line "
+            "would be recorded as the on-target pilot. Every detection rate "
+            "below would describe noise. Try the opposite --spectral-sense, "
+            "toggle --reference-archive-phase, or check --physical-channel "
+            "against the weight bank."
         )
     return report
 
