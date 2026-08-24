@@ -35,7 +35,7 @@ PER_PILOT_PRODUCT_SCHEMA_NAME = "pilotproxy_per_pilot_product"
 # v3 adds the per-frame PSD the analyzer already computed and discarded,
 # so a later pass can apply a new frame mask, window, or threshold to the
 # spectra instead of being limited to the two archived accumulators.
-PER_PILOT_PRODUCT_SCHEMA_REVISION = 3
+PER_PILOT_PRODUCT_SCHEMA_REVISION = 4
 PER_PILOT_PRODUCT_SCHEMA_TOKEN = (
     f"{PER_PILOT_PRODUCT_SCHEMA_NAME}_v{PER_PILOT_PRODUCT_SCHEMA_REVISION}"
 )
@@ -333,6 +333,8 @@ def validate_current_product_identity(
         "reference_norm_sum_sq",
         "normalized_pilot_excess",
         "baseband_power_linear",
+        "railed_sample_count",
+        "railed_sample_total",
         "integrated_spectrum_before_mask",
         "integrated_spectrum_after_mask",
         "fine_pad_factor",
@@ -634,6 +636,28 @@ def validate_current_product_identity(
                 f"({frame_count}, 1)"
             )
         exact_flags[field] = values
+    # ADC/F-engine saturation, counted from the raw int4 nibbles while the frame
+    # was in hand. The product stores no raw samples, so an absent or wrong count
+    # cannot be repaired later; validate it here rather than trusting the writer.
+    railed: dict[str, np.ndarray] = {}
+    for field in ("railed_sample_count", "railed_sample_total"):
+        values = exact_integer_array(
+            product[field],
+            field=field,
+            dtype=np.uint64,
+            minimum=0,
+        )
+        if values.shape != (frame_count, 1):
+            raise CurrentProductContractError(
+                f"current per-pilot field {field!r} must have shape "
+                f"({frame_count}, 1)"
+            )
+        railed[field] = values
+    if np.any(railed["railed_sample_count"] > railed["railed_sample_total"]):
+        raise CurrentProductContractError(
+            "current per-pilot railed_sample_count exceeds railed_sample_total; "
+            "the saturation counter and its denominator disagree"
+        )
     for field, minimum in (
         ("coarse_power_ratio", 0.0),
         ("normalized_coarse_power_ratio_db", None),

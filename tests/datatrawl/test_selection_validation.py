@@ -172,6 +172,8 @@ def _write_min_detector_product(
         null_power_ratio=np.asarray([1.0], dtype=np.float64),
         normalized_pilot_excess=np.zeros(shape, dtype=np.float64),
         baseband_power_linear=np.ones(shape, dtype=np.float64),
+        railed_sample_count=np.zeros(shape, dtype=np.uint64),
+        railed_sample_total=np.zeros(shape, dtype=np.uint64),
         integrated_spectrum_before_mask=np.zeros(int(nfft), dtype=np.float64),
         integrated_spectrum_after_mask=np.zeros(int(nfft), dtype=np.float64),
         fine_power_ratio=np.zeros((int(n_frames), 0), dtype=np.float32),

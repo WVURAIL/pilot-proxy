@@ -93,7 +93,7 @@ failure.
    (a handful of files, one even and one odd freq_id) with the current
    analyzer:
    pass criteria, all from the produced npz:
-   - `schema_version == pilotproxy_per_pilot_product_v3`;
+   - `schema_version == pilotproxy_per_pilot_product_v4`;
    - `source_event_key_schema_version ==
      pilotproxy_namespaced_source_event_key_v1`, so basename-only development
      products cannot align across archive or campaign namespaces;
@@ -123,7 +123,7 @@ failure.
 
 7. **Combine compatibility.** `chime-combine` over two smoke products.
    Pass: succeeds when both products satisfy
-   `pilotproxy_per_pilot_product_v3` and the required namespaced source-event
+   `pilotproxy_per_pilot_product_v4` and the required namespaced source-event
    identity version; refuses any missing, mismatched, or non-current
    schema/decision identity. Fine products remain in the authoritative
    per-channel NPZ files rather than the combined stack.

@@ -2,8 +2,8 @@
 
 ```text
 schema_name = "pilotproxy_per_pilot_product"
-schema_revision = 3
-schema_version = "pilotproxy_per_pilot_product_v3"
+schema_revision = 4
+schema_version = "pilotproxy_per_pilot_product_v4"
 source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 
@@ -54,7 +54,7 @@ error. Current runtime code contains no aliases, adapters, repair paths, or
 fallback readers for pre-release products.
 
 The source-event identity version is required and is versioned independently of
-the enclosing product schema, which is at revision 3. It gates the change from
+the enclosing product schema, which is at revision 4. It gates the change from
 historical basename-only
 keys to keys that retain the complete archive or campaign namespace. Products
 without this field cannot be combined or resumed because identical basenames in

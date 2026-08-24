@@ -7,8 +7,8 @@ listed in [`FINE_REDUCTION_PRODUCTS.md`](FINE_REDUCTION_PRODUCTS.md).
 
 ```text
 schema_name = "pilotproxy_per_pilot_product"
-schema_revision = 3
-schema_version = "pilotproxy_per_pilot_product_v3"
+schema_revision = 4
+schema_version = "pilotproxy_per_pilot_product_v4"
 source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 
@@ -68,7 +68,19 @@ integrated spectrum receives the frame.
 | `target_norm_sq` | `(1,)` | `int64` | Exact `||w_target||^2` of the int4 weights |
 | `reference_norm_sum_sq` | `(1,)` | `int64` | Exact `||w_ref_lo||^2 + ||w_ref_up||^2` |
 | `baseband_power_linear` | `(N, 1)` | `float64` | Mean non-coherent baseband power for the frame |
+| `railed_sample_count` | `(N, 1)` | `uint64` | 4-bit components on either rail (nibble 0 or 15), counted from the raw frame |
+| `railed_sample_total` | `(N, 1)` | `uint64` | Denominator for the above: `2 * nfft * streams` |
 | `psd_db_step_per_code` | `()` | `float64` | dB per `psd_frame_db_i16` code; `0.01` |
+
+ADC/F-engine saturation is recorded per frame because it **cannot be recovered
+afterwards**: the product stores no raw samples (5.8 MB against 8.0 GB for one
+pre-flight channel). `baseband_power_linear == 128` only catches a frame that is
+railed everywhere, so partial saturation was previously invisible. The count
+covers real and imaginary parts separately and is written for invalid frames too,
+since clipping is a property of the samples rather than of the detection. Measured
+on real CHIME baseband (freq_id 506): median 795 of 67,108,864 components
+(0.0012%), with the worst frame at 18,948 (0.028%) -- a 24x frame-to-frame spread
+that nothing in the product previously exposed.
 
 `null_power_ratio` was stored through schema v2 and is **no longer written**: it
 is exactly `2*target_norm_sq/reference_norm_sum_sq` from two fields above, so

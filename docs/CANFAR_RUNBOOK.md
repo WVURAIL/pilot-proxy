@@ -345,7 +345,7 @@ sv = str(np.asarray(z["schema_version"]).reshape(()).item())
 ev = str(np.asarray(z["source_event_key_schema_version"]).reshape(()).item())
 dv = str(np.asarray(z["detector_version"]).reshape(()).item())
 fs = str(np.asarray(z["fine_status"]).reshape(()).item())
-assert sv == "pilotproxy_per_pilot_product_v3", sv
+assert sv == "pilotproxy_per_pilot_product_v4", sv
 assert ev == "pilotproxy_namespaced_source_event_key_v1", ev
 assert "pilot-proxy/" in dv and "kernel=2.3.0" in dv, dv
 assert fs == "enabled", fs
