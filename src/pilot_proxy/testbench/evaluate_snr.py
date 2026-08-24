@@ -433,54 +433,69 @@ def assert_clean_pilot_lands_on_target(
     clean_streams: np.ndarray,
     *,
     selected_weight_layout: dict[str, Any],
+    cpu_float_weights: np.ndarray,
     detector_window_samples: int,
     samples_per_block: int,
     spectral_sense: str,
-    minimum_target_excess: float = 8.0,
+    minimum_normalized_ratio: float = 8.0,
 ) -> dict[str, Any]:
-    """Fail loudly when the noise-free pilot is not in the detector's target bin.
+    """Fail loudly when the detector statistic cannot see the noise-free pilot.
 
-    Every quantity downstream is a ratio of that bin to its neighbours, so a
-    stream whose line sits elsewhere yields F ~= 1 at every SNR and produces a
-    detection curve made entirely of noise -- silently, and with the requested
-    SNR still tracking perfectly. That is what a wrong ``--spectral-sense``
-    does: it mirrors the line into the bin below the channel centre while the
-    weight bank targets the bin above it. Checking the clean signal once at
-    startup costs nothing and turns a plausible-looking curve into an error.
+    Every quantity downstream is a ratio of the target term to its references,
+    so a configuration whose clean line excites the wrong bin yields F ~= 1 at
+    every SNR and produces a detection curve made entirely of noise --
+    silently, and with the requested SNR still tracking perfectly. The check
+    is made through the same CPU-float statistic the sweep reports rather than
+    an independent FFT, because the two can disagree about spectral
+    conventions while each looks internally consistent. One clean
+    channelization at startup turns a curve made of noise into an error.
     """
-    rows = np.asarray(
-        _float_streams_for_reference(
-            clean_streams,
-            samples_per_block=int(samples_per_block),
-            detector_window_samples=int(detector_window_samples),
-            spectral_sense=str(spectral_sense),
-        )
-    ).reshape(-1, int(detector_window_samples))
-    spectrum = (np.abs(np.fft.fft(rows, axis=1)) ** 2).mean(axis=0)
+    rows = _float_streams_for_reference(
+        clean_streams,
+        samples_per_block=int(samples_per_block),
+        detector_window_samples=int(detector_window_samples),
+        spectral_sense=str(spectral_sense),
+    )
+    fstat, _ = coarse_power_ratio_cpu_reference(rows, cpu_float_weights)
+    target_norm_sq = float(
+        np.sum(np.abs(cpu_float_weights[REFERENCE_TARGET_TERM_INDEX]) ** 2)
+    )
+    reference_norm_sum_sq = float(
+        np.sum(np.abs(cpu_float_weights[REFERENCE_LOWER_TERM_INDEX]) ** 2)
+        + np.sum(np.abs(cpu_float_weights[REFERENCE_UPPER_TERM_INDEX]) ** 2)
+    )
+    null_ratio = float(
+        COARSE_POWER_RATIO_SCALE * target_norm_sq / reference_norm_sum_sq
+    )
+    normalized = float(normalize_coarse_power_ratio(fstat, null_ratio))
+    matrix = np.asarray(rows).reshape(-1, int(detector_window_samples))
+    statistic_spectrum = (np.abs(np.fft.fft(np.conj(matrix), axis=1)) ** 2).mean(
+        axis=0
+    )
+    observed = int(np.argmax(statistic_spectrum))
     target_bin = int(
         round(
             float(selected_weight_layout["target_normalized_frequency"])
             * int(detector_window_samples)
         )
     ) % int(detector_window_samples)
-    median = float(np.median(spectrum))
-    excess = float(spectrum[target_bin] / median) if median > 0.0 else float("inf")
-    observed = int(np.argmax(spectrum))
     report = {
+        "normalized_coarse_power_ratio": normalized,
         "target_bin": target_bin,
-        "observed_peak_bin": observed,
-        "target_bin_excess_over_median": excess,
+        "observed_statistic_peak_bin": observed,
         "spectral_sense": str(spectral_sense),
     }
-    if observed != target_bin or excess < float(minimum_target_excess):
+    if not normalized >= float(minimum_normalized_ratio):
         raise SystemExit(
             "evaluate-snr: the clean pilot is not in the detector's target "
-            f"bin. Target bin {target_bin} carries {excess:.2f}x the median "
-            f"bin power, and the strongest bin is {observed}. With "
-            f"--spectral-sense {spectral_sense} the channelized line does not "
-            "align with the selected weight layout, so every detection rate "
-            "below would describe noise. Try the opposite --spectral-sense, "
-            "or check --physical-channel against the weight bank."
+            f"bin. The noise-free waveform yields a normalized coarse power "
+            f"ratio of {normalized:.2f} (need >= "
+            f"{float(minimum_normalized_ratio):.1f}); the statistic's "
+            f"strongest bin is {observed} while the weight layout targets bin "
+            f"{target_bin}. Every detection rate below would describe noise. "
+            "Try the opposite --spectral-sense, toggle "
+            "--reference-archive-phase, or check --physical-channel against "
+            "the weight bank."
         )
     return report
 
@@ -1458,23 +1473,29 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser.add_argument(
         "--spectral-sense",
         choices=["normal", "inverted"],
-        default="inverted",
+        default="normal",
         help=(
             "Sense of the channelized stream relative to the deployed weight "
-            "bank. The reference PFB emits the opposite sense to the bank, so "
-            "'normal' mirrors the pilot into the bin below the channel centre "
-            "while the bank targets the bin above it, and the detector then "
-            "measures noise at every SNR. Measured on channel 14: 'normal' "
-            "puts the clean line in bin 127 of 128 and leaves the target bin "
-            "at 3.9x the median, 'inverted' puts it in bin 1 at 262x."
+            "bank. With the reference channelizer's native phase and the "
+            "shipped bank, 'normal' places the clean pilot on the statistic's "
+            "target term (measured on channel 14: clean normalized ratio 121 "
+            "against 1.1 for every other sense/phase combination). The "
+            "startup guard verifies the configured combination against the "
+            "clean waveform and refuses to sweep when the pilot misses."
         ),
     )
     parser.add_argument(
         "--reference-archive-phase",
         dest="reference_archive_phase",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply the reference channel phase convention expected by weights.",
+        default=False,
+        help=(
+            "Apply the conj/(-1)^n archive phase convention to channelized "
+            "streams before detection. Its half-rate factor displaces the "
+            "pilot by half a coarse channel relative to the shipped weight "
+            "layouts, so the detector then measures noise at every SNR; "
+            "leave this off except to diagnose coordinate conventions."
+        ),
     )
     parser.add_argument("--lib-path", type=Path, default=DEFAULT_LIB_PATH)
     parser.add_argument("--weights-path", type=Path, default=DEFAULT_WEIGHTS_PATH)
@@ -1616,6 +1637,34 @@ def run(args: argparse.Namespace) -> int:
     cpu_float_weights = _ideal_float_weights_from_layout(
         selected_weight_layout,
         detector_window_samples=int(args.detector_window_samples),
+    )
+
+    guard_blocks = complex_envelope_to_real_adc_blocks(
+        clean_iq,
+        iq_sample_rate_hz=float(args.iq_sample_rate_hz),
+        rf_center_hz=rf_center_hz,
+        adc_sample_rate_hz=float(args.adc_sample_rate_hz),
+        band_lower_hz=band_lower_hz,
+        n_blocks=n_blocks,
+        block_size=REFERENCE_PFB_FFT_SIZE,
+    )
+    guard_channel_streams = channelize_real_blocks_to_reference_channels(
+        guard_blocks,
+        channel_indices=[channel_index],
+        response=response,
+        spec=spec,
+    )
+    if args.reference_archive_phase:
+        guard_channel_streams = apply_reference_archive_phase_convention(
+            guard_channel_streams
+        )
+    assert_clean_pilot_lands_on_target(
+        flatten_feed_channel_streams(np.stack([guard_channel_streams], axis=0)),
+        selected_weight_layout=selected_weight_layout,
+        cpu_float_weights=cpu_float_weights,
+        detector_window_samples=int(args.detector_window_samples),
+        samples_per_block=int(args.samples_per_block),
+        spectral_sense=str(args.spectral_sense),
     )
 
     for frequency_offset_hz in frequency_offset_values:

@@ -487,16 +487,20 @@ def test_detector_backend_flag_parses() -> None:
     assert build_parser().parse_args(["--input-iq", "x.cfile"]).detector_backend == "cuda"
 
 
-def test_spectral_sense_defaults_to_inverted() -> None:
-    """The reference PFB emits the opposite sense to the deployed weight bank.
+def test_defaults_are_the_matched_clean_pilot_configuration() -> None:
+    """The parser defaults must be the combination the clean pilot satisfies.
 
-    With the historical `normal` default the channelized pilot landed one bin
-    below the channel centre while the bank targeted one bin above, so every
-    detection rate the sweep produced described noise -- with the requested SNR
-    still tracking perfectly, which is why it went unnoticed.
+    The archive phase convention's half-rate factor displaces the channelized
+    pilot by half a coarse channel relative to the shipped weight layouts, so
+    with it applied the detector measures noise at every SNR regardless of
+    spectral sense -- with the requested SNR still tracking perfectly, which
+    is why it went unnoticed twice. Measured on channel 14: clean normalized
+    ratio 121 with these defaults against 1.1 for every other combination,
+    and the startup guard now enforces whichever combination is configured.
     """
     args = evaluate_snr.build_parser().parse_args(["--input-iq", "x.cfile"])
-    assert args.spectral_sense == "inverted"
+    assert args.spectral_sense == "normal"
+    assert args.reference_archive_phase is False
 
 
 def _tone_stream(normalized_frequency: float, *, window: int, windows: int):
@@ -506,29 +510,153 @@ def _tone_stream(normalized_frequency: float, *, window: int, windows: int):
     ).reshape(1, -1)
 
 
-def test_clean_pilot_guard_accepts_a_line_on_the_target_bin() -> None:
+def _guard_layout(window: int, target_bin: int) -> dict:
+    return {
+        "target_normalized_frequency": target_bin / window,
+        "lower_reference_normalized_frequency": (target_bin - 2) / window,
+        "upper_reference_normalized_frequency": (target_bin + 2) / window,
+    }
+
+
+def test_clean_pilot_guard_accepts_a_line_the_statistic_sees() -> None:
+    """A line the coarse statistic resolves onto its target term must pass.
+
+    The weight rows are ``exp(-2j*pi*f*n)`` and the statistic correlates
+    against their conjugates, so the passing tone is the one at ``-f`` -- the
+    statistic, not an independent FFT, is the arbiter of "on target".
+    """
     window, windows, target_bin = 128, 8, 1
-    streams = _tone_stream(target_bin / window, window=window, windows=windows)
+    layout = _guard_layout(window, target_bin)
+    weights = evaluate_snr._ideal_float_weights_from_layout(
+        layout, detector_window_samples=window
+    )
+    rng = np.random.default_rng(0)
+    streams = _tone_stream(-target_bin / window, window=window, windows=windows)
+    streams = streams + 0.01 * (
+        rng.standard_normal(streams.shape) + 1j * rng.standard_normal(streams.shape)
+    ).astype(np.complex64)
     report = evaluate_snr.assert_clean_pilot_lands_on_target(
         streams,
-        selected_weight_layout={"target_normalized_frequency": target_bin / window},
+        selected_weight_layout=layout,
+        cpu_float_weights=weights,
         detector_window_samples=window,
         samples_per_block=window * windows,
         spectral_sense="normal",
     )
-    assert report["observed_peak_bin"] == target_bin
-    assert report["target_bin_excess_over_median"] > 8.0
+    assert report["normalized_coarse_power_ratio"] > 8.0
+    assert report["observed_statistic_peak_bin"] == target_bin
 
 
 def test_clean_pilot_guard_rejects_a_mirrored_line() -> None:
-    """A line in the mirrored bin must be an error, not a curve made of noise."""
+    """A line in the conjugate bin must be an error, not a curve made of noise."""
     window, windows, target_bin = 128, 8, 1
-    streams = _tone_stream(-target_bin / window, window=window, windows=windows)
+    layout = _guard_layout(window, target_bin)
+    weights = evaluate_snr._ideal_float_weights_from_layout(
+        layout, detector_window_samples=window
+    )
+    rng = np.random.default_rng(0)
+    streams = _tone_stream(target_bin / window, window=window, windows=windows)
+    streams = streams + 0.01 * (
+        rng.standard_normal(streams.shape) + 1j * rng.standard_normal(streams.shape)
+    ).astype(np.complex64)
     with pytest.raises(SystemExit, match="not in the detector's target"):
         evaluate_snr.assert_clean_pilot_lands_on_target(
             streams,
-            selected_weight_layout={"target_normalized_frequency": target_bin / window},
+            selected_weight_layout=layout,
+            cpu_float_weights=weights,
             detector_window_samples=window,
             samples_per_block=window * windows,
             spectral_sense="normal",
+        )
+
+
+def test_default_configuration_passes_the_clean_pilot_guard() -> None:
+    """The full synthesis chain at the parser defaults satisfies the guard.
+
+    Pins the matched quadrant end-to-end: a clean channel-14 pilot tone
+    channelized with the defaults passes, and applying the archive phase
+    convention -- whose half-rate factor displaces the pilot by half a coarse
+    channel -- must fail the guard rather than sweep noise.
+    """
+    args = evaluate_snr.build_parser().parse_args(
+        [
+            "--input-iq",
+            "x.cfile",
+            "--physical-channel",
+            "14",
+            "--frame-size-samples",
+            "1024",
+        ]
+    )
+    args.dtv_pilot_mhz = (
+        evaluate_snr.physical_channel_to_pilot_hz(14) / evaluate_snr.HZ_PER_MHZ
+    )
+    window = 128
+    frame = 1024
+    n_blocks = frame + evaluate_snr.REFERENCE_PFB_TAPS - 1
+    required = evaluate_snr.required_iq_samples(
+        iq_sample_rate_hz=float(args.iq_sample_rate_hz),
+        adc_sample_rate_hz=float(args.adc_sample_rate_hz),
+        num_output_samples=frame,
+    )
+    band_lower_hz = float(args.band_lower_mhz) * evaluate_snr.HZ_PER_MHZ
+    rf_center_hz = evaluate_snr._resolve_rf_center_hz(args)
+    pilot_offset_hz = (
+        float(args.dtv_pilot_mhz) * evaluate_snr.HZ_PER_MHZ - rf_center_hz
+    )
+    n = np.arange(required, dtype=np.float64)
+    clean_iq = np.exp(
+        2j * np.pi * pilot_offset_hz * n / float(args.iq_sample_rate_hz)
+    ).astype(np.complex64)
+    spec = evaluate_snr.ReferenceChannelizerSpec(
+        adc_sample_rate_hz=float(args.adc_sample_rate_hz),
+        band_lower_hz=band_lower_hz,
+    )
+    channel_index = evaluate_snr.nearest_reference_channel_index(
+        float(args.dtv_pilot_mhz) * evaluate_snr.HZ_PER_MHZ, spec
+    )
+    blocks = evaluate_snr.complex_envelope_to_real_adc_blocks(
+        clean_iq,
+        iq_sample_rate_hz=float(args.iq_sample_rate_hz),
+        rf_center_hz=rf_center_hz,
+        adc_sample_rate_hz=float(args.adc_sample_rate_hz),
+        band_lower_hz=band_lower_hz,
+        n_blocks=n_blocks,
+        block_size=evaluate_snr.REFERENCE_PFB_FFT_SIZE,
+    )
+    channel_streams = evaluate_snr.channelize_real_blocks_to_reference_channels(
+        blocks,
+        channel_indices=[channel_index],
+        spec=spec,
+    )
+    bank = evaluate_snr.DetectorWeightBank(
+        explicit_path=evaluate_snr.DEFAULT_WEIGHTS_PATH,
+        expected_kernel=None,
+    )
+    layout = bank.layout_for_pilot_frequency(float(args.dtv_pilot_mhz))
+    weights = evaluate_snr._ideal_float_weights_from_layout(
+        layout, detector_window_samples=window
+    )
+    streams = evaluate_snr.flatten_feed_channel_streams(
+        np.stack([channel_streams], axis=0)
+    )
+    report = evaluate_snr.assert_clean_pilot_lands_on_target(
+        streams,
+        selected_weight_layout=layout,
+        cpu_float_weights=weights,
+        detector_window_samples=window,
+        samples_per_block=frame,
+        spectral_sense=str(args.spectral_sense),
+    )
+    assert report["normalized_coarse_power_ratio"] > 8.0
+
+    shifted = evaluate_snr.apply_reference_archive_phase_convention(channel_streams)
+    with pytest.raises(SystemExit, match="not in the detector's target"):
+        evaluate_snr.assert_clean_pilot_lands_on_target(
+            evaluate_snr.flatten_feed_channel_streams(np.stack([shifted], axis=0)),
+            selected_weight_layout=layout,
+            cpu_float_weights=weights,
+            detector_window_samples=window,
+            samples_per_block=frame,
+            spectral_sense=str(args.spectral_sense),
         )

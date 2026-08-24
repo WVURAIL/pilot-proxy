@@ -188,8 +188,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--reference-archive-phase",
         dest="reference_archive_phase",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply the reference channel phase convention expected by weights.",
+        default=False,
+        help=(
+            "Apply the conj/(-1)^n archive phase convention before packing. "
+            "Its half-rate factor displaces the pilot by half a coarse "
+            "channel relative to the shipped weight layouts; leave this off "
+            "except to diagnose coordinate conventions."
+        ),
     )
     parser.add_argument(
         "--experimental-bits",
