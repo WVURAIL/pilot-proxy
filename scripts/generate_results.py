@@ -66,7 +66,10 @@ from pathlib import Path
 
 import numpy as np
 
-from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
+from pilot_proxy.product_contract import (
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    null_power_ratio_of,
+)
 
 # CHIME freq_ids of the ATSC physical-channel 14-36 pilot set (CANFAR_RUNBOOK.md).
 PILOT_FREQ_IDS = frozenset({
@@ -484,7 +487,8 @@ def h0_fulldepth_table(metas: list[dict], out_dir: Path, runner: Runner) -> dict
             rej = np.asarray(z["reject_mask"]).reshape(-1).astype(bool)
             f = np.asarray(z["coarse_power_ratio"], np.float64).reshape(-1)[valid]
             f = f[np.isfinite(f)]
-            null_power_ratio = float(np.asarray(z["null_power_ratio"]).reshape(-1)[0])
+            # not stored since schema v3; exact from the two weight norms
+            null_power_ratio = null_power_ratio_of(z)
             pilot = float(np.asarray(z["pilot_frequency_hz"]).reshape(-1)[0])
             center = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
         n = int(f.size)

@@ -11,6 +11,9 @@ from pathlib import Path
 
 import numpy as np
 
+import _paths  # noqa: F401  (repo src on sys.path + shared locations)
+from pilot_proxy.product_contract import null_power_ratio_of
+
 in_dir = (sys.argv[1] if len(sys.argv) > 1 else
           str(Path.home() / "pilot_proxy_runs/chime-pilots/_per_pilot"))
 out_dir = Path.home() / "paper/dumps"
@@ -29,7 +32,8 @@ for p in paths:
             out[f"ch{ch}_{k}"] = np.asarray(z[k]).reshape(-1)
         out[f"ch{ch}_unit_time0_ctime"] = np.asarray(z["unit_time0_ctime"])
         out[f"ch{ch}_scalars"] = np.asarray([
-            float(z["null_power_ratio"][0]),
+            # not stored since schema v3; exact from the two weight norms
+            null_power_ratio_of(z),
             float(z["target_norm_sq"][0]),
             float(z["reference_norm_sum_sq"][0]),
             float(np.asarray(z["freq_id"]).reshape(-1)[0]),

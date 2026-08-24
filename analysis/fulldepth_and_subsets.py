@@ -24,6 +24,9 @@ from pathlib import Path
 
 import numpy as np
 
+import _paths  # noqa: F401  (repo src on sys.path + shared locations)
+from pilot_proxy.product_contract import null_power_ratio_of
+
 work = Path(sys.argv[1]) if len(sys.argv) > 1 else (
     Path.home() / "pilot_proxy_runs" / "chime-pilots" / "_per_pilot")
 paths = sorted(p for p in work.glob("*.npz") if p.stem.isdigit())
@@ -40,7 +43,8 @@ for p in paths:
         rej = np.asarray(z["reject_mask"]).reshape(-1).astype(bool)
         f = np.asarray(z["coarse_power_ratio"]).reshape(-1)[valid]
         f = f[np.isfinite(f)]
-        null_power_ratio = float(np.asarray(z["null_power_ratio"]).reshape(-1)[0])
+        # not stored since schema v3; exact from the two weight norms
+        null_power_ratio = null_power_ratio_of(z)
         ev = set(np.asarray(z["source_event_keys"]).reshape(-1)
                  .astype(str).tolist())
     n = f.size

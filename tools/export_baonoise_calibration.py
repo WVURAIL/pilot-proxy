@@ -60,6 +60,13 @@ import sys
 
 import numpy as np
 
+sys.path.insert(
+    0, os.path.join(os.path.dirname(os.path.abspath(__file__)), os.pardir, "src")
+)
+
+from pilot_proxy.fine_reduction import calibrate_cfar, detect_any_bin
+from pilot_proxy.fxfft import fine_power_ratio_fx
+
 FINE_BINS = 256
 FINE_BIN_HZ = (390625.0 / 128.0) / 256.0
 FRAME_SECONDS = 16384.0 / 390625.0
@@ -91,18 +98,41 @@ class Channel:
         self.freq_id = int(r("freq_id")[0])
         self.atsc = int(r("physical_channel")[0])
         self.valid = r("valid").astype(bool)
-        self.fine = np.asarray(z["fine_power_ratio"], dtype=np.float64)
+        # v3 stores only the exact uint64 fine terms; form the deployed
+        # per-bin statistic with the contract function (terms axis first)
+        if "fine_power_u64" not in z or z["fine_power_u64"].size == 0:
+            raise SystemExit(
+                f"{path}: fine_power_u64 absent or empty; cannot re-derive "
+                "fine_power_ratio"
+            )
+        fine_terms = np.asarray(z["fine_power_u64"])
+        self.fine = fine_power_ratio_fx(fine_terms.transpose(1, 0, 2))
         self.n_frames = self.valid.size
         self.unit_index = r("frame_unit_index").astype(int)
         t0 = r("unit_time0_ctime").astype(float)
         self.t = t0[self.unit_index]
         self.power = r("baseband_power_linear").astype(float)
         self.detector_version = str(np.asarray(z["detector_version"]))
-        det_bin = r("fine_threshold_exceedance_bin").astype(int)
-        self.det_frac = (
-            np.bincount(det_bin, minlength=FINE_BINS).astype(float)
-            / max(self.n_frames, 1)
-        )
+        # v3 stores no CFAR products either; replay the scan-time any-bin
+        # rule per frame at the archived operating point (invalid frames
+        # have all-zero references, hence no exceedances)
+        det_counts = np.zeros(FINE_BINS, dtype=float)
+        designated = r("fine_designated_bins").astype(int)
+        excluded = r("fine_census_excluded_bins").astype(int)
+        guard = int(r("fine_guard_fine_bins")[0])
+        pad = int(r("fine_pad_factor")[0])
+        p_fa = float(r("fine_p_fa")[0])
+        for i in np.flatnonzero(self.valid):
+            cal = calibrate_cfar(
+                self.fine[i],
+                designated_bins=designated,
+                census_excluded_bins=excluded,
+                guard_fine_bins=guard,
+                pad_factor=pad,
+                p_fa=p_fa,
+            )
+            det_counts[detect_any_bin(self.fine[i], cal)] += 1.0
+        self.det_frac = det_counts / max(self.n_frames, 1)
         # line map: per-bin median of the bulk-normalized spectrum. A
         # persistent line elevates its bin's median; broadband splash
         # (whole-spectrum elevation on strong-transmitter frames)

@@ -18,6 +18,12 @@ import sys
 
 import numpy as np
 
+from pilot_proxy.fine_reduction import (
+    CFAR_DEFAULT_GUARD_FINE_BINS,
+    CFAR_DEFAULT_P_FA,
+    FINE_PAD_FACTOR,
+)
+
 REPO = pathlib.Path(__file__).resolve().parents[2]
 TOOL = REPO / "tools" / "export_baonoise_calibration.py"
 
@@ -36,18 +42,30 @@ def _write_product(path: pathlib.Path, rng: np.random.Generator) -> None:
     n_units = N_FRAMES // 4
     unit_t0 = np.where(np.arange(n_units) >= n_units // 2, T_ON, T_OFF)
     det_frames = np.flatnonzero(on)
+    # The current schema stores only the exact uint64 fine terms; encode the
+    # intended ratio pattern as 2*t/(l+u) with constant references, so the
+    # exporter's contract-function re-derivation reproduces `fine` to rounding.
+    scale = 1_000_000
+    fine_terms = np.empty((N_FRAMES, 3, 256), dtype=np.uint64)
+    fine_terms[:, 0, :] = np.round(fine * scale).astype(np.uint64)
+    fine_terms[:, 1, :] = scale
+    fine_terms[:, 2, :] = scale
+    del det_frames  # detections are replayed from the terms, not stored
     np.savez(
         path,
         freq_id=np.array([521]),
         physical_channel=np.array([35], dtype=np.int32),
         valid=np.ones((N_FRAMES, 1), dtype=np.uint8),
-        fine_power_ratio=fine.astype(np.float32),
+        fine_power_u64=fine_terms,
+        fine_designated_bins=np.array([LINE_BIN], dtype=np.int64),
+        fine_census_excluded_bins=np.array([], dtype=np.int64),
+        fine_guard_fine_bins=np.array([CFAR_DEFAULT_GUARD_FINE_BINS]),
+        fine_pad_factor=np.array([FINE_PAD_FACTOR]),
+        fine_p_fa=np.array([CFAR_DEFAULT_P_FA]),
         frame_unit_index=unit_index.astype(np.int32),
         unit_time0_ctime=unit_t0.astype(np.float64),
         baseband_power_linear=np.full((N_FRAMES, 1), 2.5),
         detector_version=np.asarray("pilot-proxy/test kernel=test K=128"),
-        fine_threshold_exceedance_frame=det_frames.astype(np.int64),
-        fine_threshold_exceedance_bin=np.full(det_frames.size, LINE_BIN, dtype=np.int64),
         unit_order=np.asarray([f"u{i}" for i in range(n_units)]),
     )
 
