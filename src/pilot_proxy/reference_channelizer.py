@@ -164,6 +164,131 @@ def complex_envelope_to_real_adc_blocks(
     return np.ascontiguousarray(out.reshape(n_blocks, block_size))
 
 
+DEFAULT_GPU_ADC_CHUNK_SAMPLES = 8_388_608
+DEFAULT_GPU_OUTPUT_CHUNK_SAMPLES = 4096
+
+
+def complex_envelope_to_real_adc_blocks_gpu(
+    iq: np.ndarray,
+    *,
+    iq_sample_rate_hz: float,
+    rf_center_hz: float,
+    adc_sample_rate_hz: float,
+    band_lower_hz: float,
+    n_blocks: int,
+    block_size: int,
+    start_adc_sample: int = 0,
+    chunk_samples: int = DEFAULT_GPU_ADC_CHUNK_SAMPLES,
+) -> np.ndarray:
+    """GPU twin of :func:`complex_envelope_to_real_adc_blocks`.
+
+    Same interpolation and mixing arithmetic evaluated with cupy; the result
+    returns to host memory, so downstream code is unchanged. Agreement with
+    the CPU path is limited only by libm-vs-CUDA trig rounding.
+    """
+    import cupy as cp
+
+    iq = np.asarray(iq, dtype=np.complex64).reshape(-1)
+    if iq.size < 2:
+        raise ValueError("iq must contain at least two complex samples.")
+    iq_sample_rate_hz = float(iq_sample_rate_hz)
+    adc_sample_rate_hz = float(adc_sample_rate_hz)
+    if iq_sample_rate_hz <= 0.0 or adc_sample_rate_hz <= 0.0:
+        raise ValueError("sample rates must be positive.")
+    n_blocks = int(n_blocks)
+    block_size = int(block_size)
+    if n_blocks <= 0 or block_size <= 0:
+        raise ValueError("n_blocks and block_size must be positive.")
+    if chunk_samples <= 0:
+        raise ValueError("chunk_samples must be positive.")
+
+    total_samples = n_blocks * block_size
+    last_source_position = (
+        (int(start_adc_sample) + total_samples - 1)
+        * iq_sample_rate_hz
+        / adc_sample_rate_hz
+    )
+    if last_source_position > iq.size - 1:
+        required = int(np.ceil(last_source_position)) + 1
+        raise ValueError(
+            "input IQ file is too short for requested PFB output: "
+            f"need at least {required} samples, got {iq.size}."
+        )
+
+    out = cp.empty(total_samples, dtype=cp.float32)
+    source_axis = cp.arange(iq.size, dtype=cp.float64)
+    source_real = cp.asarray(iq.real, dtype=cp.float32)
+    source_imag = cp.asarray(iq.imag, dtype=cp.float32)
+    adc_to_iq = iq_sample_rate_hz / adc_sample_rate_hz
+    phase_inc = FULL_CYCLE_RADIANS * (float(rf_center_hz) - float(band_lower_hz))
+    phase_inc /= adc_sample_rate_hz
+
+    for start in range(0, total_samples, int(chunk_samples)):
+        stop = min(start + int(chunk_samples), total_samples)
+        adc_indices = int(start_adc_sample) + cp.arange(start, stop, dtype=cp.float64)
+        source_pos = adc_indices * adc_to_iq
+        real = cp.interp(source_pos, source_axis, source_real)
+        imag = cp.interp(source_pos, source_axis, source_imag)
+        phase = phase_inc * adc_indices
+        out[start:stop] = (real * cp.cos(phase) - imag * cp.sin(phase)).astype(
+            cp.float32
+        )
+
+    return cp.asnumpy(out.reshape(n_blocks, block_size))
+
+
+def channelize_real_blocks_to_reference_channels_gpu(
+    blocks: np.ndarray,
+    *,
+    channel_indices: Iterable[int],
+    response: np.ndarray | None = None,
+    spec: ReferenceChannelizerSpec | None = None,
+    output_chunk_samples: int = DEFAULT_GPU_OUTPUT_CHUNK_SAMPLES,
+) -> np.ndarray:
+    """GPU twin of :func:`channelize_real_blocks_to_reference_channels`."""
+    import cupy as cp
+
+    spec = spec or ReferenceChannelizerSpec()
+    response = (
+        sinc_hamming_pfb_response(spec.n_tap, spec.n_sample)
+        if response is None
+        else np.asarray(response, dtype=np.float32)
+    )
+    if response.shape != (int(spec.n_tap), int(spec.n_sample)):
+        raise ValueError(
+            "response shape must be "
+            f"({int(spec.n_tap)}, {int(spec.n_sample)}), got {response.shape}."
+        )
+
+    blocks = np.asarray(blocks, dtype=np.float32)
+    if blocks.ndim != 2 or blocks.shape[1] != int(spec.n_sample):
+        raise ValueError(
+            "blocks must have shape (n_blocks, "
+            f"{int(spec.n_sample)}), got {blocks.shape}."
+        )
+    n_output = int(blocks.shape[0]) + 1 - int(spec.n_tap)
+    if n_output <= 0:
+        raise ValueError("blocks does not contain enough PFB blocks for one output.")
+    if output_chunk_samples <= 0:
+        raise ValueError("output_chunk_samples must be positive.")
+
+    channel_indices_arr = normalize_reference_channel_indices(channel_indices, spec)
+    rfft_bins = cp.asarray(channel_indices_arr + 1)
+    blocks_gpu = cp.asarray(blocks)
+    response_gpu = cp.asarray(response)
+    selected = cp.empty((channel_indices_arr.size, n_output), dtype=cp.complex64)
+
+    for start in range(0, n_output, int(output_chunk_samples)):
+        stop = min(start + int(output_chunk_samples), n_output)
+        ppf = cp.zeros((stop - start, int(spec.n_sample)), dtype=cp.float32)
+        for tap in range(int(spec.n_tap)):
+            ppf += blocks_gpu[start + tap : stop + tap] * response_gpu[tap][None, :]
+        spectra = cp.fft.rfft(ppf, axis=1)
+        selected[:, start:stop] = spectra[:, rfft_bins].T.astype(cp.complex64)
+
+    return cp.asnumpy(selected)
+
+
 def channelize_real_blocks_to_reference_channels(
     blocks: np.ndarray,
     *,

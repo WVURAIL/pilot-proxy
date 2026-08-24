@@ -80,7 +80,9 @@ from pilot_proxy.reference_channelizer import (  # noqa: E402
     ReferenceChannelizerSpec,
     apply_reference_archive_phase_convention,
     channelize_real_blocks_to_reference_channels,
+    channelize_real_blocks_to_reference_channels_gpu,
     complex_envelope_to_real_adc_blocks,
+    complex_envelope_to_real_adc_blocks_gpu,
     nearest_reference_channel_index,
     sinc_hamming_pfb_response,
 )
@@ -931,9 +933,20 @@ def _evaluate_one_trial(
         measured_data_shelf_power / realized_in_band_noise_power
     )
 
+    synthesis_cuda = str(getattr(args, "synthesis_backend", "cpu")) == "cuda"
+    envelope_to_blocks = (
+        complex_envelope_to_real_adc_blocks_gpu
+        if synthesis_cuda
+        else complex_envelope_to_real_adc_blocks
+    )
+    blocks_to_channels = (
+        channelize_real_blocks_to_reference_channels_gpu
+        if synthesis_cuda
+        else channelize_real_blocks_to_reference_channels
+    )
     feed_channel_streams = []
     for noisy_iq in feed_noisy_iq:
-        raw_blocks = complex_envelope_to_real_adc_blocks(
+        raw_blocks = envelope_to_blocks(
             noisy_iq,
             iq_sample_rate_hz=float(args.iq_sample_rate_hz),
             rf_center_hz=rf_center_hz,
@@ -942,7 +955,7 @@ def _evaluate_one_trial(
             n_blocks=n_blocks,
             block_size=REFERENCE_PFB_FFT_SIZE,
         )
-        channel_streams = channelize_real_blocks_to_reference_channels(
+        channel_streams = blocks_to_channels(
             raw_blocks,
             channel_indices=[channel_index],
             response=response,
@@ -1352,6 +1365,18 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--synthesis-backend",
+        choices=("cpu", "cuda"),
+        default="cpu",
+        help=(
+            "Where the reference ADC interpolation and PFB channelization "
+            "run. They dominate the trial cost, linearly in stream count; "
+            "'cuda' computes them with cupy and agrees with 'cpu' to float "
+            "rounding (pinned by a parity test). The clean-pilot guard "
+            "always runs on the cpu path."
+        ),
+    )
+    parser.add_argument(
         "--noise-trials",
         type=int,
         default=DEFAULT_NOISE_TRIALS,
@@ -1551,6 +1576,8 @@ def run(args: argparse.Namespace) -> int:
     else:
         import cupy as cp
         kernel = FStatKernel(args.lib_path)
+    if str(args.synthesis_backend) == "cuda" and cp is None:
+        import cupy  # noqa: F401
 
     output_dir = args.output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
