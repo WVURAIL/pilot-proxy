@@ -35,9 +35,44 @@ PER_PILOT_PRODUCT_SCHEMA_NAME = "pilotproxy_per_pilot_product"
 # v3 adds the per-frame PSD the analyzer already computed and discarded,
 # so a later pass can apply a new frame mask, window, or threshold to the
 # spectra instead of being limited to the two archived accumulators.
-PER_PILOT_PRODUCT_SCHEMA_REVISION = 4
+# v4 added the per-frame railed-sample counts; saturation cannot be
+# recovered later because no raw samples are stored.
+# v5 splits the archive's 0x00 missing-data fill signature out of the
+# railed count (fill_sample_count), so incomplete baseband is no longer
+# recorded as clipping. No v4 cohort was ever produced; v4 snapshots are
+# rejected like every other development snapshot.
+PER_PILOT_PRODUCT_SCHEMA_REVISION = 5
 PER_PILOT_PRODUCT_SCHEMA_TOKEN = (
     f"{PER_PILOT_PRODUCT_SCHEMA_NAME}_v{PER_PILOT_PRODUCT_SCHEMA_REVISION}"
+)
+
+# Every per-frame array the analyzer writes (length n_frames along axis 0),
+# in one authoritative place: event-keyed alignment in combine, the
+# resume/compare gate, and the deep audit all treat per-frame data by this
+# list, so a schema bump that adds a per-frame field must extend it here or
+# the field silently escapes alignment and comparison.
+PER_FRAME_PRODUCT_KEYS = (
+    "frame_index",
+    "p_target_u64",
+    "p_ref_sum_u64",
+    "p_ref_lower_u64",
+    "p_ref_upper_u64",
+    "coarse_power_ratio",
+    "normalized_coarse_power_ratio_db",
+    "pilot_excess_db",
+    "estimated_data_shelf_snr_db",
+    "normalized_pilot_excess",
+    "reject_mask",
+    "valid",
+    "baseband_power_linear",
+    "railed_sample_count",
+    "fill_sample_count",
+    "railed_sample_total",
+    "fine_power_u64",
+    "psd_frame_db_i16",
+    "psd_db_reference",
+    "frame_unit_index",
+    "frame_in_unit",
 )
 # Per-frame PSD encoding: int16 codes at 0.01 dB per step about a
 # per-frame reference. The sentinel marks a frame that never reached the
@@ -278,7 +313,11 @@ def validate_current_product_identity(
             "unsupported per-pilot product identity: "
             f"schema_name={schema_name!r}, schema_revision={schema_revision!r}, "
             f"schema_version={schema_token!r}; delete the product and regenerate "
-            "it with the current PilotProxy release"
+            "it with the current PilotProxy release. A checkpoint from an older "
+            "schema cannot be resumed here: the per-frame railed/fill counts "
+            "are taken from raw samples the product does not retain, so they "
+            "cannot be backfilled -- finish that cohort on the release that "
+            "started it, or rebuild from the archive"
         )
 
     event_key_schema = _exact_string_scalar(
@@ -334,6 +373,7 @@ def validate_current_product_identity(
         "normalized_pilot_excess",
         "baseband_power_linear",
         "railed_sample_count",
+        "fill_sample_count",
         "railed_sample_total",
         "integrated_spectrum_before_mask",
         "integrated_spectrum_after_mask",
@@ -397,7 +437,7 @@ def validate_current_product_identity(
     exact_integer_scalar(
         product, "detector_window_samples", dtype=np.int64, minimum=1
     )
-    exact_integer_scalar(
+    num_input_streams = exact_integer_scalar(
         product, "num_input_streams", dtype=np.int64, minimum=1
     )
     sense = exact_integer_scalar(
@@ -636,11 +676,12 @@ def validate_current_product_identity(
                 f"({frame_count}, 1)"
             )
         exact_flags[field] = values
-    # ADC/F-engine saturation, counted from the raw int4 nibbles while the frame
-    # was in hand. The product stores no raw samples, so an absent or wrong count
-    # cannot be repaired later; validate it here rather than trusting the writer.
+    # ADC/F-engine saturation and 0x00 fill, counted from the raw int4 nibbles
+    # while the frame was in hand. The product stores no raw samples, so an
+    # absent or wrong count cannot be repaired later; validate it here rather
+    # than trusting the writer.
     railed: dict[str, np.ndarray] = {}
-    for field in ("railed_sample_count", "railed_sample_total"):
+    for field in ("railed_sample_count", "fill_sample_count", "railed_sample_total"):
         values = exact_integer_array(
             product[field],
             field=field,
@@ -653,11 +694,34 @@ def validate_current_product_identity(
                 f"({frame_count}, 1)"
             )
         railed[field] = values
-    if np.any(railed["railed_sample_count"] > railed["railed_sample_total"]):
+    if np.any(
+        railed["railed_sample_count"] + railed["fill_sample_count"]
+        > railed["railed_sample_total"]
+    ):
         raise CurrentProductContractError(
-            "current per-pilot railed_sample_count exceeds railed_sample_total; "
-            "the saturation counter and its denominator disagree"
+            "current per-pilot railed_sample_count + fill_sample_count exceeds "
+            "railed_sample_total; the saturation counters and their denominator "
+            "disagree"
         )
+    expected_total = np.uint64(2 * nfft * num_input_streams)
+    if np.any(railed["railed_sample_total"] != expected_total):
+        raise CurrentProductContractError(
+            "current per-pilot railed_sample_total does not equal "
+            "2 * nfft * num_input_streams "
+            f"({int(expected_total)}); the denominator no longer describes the "
+            "frame it was counted from"
+        )
+    for field in PER_FRAME_PRODUCT_KEYS:
+        if field not in product:
+            raise CurrentProductContractError(
+                f"current per-pilot product is missing per-frame field {field!r}"
+            )
+        values = np.asarray(product[field])
+        if values.ndim == 0 or int(values.shape[0]) != frame_count:
+            raise CurrentProductContractError(
+                f"current per-pilot per-frame field {field!r} does not have "
+                f"{frame_count} frames along axis 0"
+            )
     for field, minimum in (
         ("coarse_power_ratio", 0.0),
         ("normalized_coarse_power_ratio_db", None),

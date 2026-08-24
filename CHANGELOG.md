@@ -3,6 +3,24 @@
 All notable changes to PilotProxy are recorded here. The project follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Per-pilot product schema v5 --- railed and fill counts per frame
+
+`chime-scan` now records `railed_sample_count` and `fill_sample_count` per
+frame against a shared `railed_sample_total = 2 * nfft * streams`. A 4-bit
+component on either rail (nibble 0 or 15) has been clipped by the ADC or the
+F-engine requantizer rather than measured; the `0x00` byte is the archive's
+missing-data fill signature and is tallied separately, so a frame partially
+overlapping absent baseband is not misrecorded as saturated. Neither count can
+be recovered later because no raw samples are stored.
+
+Schema v4 (railed counts without the fill split) existed for one day and no
+cohort was produced with it; v4 snapshots are rejected like any other
+development snapshot.
+
+Measured on real CHIME baseband (freq_id 506): median 795 railed of 67,108,864
+components per frame (0.0012%), worst frame 18,948 (0.028%).
+
+
 ## Per-pilot product schema v3 --- retain the per-frame PSD
 
 `chime-scan` now records `psd_frame_db_i16`, the per-frame power spectrum with

@@ -68,9 +68,15 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     scalar = lambda k: g(k).reshape(()).item() if g(k).size == 1 else g(k).reshape(-1)[0]
 
     # ---- provenance -------------------------------------------------------
+    # Historic cohorts stay auditable: v3 (the pre-flight and any archive
+    # cohort scanned before the railed/fill counts existed) and the current
+    # token are both accepted; the railed audit below applies only where the
+    # fields exist.
+    known_schemas = ("pilotproxy_per_pilot_product_v3",
+                     PER_PILOT_PRODUCT_SCHEMA_TOKEN)
     sv = str(scalar("schema_version"))
     dv = str(scalar("detector_version"))
-    a.check(sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN, f"schema_version={sv}")
+    a.check(sv in known_schemas, f"schema_version={sv}")
     a.check(json.loads(str(scalar("decision_contract_json"))) == current_decision_contract(),
             "decision_contract_json")
     # kernel core 2.x family: additive minor bumps (2.0.0 survey cohort,
@@ -78,7 +84,7 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     # must still fail this check loudly. Cohort binary hashes are pinned
     # in the run ledger, not here.
     a.check(re.search(r"kernel=2\.\d+\.\d+", dv) is not None and "K=128" in dv
-            and PER_PILOT_PRODUCT_SCHEMA_TOKEN in dv,
+            and sv in dv,
             "detector_version tokens")
     src = next((t[len("source="):][:12] for t in dv.split() if t.startswith("source=")), "?")
     a.check(str(scalar("mask_rule")) == NORMALIZED_POSITIVE_EXCESS_MASK_RULE, "mask_rule string")
@@ -119,9 +125,26 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
                  "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
                  "baseband_power_linear", "frame_index", "frame_unit_index",
                  "frame_in_unit", "normalized_pilot_excess"]
+    if sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN:
+        per_frame += ["railed_sample_count", "fill_sample_count",
+                      "railed_sample_total"]
     for k in per_frame:
         a.check(r(k).size == n, f"len({k})=={n}")
     a.check(np.array_equal(r("frame_index"), np.arange(n)), "frame_index == arange")
+
+    # ---- railed/fill counts (current schema only) ------------------------
+    # Counted from raw samples the product does not retain, so a wrong value
+    # is unrepairable; audit the full invariant set, not just presence.
+    if sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN:
+        rc = r("railed_sample_count"); fc = r("fill_sample_count")
+        rt = r("railed_sample_total")
+        a.check(rc.dtype == fc.dtype == rt.dtype == np.uint64,
+                "railed/fill u64 dtypes")
+        a.check(bool(np.all(rc + fc <= rt)),
+                "railed_sample_count + fill_sample_count <= railed_sample_total")
+        expected_total = 2 * int(scalar("nfft")) * int(scalar("num_input_streams"))
+        a.check(bool(np.all(rt == np.uint64(expected_total))),
+                f"railed_sample_total == 2*nfft*streams ({expected_total})")
 
     # ---- exact integer contract ------------------------------------------
     pt = r("p_target_u64"); pr = r("p_ref_sum_u64")
@@ -156,15 +179,20 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     ff = g("fine_power_u64")
     a.check(ff.shape == (n, 3, bins), f"fine_power_u64 shape {ff.shape}")
     a.check(ff.dtype == np.uint64, f"fine_power_u64 dtype {ff.dtype}")
-    a.check(bool(np.all(ff[v] > 0)) if v.any() else True,
-            "fine reference terms are non-zero on valid frames")
+    # The writer guarantees no per-bin positivity (valid only means the coarse
+    # p_ref_sum is non-zero), so audit the frame totals rather than every bin
+    # of every term: a valid frame with zero fine power everywhere is corrupt.
+    a.check(bool(np.all(ff[v].sum(axis=(1, 2)) > 0)) if v.any() else True,
+            "fine terms carry power on valid frames")
     # The deployed ratio is a post-processing quantity; check it is recoverable
-    # from what is stored rather than expecting a stored column.
+    # from what is stored rather than expecting a stored column. Bins whose
+    # reference pair sums to zero are legitimately undefined, not corrupt.
+    denom = ff[:, 1, :].astype(np.float64) + ff[:, 2, :].astype(np.float64)
     with np.errstate(divide="ignore", invalid="ignore"):
-        fine_ratio = (2.0 * ff[:, 0, :].astype(np.float64)
-                      / (ff[:, 1, :].astype(np.float64) + ff[:, 2, :].astype(np.float64)))
-    a.check(bool(np.all(np.isfinite(fine_ratio[v]))) if v.any() else True,
-            "fine ratio recomputable and finite on valid frames")
+        fine_ratio = 2.0 * ff[:, 0, :].astype(np.float64) / denom
+    a.check(bool(np.all(np.isfinite(fine_ratio[v]) | (denom[v] == 0)))
+            if v.any() else True,
+            "fine ratio recomputable wherever its references are non-zero")
     a.check(str(scalar("decision_contract_json")).strip().startswith("{"),
             "decision_contract_json present for exact replay")
 

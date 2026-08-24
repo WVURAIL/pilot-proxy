@@ -18,24 +18,40 @@ on any failure so it can gate a script. Per-pilot products live in
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
 import numpy as np
 
-from pilot_proxy.product_contract import PER_PILOT_PRODUCT_SCHEMA_TOKEN
+from pilot_proxy.product_contract import (
+    PER_FRAME_PRODUCT_KEYS,
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+)
 
-SCHEMA = PER_PILOT_PRODUCT_SCHEMA_TOKEN
-PER_FRAME = ("frame_index", "p_target_u64", "p_ref_sum_u64", "coarse_power_ratio",
-             "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db", "valid",
-             "reject_mask", "baseband_power_linear", "frame_unit_index",
-             "frame_in_unit")
+# Historic cohorts stay checkable: the gate accepts the schema tokens whose
+# products exist on disk and knows which per-frame fields each one carries.
+# The per-frame list is the product contract's, not a second hand-kept copy.
+_V5_ONLY = ("railed_sample_count", "fill_sample_count", "railed_sample_total")
+KNOWN_SCHEMAS = {
+    "pilotproxy_per_pilot_product_v3": tuple(
+        k for k in PER_FRAME_PRODUCT_KEYS if k not in _V5_ONLY
+    ),
+    PER_PILOT_PRODUCT_SCHEMA_TOKEN: PER_FRAME_PRODUCT_KEYS,
+}
 PER_UNIT = ("unit_order", "unit_time0_ctime", "unit_time0_fpga", "unit_event_id",
             "unit_delta_time", "archive_version")
-COMPARE_EXACT = ("p_target_u64", "p_ref_sum_u64", "reject_mask", "valid",
-                 "frame_index", "frame_unit_index", "frame_in_unit", "source_event_keys",
-                 "unit_time0_ctime", "unit_time0_fpga", "unit_event_id",
-                 "unit_delta_time", "archive_version")
+# Exact bit-equality across a kill/resume. Integer-exact per-frame fields are
+# filtered to the schema the products carry; a field the schema requires but a
+# side lacks is a failure, never a silent skip.
+COMPARE_FRAME_EXACT = ("frame_index", "p_target_u64", "p_ref_sum_u64",
+                       "p_ref_lower_u64", "p_ref_upper_u64", "reject_mask",
+                       "valid", "frame_unit_index", "frame_in_unit",
+                       "fine_power_u64", "psd_frame_db_i16",
+                       "railed_sample_count", "fill_sample_count",
+                       "railed_sample_total")
+COMPARE_UNIT_EXACT = ("source_event_keys", "unit_time0_ctime", "unit_time0_fpga",
+                      "unit_event_id", "unit_delta_time", "archive_version")
 
 
 class Report:
@@ -78,15 +94,17 @@ def _per_pilot_paths(run: Path):
 def check_per_pilot(path: Path, r: Report):
     print(f"\n--- per-pilot {path.name} ---")
     z = np.load(path)
-    if not r.check(str(_scalar(z, "schema_version")) == SCHEMA,
-                   f"schema_version == {SCHEMA}"):
+    token = str(_scalar(z, "schema_version"))
+    if not r.check(token in KNOWN_SCHEMAS,
+                   f"schema_version known ({token})"):
         return None
-    missing = [k for k in PER_FRAME + PER_UNIT if k not in z.files]
-    r.check(not missing, "all current product fields present"
+    per_frame = KNOWN_SCHEMAS[token]
+    missing = [k for k in per_frame + PER_UNIT if k not in z.files]
+    r.check(not missing, f"all {token} product fields present"
             + (f" (missing {missing})" if missing else ""))
 
-    # per-frame arrays all the same length
-    lens = {k: _1d(z, k).size for k in PER_FRAME if k in z.files}
+    # per-frame arrays all the same length along axis 0
+    lens = {k: int(np.asarray(z[k]).shape[0]) for k in per_frame if k in z.files}
     n = lens.get("frame_index", 0)
     r.check(len(set(lens.values())) == 1,
             f"per-frame arrays aligned (n_frames={n}; {sorted(set(lens.values()))})")
@@ -154,11 +172,36 @@ def check_per_pilot(path: Path, r: Report):
             "before": before, "path": path}
 
 
+def _terminal_combine_skipped(run: Path):
+    """Return the recorded refusal class when the scan soft-failed the combine.
+
+    The scan writes a ``terminal_combine`` entry into ``scan_scope.json``; a
+    recorded skip makes missing combined products the documented outcome of a
+    successful scan rather than a failure. Runs predating the record (or a
+    crash before the combine) carry no entry and stay failures.
+    """
+    scope = run / "scan_scope.json"
+    if not scope.is_file():
+        return None
+    try:
+        entry = json.loads(scope.read_text()).get("terminal_combine")
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(entry, dict) and entry.get("status") == "skipped":
+        return str(entry.get("error", "unknown"))
+    return None
+
+
 def check_combined(run: Path, per: list, r: Report):
     print("\n--- combined products ---")
     det = run / "chime_detector_outputs.npz"
-    r.check(det.exists(), "chime_detector_outputs.npz present")
     spec_path = run / "chime_integrated_spectra.npz"
+    skipped = _terminal_combine_skipped(run)
+    if skipped and not det.exists() and not spec_path.exists():
+        r.warning(f"terminal combine recorded as skipped ({skipped}); "
+                  "no combined products expected")
+        return
+    r.check(det.exists(), "chime_detector_outputs.npz present")
     if not r.check(spec_path.exists(), "chime_integrated_spectra.npz present"):
         return
     s = np.load(spec_path)
@@ -212,6 +255,10 @@ def cmd_compare(dir_a: str, dir_b: str) -> int:
     for fid in sorted(pa, key=int):
         print(f"\n--- freq_id {fid} ---")
         za, zb = np.load(pa[fid]), np.load(pb[fid])
+        ta, tb = str(_scalar(za, "schema_version")), str(_scalar(zb, "schema_version"))
+        if not r.check(ta == tb and ta in KNOWN_SCHEMAS,
+                       f"schema tokens equal and known ({ta} vs {tb})"):
+            continue
         na, nb = _1d(za, "frame_index").size, _1d(zb, "frame_index").size
         ua, ub = _1d(za, "unit_order").size, _1d(zb, "unit_order").size
         tot_a += na
@@ -219,11 +266,20 @@ def cmd_compare(dir_a: str, dir_b: str) -> int:
         # the headline: no double-count, no loss
         r.check(na == nb, f"n_frames equal (clean={na}, resumed={nb})")
         r.check(ua == ub, f"n_units equal (clean={ua}, resumed={ub})")
-        for k in COMPARE_EXACT:
-            if k in za.files and k in zb.files:
-                xa, xb = _1d(za, k), _1d(zb, k)
-                same = xa.shape == xb.shape and np.array_equal(xa, xb)
-                (r.ok if same else r.bad)(f"{k} identical")
+        schema_frame = KNOWN_SCHEMAS[ta]
+        required = tuple(
+            k for k in COMPARE_FRAME_EXACT if k in schema_frame
+        ) + COMPARE_UNIT_EXACT
+        for k in required:
+            if k not in za.files or k not in zb.files:
+                r.bad(f"{k} missing from "
+                      + ("both runs" if k not in za.files and k not in zb.files
+                         else "the clean run" if k not in za.files
+                         else "the resumed run"))
+                continue
+            xa, xb = np.asarray(za[k]), np.asarray(zb[k])
+            same = xa.shape == xb.shape and np.array_equal(xa, xb)
+            (r.ok if same else r.bad)(f"{k} identical")
         # spectra: same GPU backend + same frame order -> ~bit-identical
         ba = _1d(za, "integrated_spectrum_before_mask")
         bb = _1d(zb, "integrated_spectrum_before_mask")

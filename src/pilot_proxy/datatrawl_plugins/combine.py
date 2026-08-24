@@ -66,6 +66,7 @@ from pilot_proxy.provenance import (
     file_sha256,
 )
 from pilot_proxy.product_contract import (
+    PER_FRAME_PRODUCT_KEYS,
     null_power_ratio_of,
     CurrentProductContractError,
     exact_integer_array,
@@ -267,11 +268,20 @@ def _write_json(path: Path, obj: Any) -> None:
     Path(path).write_text(json.dumps(obj, indent=2, sort_keys=True), encoding="utf-8")
 
 
-class CombineEmptyIntersectionError(ValueError):
+class CombineIntegrityError(ValueError):
+    """The per-pilot products are intact but cannot be stacked as handed over.
+
+    Base for every condition combine's validation pass raises about the
+    products themselves, so the scan layer can soft-fail the optional terminal
+    combine as one family instead of enumerating members.
+    """
+
+
+class CombineEmptyIntersectionError(CombineIntegrityError):
     """No (event, frame) identity is shared by every product handed to combine."""
 
 
-class CombineDuplicateIdentityError(ValueError):
+class CombineDuplicateIdentityError(CombineIntegrityError):
     """One product carries the same (event, frame) identity more than once.
 
     Frame identity here is ``(source_event_key, frame_in_unit)`` -- deliberately
@@ -299,15 +309,12 @@ def _label(z: Mapping[str, Any]) -> str:
     return f"ch{ch}/freq_id {fid}"
 
 
-# Every per-frame array the analyzer writes (length n_frames along axis 0).
-# Event-keyed alignment gathers exactly these; everything else in a product is
-# per-pilot (scalars), per-unit (time/provenance axes), or per-bin (spectra).
-_PER_FRAME_KEYS = (
-    "frame_index", "p_target_u64", "p_ref_sum_u64", "coarse_power_ratio",
-    "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db", "normalized_pilot_excess",
-    "reject_mask", "valid", "baseband_power_linear",
-    "frame_unit_index", "frame_in_unit",
-)
+# Every per-frame array the analyzer writes (length n_frames along axis 0),
+# from the product contract's single authoritative list, so a schema bump that
+# adds a per-frame field is aligned here without a second hand-kept copy.
+# Everything else in a product is per-pilot (scalars), per-unit
+# (time/provenance axes), or per-bin (spectra).
+_PER_FRAME_KEYS = PER_FRAME_PRODUCT_KEYS
 
 
 def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:

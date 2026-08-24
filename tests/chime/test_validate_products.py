@@ -97,8 +97,6 @@ def _write_products(
     np.savez_compressed(
         run_dir / "chime_spectrogram_cache.npz",
         baseband_power_linear=baseband,
-        railed_sample_count=baseband,
-        railed_sample_total=baseband,
         baseband_power_db=10.0 * np.log10(baseband),
         mask=cache_mask,
         valid=valid,

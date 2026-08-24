@@ -18,8 +18,8 @@ from pilot_proxy.product_contract import (
 
 def test_current_product_schema_identity_is_structured() -> None:
     assert PER_PILOT_PRODUCT_SCHEMA_NAME == "pilotproxy_per_pilot_product"
-    assert PER_PILOT_PRODUCT_SCHEMA_REVISION == 4
-    assert PER_PILOT_PRODUCT_SCHEMA_TOKEN == "pilotproxy_per_pilot_product_v4"
+    assert PER_PILOT_PRODUCT_SCHEMA_REVISION == 5
+    assert PER_PILOT_PRODUCT_SCHEMA_TOKEN == "pilotproxy_per_pilot_product_v5"
 
 
 def test_decision_contract_distinguishes_active_diagnostic_and_candidate() -> None:

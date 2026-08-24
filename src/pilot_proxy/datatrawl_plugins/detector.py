@@ -162,13 +162,28 @@ def _unpack_4bit_xp(xp, packed):
     return (real + 1j * imag).astype(xp.complex64)
 
 
-def railed_component_count(packed: np.ndarray) -> int:
-    """Count 4-bit components sitting on either rail of the offset-binary grid.
+# Rails per packed byte, indexed by the uint8 value. A nibble of 0 or 15 is
+# signed -8 or +7, the ends of the int4 range. The 0x00 byte is excluded: it is
+# also the archive's missing-data fill signature, so its components are tallied
+# as fill rather than clipping (a genuinely doubly-negative-railed sample is
+# indistinguishable from fill and lands in the fill count).
+_PACKED_BYTE = np.arange(256, dtype=np.uint16)
+_RAILS_PER_BYTE = (
+    np.isin(_PACKED_BYTE >> 4, (0, 15)).astype(np.uint8)
+    + np.isin(_PACKED_BYTE & 0x0F, (0, 15)).astype(np.uint8)
+)
+_RAILS_PER_BYTE[0] = 0
+
+
+def railed_component_count(packed: np.ndarray) -> tuple[int, int]:
+    """Count components on the int4 rails, and components in 0x00 fill bytes.
 
     A nibble of 0 or 15 is signed -8 or +7, the ends of the int4 range, so a
     sample there has been clipped by the ADC or the F-engine requantizer rather
-    than measured. Real and imaginary parts are counted separately, giving a
-    denominator of ``2 * packed.size``.
+    than measured -- unless the whole byte is 0x00, the archive's missing-data
+    fill signature, which is returned as the separate fill count. Real and
+    imaginary parts are counted separately, giving a shared denominator of
+    ``2 * packed.size``.
 
     This has to be recorded while the frame is in hand: the product stores no
     raw samples (5.8 MB against 8.0 GB for one channel of the pre-flight), so a
@@ -176,15 +191,10 @@ def railed_component_count(packed: np.ndarray) -> int:
     ``baseband_power_linear == 128`` only catches a frame that is railed
     everywhere; partial saturation is invisible without this.
     """
-    packed = np.asarray(packed, dtype=np.uint8)
-    real = packed >> 4
-    imag = packed & np.uint8(0x0F)
-    return int(
-        np.count_nonzero(real == 0)
-        + np.count_nonzero(real == 15)
-        + np.count_nonzero(imag == 0)
-        + np.count_nonzero(imag == 15)
-    )
+    packed = np.asarray(packed, dtype=np.uint8).reshape(-1)
+    fill = 2 * int(np.count_nonzero(packed == 0))
+    railed = int(_RAILS_PER_BYTE[packed].sum(dtype=np.uint64))
+    return railed, fill
 
 
 def _to_host(a) -> np.ndarray:
@@ -551,6 +561,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._valid: list[int] = []
         self._baseband_power: list[float] = []
         self._railed_count: list[int] = []
+        self._fill_count: list[int] = []
         self._railed_total: list[int] = []
         self._overflow = 0
         self._n_frames = 0
@@ -780,6 +791,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._valid = [int(x) for x in _col("valid")]
         self._baseband_power = [float(x) for x in _col("baseband_power_linear")]
         self._railed_count = [int(x) for x in _col("railed_sample_count")]
+        self._fill_count = [int(x) for x in _col("fill_sample_count")]
         self._railed_total = [int(x) for x in _col("railed_sample_total")]
         self._frame_unit_index = [int(x) for x in _col("frame_unit_index")]
         self._frame_in_unit = [int(x) for x in _col("frame_in_unit")]
@@ -1348,6 +1360,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "_valid",
             "_baseband_power",
             "_railed_count",
+            "_fill_count",
             "_railed_total",
             "_frame_unit_index",
             "_frame_in_unit",
@@ -1417,7 +1430,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     "chime-scan`, or pass `--reader chime-baseband-packed` "
                     "when driving datatrawl directly."
                 )
-            railed_count = railed_component_count(arr)
+            railed_count, fill_count = railed_component_count(arr)
             railed_total = 2 * int(arr.size)
             chunk_streams = int(arr.shape[1])
             if self._num_input_streams == 0:
@@ -1447,6 +1460,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 # Saturation is a property of the raw samples, so it is
                 # recorded even for a frame the detector cannot use.
                 self._railed_count.append(int(railed_count))
+                self._fill_count.append(int(fill_count))
                 self._railed_total.append(int(railed_total))
                 self._ensure_fine_width(
                     fine_bin_count(int(self._nfft) // int(self._K))
@@ -1629,6 +1643,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 )
                 self._baseband_power.append(bp)
                 self._railed_count.append(int(railed_count))
+                self._fill_count.append(int(fill_count))
                 self._railed_total.append(int(railed_total))
                 self._frame_unit_index.append(unit_idx)
                 self._frame_in_unit.append(chunk_in_unit)
@@ -1789,9 +1804,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             valid=col_u(self._valid, np.uint8),
             # --- per-frame power + integrated spectra (rectangular window) ---
             baseband_power_linear=col_f(self._baseband_power),
-            # ADC/F-engine saturation, counted while the frame was in hand;
-            # unrecoverable afterwards because no raw samples are stored.
+            # ADC/F-engine saturation and 0x00 fill, counted while the frame
+            # was in hand; unrecoverable afterwards because no raw samples are
+            # stored. Both share the railed_sample_total denominator.
             railed_sample_count=col_u(self._railed_count, np.uint64),
+            fill_sample_count=col_u(self._fill_count, np.uint64),
             railed_sample_total=col_u(self._railed_total, np.uint64),
             # Per-frame PSD, feeds summed, int16 dB about psd_db_reference.
             # Decode: psd_db_reference * 10 ** (codes / 1000.0).
