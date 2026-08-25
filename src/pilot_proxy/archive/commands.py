@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -373,6 +374,7 @@ def run_chime_control_scan(
     source_event_regex: str | None = None,
     max_files: int | None = None,
     max_frames_per_file: int | None = None,
+    frame_batch_size: int = 1,
     checkpoint_every: int = pipeline.DEFAULT_CHECKPOINT_EVERY,
     tmp_dir: str | Path | None = None,
     quarantine: str | Path | None = None,
@@ -383,6 +385,15 @@ def run_chime_control_scan(
 ) -> list[Path]:
     """Run one resumable control product per selected CHIME channel."""
     from .control import ControlBandAnalyzer
+
+    if (
+        isinstance(frame_batch_size, bool)
+        or not isinstance(frame_batch_size, Integral)
+        or frame_batch_size < 1
+    ):
+        raise SystemExit(
+            "chime-control-scan: --frame-batch-size must be a positive integer"
+        )
 
     for label, value in (
         ("--max-files", max_files),
@@ -399,6 +410,7 @@ def run_chime_control_scan(
         inventory_name=inventory_name,
     )
     options = dict(analyzer_options or {})
+    options["frame_batch_size"] = int(frame_batch_size)
     if max_frames_per_file is not None:
         options["max_frames_per_file"] = int(max_frames_per_file)
     src, options, inventory_path = _source_context(

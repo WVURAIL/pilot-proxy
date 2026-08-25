@@ -227,6 +227,7 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
         self._f_center: Optional[float] = None
         self._freq_id = -1
         self._max_frames = -1                    # per-file cap stamp (-1 = none)
+        self._frame_batch_size = 1
         self._xp = np
         self._resumed = False
 
@@ -239,8 +240,13 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
         return [[ch] for ch in self.resolve_selection(ctx, spec)]
 
     def resume_parameters(self, ctx: RunContext) -> Mapping[str, Any]:
-        """All options except ``gpu``: CuPy-vs-NumPy does not change meaning."""
-        return {k: v for k, v in dict(ctx.options or {}).items() if k != "gpu"}
+        """Exclude execution settings that do not change the product."""
+        execution_settings = {"gpu", "frame_batch_size"}
+        return {
+            k: v
+            for k, v in dict(ctx.options or {}).items()
+            if k not in execution_settings
+        }
 
     # -- small shared lookups -------------------------------------------------
     @staticmethod
@@ -256,6 +262,25 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
     def _run_cap(ctx: RunContext) -> int:
         v = (ctx.options or {}).get("max_frames_per_file")
         return int(v) if v else -1
+
+    @staticmethod
+    def _batch_size(ctx: RunContext) -> int:
+        value = (ctx.options or {}).get("frame_batch_size", 1)
+        if isinstance(value, bool):
+            raise ValueError(
+                "pilot-proxy-control: frame_batch_size must be a positive integer"
+            )
+        try:
+            batch_size = int(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "pilot-proxy-control: frame_batch_size must be a positive integer"
+            ) from exc
+        if batch_size < 1 or batch_size != value:
+            raise ValueError(
+                "pilot-proxy-control: frame_batch_size must be a positive integer"
+            )
+        return batch_size
 
     @staticmethod
     def _expected_center_hz(ctx: RunContext, freq_id: Optional[int]):
@@ -280,6 +305,7 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
 
     # -- lifecycle ------------------------------------------------------------
     def begin(self, ctx: RunContext, first_meta: Mapping[str, Any]) -> None:
+        self._frame_batch_size = self._batch_size(ctx)
         if (ctx.options or {}).get("gpu"):
             from pilot_proxy.archive import accel
             self._xp = accel.get_array_module(True)
@@ -331,8 +357,94 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
         self._n_feeds = int(n_feeds)
         self._spectrum_sum = np.zeros(self._nfft, dtype=np.float64)
 
-    def consume_file(self, arrays: Iterable, meta: Mapping[str, Any]) -> int:
+    def _prepare_frame(self, frame: Any, meta: Mapping[str, Any]):
+        frame = self._xp.asarray(frame)
+        if self._spectrum_sum is None:
+            self._size_to(frame.shape[0], frame.shape[1] if frame.ndim > 1 else 1)
+        if frame.shape[0] != self._nfft:
+            return None
+        feeds = int(frame.shape[1]) if frame.ndim > 1 else 1
+        if feeds != self._n_feeds:
+            raise ValueError(
+                "pilot-proxy-control: feed count changed within a product "
+                f"({feeds} != {self._n_feeds}) at "
+                f"{meta.get('unit_name', '?')}; refusing to average "
+                "incompatible frames into one product."
+            )
+        return frame
+
+    def _consume_frame(self, frame: Any, unit_idx: int, frame_idx: int) -> None:
         xp = self._xp
+        spec = xp.fft.fft(frame, axis=0)
+        power_bins = spec.real ** 2 + spec.imag ** 2
+        if power_bins.ndim > 1:
+            power_bins = power_bins.mean(axis=tuple(range(1, power_bins.ndim)))
+        host_bins = power_bins if xp is np else xp.asnumpy(power_bins)
+        self._spectrum_sum += host_bins.astype(np.float64)
+        self._spectrum_count += 1
+
+        self._marginal.append(
+            coarse_marginal(frame, DETECTOR_WINDOW_SAMPLES, xp=xp)
+        )
+        self._power.append(band_power(frame if xp is np else xp.asnumpy(frame)))
+        self._frame_unit_index.append(unit_idx)
+        self._frame_in_unit.append(frame_idx)
+
+    def _consume_batch(
+        self,
+        frames: list[Any],
+        unit_idx: int,
+        first_frame_idx: int,
+    ) -> None:
+        if len(frames) == 1:
+            self._consume_frame(frames[0], unit_idx, first_frame_idx)
+            return
+
+        xp = self._xp
+        batch_count = len(frames)
+        stacked = xp.stack(frames, axis=0)
+        frames.clear()
+        spectra = xp.fft.fft(stacked, axis=1)
+        spectrum_power = spectra.real ** 2 + spectra.imag ** 2
+
+        for offset in range(batch_count):
+            power_bins = spectrum_power[offset]
+            if power_bins.ndim > 1:
+                power_bins = power_bins.mean(
+                    axis=tuple(range(1, power_bins.ndim))
+                )
+            host_bins = power_bins if xp is np else xp.asnumpy(power_bins)
+            self._spectrum_sum += host_bins.astype(np.float64)
+            self._spectrum_count += 1
+        del spectra, spectrum_power, power_bins, host_bins
+
+        nfft = int(stacked.shape[1])
+        windows = stacked.reshape(
+            batch_count,
+            nfft // DETECTOR_WINDOW_SAMPLES,
+            DETECTOR_WINDOW_SAMPLES,
+            -1,
+        ).astype(xp.complex128)
+        marginal_spectra = xp.fft.fft(windows, axis=2)
+        marginal_power = (
+            marginal_spectra.real ** 2 + marginal_spectra.imag ** 2
+        )
+
+        for offset in range(batch_count):
+            marginal = marginal_power[offset].mean(axis=(0, 2))
+            host_marginal = marginal if xp is np else xp.asnumpy(marginal)
+            self._marginal.append(host_marginal.astype(np.float64))
+            self._power.append(
+                band_power(
+                    stacked[offset]
+                    if xp is np
+                    else xp.asnumpy(stacked[offset])
+                )
+            )
+            self._frame_unit_index.append(unit_idx)
+            self._frame_in_unit.append(first_frame_idx + offset)
+
+    def consume_file(self, arrays: Iterable, meta: Mapping[str, Any]) -> int:
         try:
             file_center = self._file_center_hz(
                 meta.get("f_center_hz"),
@@ -349,35 +461,36 @@ class ControlBandAnalyzer(AccumulatingAnalyzer):
 
         unit_idx = len(self._keys)
         n = 0
-        for frame in arrays:
-            frame = xp.asarray(frame)
-            if self._spectrum_sum is None:
-                self._size_to(frame.shape[0], frame.shape[1] if frame.ndim > 1 else 1)
-            if frame.shape[0] != self._nfft:              # ragged frame -> skip
-                continue
-            feeds = int(frame.shape[1]) if frame.ndim > 1 else 1
-            if feeds != self._n_feeds:
-                raise ValueError(
-                    "pilot-proxy-control: feed count changed within a product "
-                    f"({feeds} != {self._n_feeds}) at "
-                    f"{meta.get('unit_name', '?')}; refusing to average "
-                    "incompatible frames into one product.")
+        pending: list[Any] = []
+        pending_signature = None
 
-            spec = xp.fft.fft(frame, axis=0)              # rectangular, full res
-            power_bins = spec.real ** 2 + spec.imag ** 2
-            if power_bins.ndim > 1:
-                power_bins = power_bins.mean(axis=tuple(range(1, power_bins.ndim)))
-            host_bins = power_bins if xp is np else xp.asnumpy(power_bins)
-            self._spectrum_sum += host_bins.astype(np.float64)
-            self._spectrum_count += 1
+        def flush() -> None:
+            nonlocal n, pending_signature
+            if not pending:
+                return
+            batch = list(pending)
+            pending.clear()
+            pending_signature = None
+            batch_count = len(batch)
+            self._consume_batch(batch, unit_idx, n)
+            n += batch_count
 
-            self._marginal.append(coarse_marginal(
-                frame, DETECTOR_WINDOW_SAMPLES, xp=xp))
-            self._power.append(band_power(
-                frame if xp is np else xp.asnumpy(frame)))
-            self._frame_unit_index.append(unit_idx)
-            self._frame_in_unit.append(n)
-            n += 1
+        try:
+            for raw_frame in arrays:
+                frame = self._prepare_frame(raw_frame, meta)
+                if frame is None:
+                    continue
+                signature = (tuple(frame.shape), str(frame.dtype))
+                if pending and signature != pending_signature:
+                    flush()
+                pending_signature = signature
+                pending.append(frame)
+                if len(pending) >= self._frame_batch_size:
+                    flush()
+        except BaseException:
+            flush()
+            raise
+        flush()
 
         if n:
             # A unit is resumably complete only if a frame actually contributed.

@@ -359,6 +359,7 @@ def _cmd_chime_control_scan(args: argparse.Namespace) -> None:
         source_event_regex=args.source_event_regex,
         max_files=args.max_files,
         max_frames_per_file=args.max_frames_per_file,
+        frame_batch_size=args.frame_batch_size,
         checkpoint_every=args.checkpoint_every,
         tmp_dir=args.tmp_dir,
         quarantine=args.quarantine,
@@ -1426,6 +1427,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-frames-per-file",
         type=int,
         default=None,
+    )
+    chime_control_scan.add_argument(
+        "--frame-batch-size",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Stack up to N compatible frames per control FFT call.",
     )
     chime_control_scan.add_argument(
         "--checkpoint-every",

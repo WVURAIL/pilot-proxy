@@ -143,6 +143,107 @@ def test_consume_save_resume_roundtrip(tmp_path):
     assert int(z["detector_window_samples"]) == K
 
 
+def _write_product(path, files, *, batch_size):
+    analyzer = ControlBandAnalyzer()
+    ctx = _ctx([591], options={"frame_batch_size": batch_size})
+    first_meta, _ = files[0]
+    analyzer.begin(ctx, first_meta)
+    for meta, frames in files:
+        assert analyzer.consume_file(frames, meta) == len(frames)
+    analyzer.save(str(path))
+
+
+def _assert_products_equal(left, right):
+    fields = (
+        "n_frames",
+        "baseband_power_linear",
+        "coarse_marginal",
+        "frame_unit_index",
+        "frame_in_unit",
+        "integrated_spectrum_sum",
+        "integrated_spectrum_count",
+        "files",
+        "unit_keys",
+        "source_event_keys",
+    )
+    with np.load(left, allow_pickle=False) as expected:
+        with np.load(right, allow_pickle=False) as actual:
+            for field in fields:
+                np.testing.assert_array_equal(actual[field], expected[field])
+
+
+def test_frame_batch_cpu_parity_and_bound(monkeypatch, tmp_path):
+    frames = _frames(7, tone_bin=25, seed=8)
+    files = [(_meta("evtA"), frames)]
+    baseline = tmp_path / "baseline.npz"
+    batched = tmp_path / "batched.npz"
+    _write_product(baseline, files, batch_size=1)
+
+    calls = []
+    original_fft = np.fft.fft
+
+    def recording_fft(values, *args, **kwargs):
+        calls.append((tuple(values.shape), kwargs.get("axis")))
+        return original_fft(values, *args, **kwargs)
+
+    monkeypatch.setattr(np.fft, "fft", recording_fft)
+    _write_product(batched, files, batch_size=3)
+
+    _assert_products_equal(baseline, batched)
+    full_calls = [
+        shape
+        for shape, axis in calls
+        if axis == 1 and len(shape) == 3 and shape[1:] == (NFFT, N_FEEDS)
+    ]
+    marginal_calls = [
+        shape
+        for shape, axis in calls
+        if axis == 2 and len(shape) == 4
+    ]
+    assert (3, NFFT, N_FEEDS) in full_calls
+    assert (3, NFFT // K, K, N_FEEDS) in marginal_calls
+    assert max(shape[0] for shape in full_calls) <= 3
+    assert max(shape[0] for shape in marginal_calls) <= 3
+    with np.load(batched, allow_pickle=False) as product:
+        assert "frame_batch_size" not in product.files
+
+
+def test_frame_batch_change_preserves_resume(tmp_path):
+    first = (_meta("evtA"), _frames(4, tone_bin=25, seed=10))
+    second = (_meta("evtB"), _frames(5, tone_bin=25, seed=11))
+    baseline = tmp_path / "baseline.npz"
+    resumed_path = tmp_path / "resumed.npz"
+    _write_product(baseline, [first, second], batch_size=1)
+
+    first_analyzer = ControlBandAnalyzer()
+    first_ctx = _ctx([591], options={"frame_batch_size": 2})
+    first_analyzer.begin(first_ctx, first[0])
+    assert first_analyzer.consume_file(first[1], first[0]) == 4
+    first_analyzer.save(str(resumed_path))
+
+    resumed = ControlBandAnalyzer()
+    second_ctx = _ctx([591], options={"frame_batch_size": 4})
+    assert resumed.resume(str(resumed_path), second_ctx)
+    resumed.begin(second_ctx, second[0])
+    assert resumed.consume_file(second[1], second[0]) == 5
+    resumed.save(str(resumed_path))
+
+    _assert_products_equal(baseline, resumed_path)
+
+
+@pytest.mark.parametrize("batch_size", [0, -1, 1.5, True])
+def test_frame_batch_size_must_be_positive(batch_size):
+    analyzer = ControlBandAnalyzer()
+    with pytest.raises(
+        ValueError,
+        match="frame_batch_size must be a positive integer",
+    ):
+        analyzer.begin(
+            _ctx([591], options={"frame_batch_size": batch_size}),
+            _meta("evtA"),
+        )
+
+
 def test_resume_refuses_other_analysis_and_wrong_invariants(tmp_path):
     path = str(tmp_path / "591.npz")
     a = ControlBandAnalyzer()

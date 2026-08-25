@@ -150,6 +150,8 @@ def test_chime_control_scan_wires_complex_reader(
                 "591",
                 "--max-frames-per-file",
                 "2",
+                "--frame-batch-size",
+                "3",
                 "--gpu",
             ]
         )
@@ -162,10 +164,31 @@ def test_chime_control_scan_wires_complex_reader(
     assert isinstance(call["analyzer"], ControlBandAnalyzer)
     assert call["ctx"].selection == [591]
     assert call["ctx"].options["max_frames_per_file"] == 2
+    assert call["ctx"].options["frame_batch_size"] == 3
     assert call["ctx"].options["gpu"] is True
     assert call["out_path"] == str(output_dir / "591.npz")
     assert call["download_workers"] == 1
     assert call["max_staged_files"] == 1
+
+
+def test_chime_control_scan_rejects_nonpositive_frame_batch(tmp_path: Path) -> None:
+    with pytest.raises(
+        SystemExit,
+        match="--frame-batch-size must be a positive integer",
+    ):
+        cli.main(
+            [
+                "chime-control-scan",
+                "--input-dir",
+                str(tmp_path / "input"),
+                "--output-dir",
+                str(tmp_path / "products"),
+                "--select",
+                "591",
+                "--frame-batch-size",
+                "0",
+            ]
+        )
 
 
 def test_chime_control_scan_requires_explicit_partial_acceptance(
