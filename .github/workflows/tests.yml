@@ -21,7 +21,7 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       # CPU-only job: the README smoke-test commands plus the full Python test
-      # suite. No CUDA, GNU Radio, datatrawl, CADC, or HDF5 data required.
+      # suite. No CUDA, GNU Radio, CADC, or HDF5 data required.
       - run: python -m pip install -U pip setuptools wheel
       - run: python -m pip install -e ".[test]"
       - run: pilot-proxy --help
@@ -41,43 +41,17 @@ jobs:
       - run: python -m pip install -e ".[chime,plot,test]"
       - run: make release-check
 
-  datatrawl-integration:
+  archive-integration:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: WVURAIL/datatrawl
-          # Required integration tests use a reviewed upstream revision. The
-          # scheduled canary below tests datatrawl's moving head separately.
-          ref: 50fc974339585584cbb9b7ddbecc0b7bdf713af1
-          path: datatrawl
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: python -m pip install -U pip setuptools wheel
-      - run: python -m pip install -e "./datatrawl[cadc,survey]"
-      - run: python -m pip install -e ".[chime,plot,test]"
-      - run: make integration-check
-
-  datatrawl-head-canary:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    continue-on-error: true
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/checkout@v4
-        with:
-          repository: WVURAIL/datatrawl
-          ref: main
-          path: datatrawl
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - run: python -m pip install -U pip setuptools wheel
-      - run: python -m pip install -e "./datatrawl[cadc,survey]"
-      - run: python -m pip install -e ".[chime,plot,test]"
-      - run: make integration-check
+      - run: python -m pip install -r requirements/archive.txt
+      - run: python -m pip install -e ".[archive,chime,plot,test]"
+      - run: make archive-integration-check
 
   wheel-resources:
     runs-on: ubuntu-latest

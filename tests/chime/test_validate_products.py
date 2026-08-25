@@ -17,7 +17,7 @@ from pilot_proxy.detector_contract import (
 )
 from pilot_proxy.chime.validate_products import validate_products
 import pilot_proxy.chime.validate_products as validate_products_module
-from pilot_proxy.datatrawl_plugins import combine as combine_module
+from pilot_proxy.archive import combine as combine_module
 from pilot_proxy.chime.products import (
     CHIME_INPUT_MANIFEST_SCHEMA_TOKEN,
     SCAN_INPUT_MANIFEST_SCHEMA_TOKEN,

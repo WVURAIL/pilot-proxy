@@ -32,6 +32,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "h5py",
+  "pyyaml",
   "pytest>=8",
   "ruff>=0.9",
 ]
@@ -43,33 +44,27 @@ plot = [
 ]
 chime = [
   "h5py",
+  "pyyaml",
   "pandas",
   "matplotlib",
 ]
-# datatrawl-driven real-data / CANFAR streaming path (offset + detector analyzers).
-# datatrawl is the shareable streaming engine: https://github.com/WVURAIL/datatrawl
-# Install it editable alongside (pip install -e path/to/datatrawl). Kept OPTIONAL so
-# the base install and every existing workflow are unchanged when it is absent.
-# datatrawl itself is NOT on PyPI -- install it editable from its repo FIRST
-# (pip install -e path/to/datatrawl), then `pip install -e .[datatrawl]` here only
-# needs to add h5py. Listing a bare "datatrawl" requirement would make pip try to
-# resolve it from PyPI and fail before the local checkout could satisfy it.
-datatrawl = [
+archive = [
+  "cadcdata>=2.5.0",
+  "cadcutils>=1.5.1.1",
+  "datatrail-cli>=0.11",
   "h5py",
+  "pyyaml",
+  "requests>=2.29.0",
 ]
 
 [project.scripts]
 pilot-proxy = "pilot_proxy.cli:main"
 
-[project.entry-points."datatrawl.plugins"]
-# Discovered by datatrawl's `list`/`scan`/`doctor` once both packages are installed;
-# value is the module to import (its decorator registers the plugin).
-pilot-proxy-detector = "pilot_proxy.datatrawl_plugins.detector"
-pilot-proxy-chime-baseband-packed = "pilot_proxy.datatrawl_plugins.packed_reader"
-pilot-proxy-control = "pilot_proxy.datatrawl_plugins.control"
-
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.package-data]
+"pilot_proxy.archive" = ["instruments/*.yaml"]
 
 [tool.setuptools.dynamic]
 version = {attr = "pilot_proxy._version.__version__"}

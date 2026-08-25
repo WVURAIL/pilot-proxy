@@ -2506,7 +2506,7 @@ def verify_supporting_evidence(
             "outrigger_labelled_events_excluded": len(outrigger_excluded),
             "outrigger_label_filter": (
                 "case-insensitive label substring 'outrigger', matching the "
-                "datatrawl survey source's exclusion rule"
+                "archive survey source's exclusion rule"
             ),
             "target_survey_scope_events": len(survey_scope_events),
             "completed_survey_scope_events": len(surveyed_scope_events),

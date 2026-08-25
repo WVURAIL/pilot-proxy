@@ -65,7 +65,7 @@ def decode_components(packed: np.ndarray) -> np.ndarray:
 
 
 def channel_center_hz(path: Path, freq_id_arg: int | None) -> tuple[float, float, str]:
-    """(center_hz, sample_rate_hz, source): CLI override, datatrawl, filename
+    """(center_hz, sample_rate_hz, source): CLI override, file metadata, filename
     ``*_<id>.h5``, a ``chNNNN`` ancestor directory, or an h5 center attr."""
     if freq_id_arg is not None:
         return (
@@ -74,9 +74,9 @@ def channel_center_hz(path: Path, freq_id_arg: int | None) -> tuple[float, float
             f"--freq-id {freq_id_arg}",
         )
     try:
-        from datatrawl.plugins.readers import _baseband_format as fmt
+        from pilot_proxy.chime import baseband_format as fmt
 
-        return float(fmt.channel_center_hz(str(path))), float(fmt.FS), "datatrawl"
+        return float(fmt.channel_center_hz(str(path))), float(fmt.FS), "file-metadata"
     except Exception:
         pass
     match = re.search(r"_(\d{1,4})\.h5$", path.name)

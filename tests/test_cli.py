@@ -729,7 +729,7 @@ def test_chime_run_wrapper_does_not_forward_detector_window(monkeypatch, tmp_pat
 
 def test_chime_scan_forwards_explicit_allow_partial(monkeypatch, tmp_path) -> None:
     calls = []
-    fake_scan = ModuleType("pilot_proxy.datatrawl_plugins.scan")
+    fake_scan = ModuleType("pilot_proxy.archive.scan")
 
     def fake_run_chime_scan(**kwargs):
         calls.append(kwargs)

@@ -8,7 +8,7 @@ import stat
 import pytest
 
 from pilot_proxy.atomic_io import atomic_write_json
-from pilot_proxy.datatrawl_plugins.scan import _atomic_write_json
+from pilot_proxy.archive.scan import _atomic_write_json
 
 
 def test_scan_json_writer_preserves_existing_destination_mode(tmp_path) -> None:
