@@ -56,6 +56,10 @@ archive = [
   "pyyaml",
   "requests>=2.29.0",
 ]
+n2 = [
+  "h5py",
+  "hdf5plugin",
+]
 
 [project.scripts]
 pilot-proxy = "pilot_proxy.cli:main"
