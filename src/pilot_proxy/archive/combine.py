@@ -759,7 +759,7 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
     `detector_contract_json` gets the same treatment for
     `fine_reduction.designated_bins`: the designated window targets each
     pilot's own predicted carrier line, so it is per-pilot data rather than
-    shared geometry, and it steers only the fine diagnostic CFAR — no
+    shared geometry, and it steers only the fine diagnostic CFAR; no
     combined output stacks fine arrays. Every other contract field must
     still match exactly. When windows differ, the per-pilot windows are
     returned as {"fine_designated_bins_by_pilot": [...]} so they survive
