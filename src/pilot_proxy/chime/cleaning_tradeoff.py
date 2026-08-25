@@ -33,8 +33,7 @@ from pilot_proxy.chime.products import (
 )
 
 # CHIME coarse channel width: 400 MHz over 1024 channels. Matches the
-# instrument geometry datatrawl loads from chime.yaml; kept as a constant so
-# this analysis stays importable without datatrawl.
+# Geometry from the CHIME instrument definition.
 CHIME_COARSE_CHANNEL_BANDWIDTH_MHZ = 400.0 / 1024.0
 
 TRADEOFF_CSV_FILENAME = "cleaning_tradeoff.csv"

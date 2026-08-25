@@ -51,9 +51,9 @@ venue.
    Then introduce the int4 weights, the exact `F > null_power_ratio` comparison, and the
    dynamic-range and capture-loss bounds in `docs/METHOD_SPEC.md`.
 4. **Implementation.** Describe the PilotProxy CUDA kernel, rational
-   thresholds, and product provenance. Describe datatrawl only to the degree
-   needed to explain bounded staging and resume. Defer interface detail to
-   the two repositories and their formal documents.
+   thresholds, product provenance, and the internal archive runtime only to
+   the degree needed to explain bounded staging and resume. Defer interface
+   detail to the repository and its formal documents.
 5. **Validation.** Present the five runbook items in causal order: the
    synthetic curves, on-sky zero point, injection recovery, radiometer
    comparison, and cleaning tradeoff.
@@ -197,13 +197,12 @@ production pass and before any relaunch.
 
 ## Data and software availability targets
 
-- Software: `WVURAIL/pilot-proxy` and `WVURAIL/datatrawl`, tagged release
-  with Zenodo DOIs (release checklist in `docs/PUBLICATION_VALIDATION.md`);
-  cite via each `CITATION.cff`.
-- Data: CHIME baseband via CADC/datatrawl under CHIME policy; derived products
+- Software: `WVURAIL/pilot-proxy`, tagged release with a Zenodo DOI (release
+  checklist in `docs/PUBLICATION_VALIDATION.md`); cite via `CITATION.cff`.
+- Data: CHIME baseband via CADC using the Pilot Proxy archive commands under CHIME policy; derived products
   (detector NPZ, tradeoff CSVs, ladder manifests) archived with the paper.
-- Documents: the PilotProxy DS001/UG001 and Datatrawl DS001/UG001 documents
-  attached to the tagged releases.
+- Documents: the PilotProxy DS001/UG001 documents attached to the tagged
+  release.
 
 ## Assembly order
 

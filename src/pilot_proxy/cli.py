@@ -272,6 +272,69 @@ def _cmd_chime_inspect(args: argparse.Namespace) -> None:
     _run_module("pilot_proxy.chime.inspect", argv)
 
 
+def _cmd_chime_survey(args: argparse.Namespace) -> None:
+    from pilot_proxy.archive.commands import survey_chime
+
+    survey_chime(
+        out_dir=args.out,
+        name=args.name,
+        root=args.root,
+        scope=args.scope,
+        freq_ids=args.freq_ids,
+        include_outrigger=args.include_outrigger,
+        workers=args.workers,
+        re_enumerate=args.re_enumerate,
+        max_events=args.max_events,
+        empty_age_days=args.empty_age_days,
+        strict_completeness=args.strict_completeness,
+        dry_run=args.dry_run,
+    )
+
+
+def _cmd_chime_inventory(args: argparse.Namespace) -> None:
+    from pilot_proxy.archive.commands import inspect_chime_inventory
+
+    inspect_chime_inventory(
+        source=args.source,
+        input_dir=args.input_dir,
+        inventory=args.inventory,
+        inventory_name=args.inventory_name,
+        source_root=args.source_root,
+        source_glob=args.source_glob,
+        source_freq_id_regex=args.source_freq_id_regex,
+        source_event_regex=args.source_event_regex,
+    )
+
+
+def _cmd_chime_control_scan(args: argparse.Namespace) -> None:
+    from pilot_proxy.archive.commands import run_chime_control_scan
+
+    analyzer_options = _parse_chime_scan_set_options(args.set_option)
+    if args.gpu:
+        analyzer_options["gpu"] = True
+    run_chime_control_scan(
+        output_dir=args.output_dir,
+        select=args.select,
+        source=args.source,
+        input_dir=args.input_dir,
+        inventory=args.inventory,
+        inventory_name=args.inventory_name,
+        source_root=args.source_root,
+        source_glob=args.source_glob,
+        source_freq_id_regex=args.source_freq_id_regex,
+        source_event_regex=args.source_event_regex,
+        max_files=args.max_files,
+        max_frames_per_file=args.max_frames_per_file,
+        checkpoint_every=args.checkpoint_every,
+        tmp_dir=args.tmp_dir,
+        quarantine=args.quarantine,
+        no_quarantine=args.no_quarantine,
+        allow_partial=args.allow_partial,
+        analyzer_options=analyzer_options,
+        dry_run=args.dry_run,
+    )
+
+
 def _cmd_chime_run(args: argparse.Namespace) -> None:
     argv = [
         "--input-dir",
@@ -313,16 +376,10 @@ def _cmd_chime_run(args: argparse.Namespace) -> None:
 
 
 def _cmd_chime_combine(args: argparse.Namespace) -> None:
-    try:
-        from pilot_proxy.datatrawl_plugins.combine import (
-            combine_detector_products,
-            report_products,
-        )
-    except ImportError as exc:
-        raise SystemExit(
-            "chime-combine needs the datatrawl integration installed "
-            "(pip install -e path/to/datatrawl alongside pilot-proxy)."
-        ) from exc
+    from pilot_proxy.archive.combine import (
+        combine_detector_products,
+        report_products,
+    )
 
     if args.products:
         paths = [Path(p) for p in args.products]
@@ -477,15 +534,7 @@ def _cmd_validate_products(args: argparse.Namespace) -> None:
 
 
 def _cmd_chime_scan(args: argparse.Namespace) -> None:
-    try:
-        from pilot_proxy.datatrawl_plugins.scan import run_chime_scan
-    except ModuleNotFoundError as exc:
-        if exc.name and exc.name.split(".")[0] == "datatrawl":
-            raise SystemExit(
-                "chime-scan needs datatrawl installed (it is not on PyPI): "
-                "pip install -e path/to/datatrawl, then pip install -e . here."
-            )
-        raise  # a real import error inside pilot-proxy; do not mask it as 'install datatrawl'
+    from pilot_proxy.archive.scan import run_chime_scan
     analyzer_options = _parse_chime_scan_set_options(args.set_option)
     for key, value in {
         "weights_path": args.weights_path,
@@ -1166,6 +1215,192 @@ def build_parser() -> argparse.ArgumentParser:
     chime_inspect.add_argument("--filename-pattern", default=None)
     chime_inspect.set_defaults(func=_cmd_chime_inspect)
 
+    chime_survey = _add_command(
+        "chime-survey",
+        "Build or resume a CHIME archive inventory.",
+    )
+    chime_survey.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Explicit inventory output directory.",
+    )
+    chime_survey.add_argument(
+        "--name",
+        default=None,
+        help="Managed inventory name; defaults to CHIME plus the freq_id selection.",
+    )
+    chime_survey.add_argument(
+        "--root",
+        type=Path,
+        default=None,
+        help="Place a managed inventory under <root>/data/<name>.",
+    )
+    chime_survey.add_argument(
+        "--scope",
+        default=None,
+        help="Comma-separated archive scopes; defaults to the CHIME configuration.",
+    )
+    chime_survey.add_argument(
+        "--freq-ids",
+        default=None,
+        help="freq_id list, range, or 'all'.",
+    )
+    chime_survey.add_argument(
+        "--include-outrigger",
+        action="store_true",
+        help="Keep events carrying an outrigger label.",
+    )
+    chime_survey.add_argument(
+        "--workers",
+        type=int,
+        default=12,
+        help="Parallel archive probes per event.",
+    )
+    chime_survey.add_argument(
+        "--re-enumerate",
+        action="store_true",
+        help="Refresh the event cache before probing files.",
+    )
+    chime_survey.add_argument(
+        "--max-events",
+        type=int,
+        default=None,
+        help="Process at most this many pending events during this run.",
+    )
+    chime_survey.add_argument(
+        "--empty-age-days",
+        type=int,
+        default=None,
+        help="Accept a dated empty event immediately once it reaches this age.",
+    )
+    chime_survey.add_argument(
+        "--strict-completeness",
+        action="store_true",
+        help="Exit nonzero while unresolved or terminal omissions remain.",
+    )
+    chime_survey.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the target without contacting the archive.",
+    )
+    chime_survey.set_defaults(func=_cmd_chime_survey)
+
+    chime_inventory = _add_command(
+        "chime-inventory",
+        "Summarize a CHIME inventory or local directory without staging data.",
+    )
+    chime_inventory.add_argument(
+        "--source",
+        choices=["local", "cadc-datatrail"],
+        default=None,
+        help="Data source; inferred from inventory options when omitted.",
+    )
+    chime_inventory.add_argument(
+        "--input-dir",
+        type=Path,
+        default=None,
+        help="Local directory of CHIME baseband files.",
+    )
+    chime_inventory.add_argument(
+        "--inventory",
+        type=Path,
+        default=None,
+        help="Explicit inventory.jsonl path.",
+    )
+    chime_inventory.add_argument(
+        "--inventory-name",
+        "--name",
+        dest="inventory_name",
+        default=None,
+        help="Managed inventory name.",
+    )
+    chime_inventory.add_argument(
+        "--source-root",
+        type=Path,
+        default=None,
+        help="Local input directory or a root containing data/<name>.",
+    )
+    chime_inventory.add_argument("--source-glob", default="*.h5")
+    chime_inventory.add_argument("--source-freq-id-regex", default=None)
+    chime_inventory.add_argument("--source-event-regex", default=None)
+    chime_inventory.set_defaults(func=_cmd_chime_inventory)
+
+    chime_control_scan = _add_command(
+        "chime-control-scan",
+        "Stream CHIME control channels into resumable per-channel products.",
+    )
+    chime_control_scan.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
+        help="Directory for per-channel products and staging.",
+    )
+    chime_control_scan.add_argument(
+        "--select",
+        required=True,
+        help="Explicit control freq_ids, such as '484,491,591'.",
+    )
+    chime_control_scan.add_argument(
+        "--source",
+        choices=["local", "cadc-datatrail"],
+        default=None,
+        help="Data source; inferred from inventory options when omitted.",
+    )
+    chime_control_scan.add_argument("--input-dir", type=Path, default=None)
+    chime_control_scan.add_argument("--inventory", type=Path, default=None)
+    chime_control_scan.add_argument(
+        "--inventory-name",
+        "--name",
+        dest="inventory_name",
+        default=None,
+    )
+    chime_control_scan.add_argument("--source-root", type=Path, default=None)
+    chime_control_scan.add_argument("--source-glob", default="*.h5")
+    chime_control_scan.add_argument("--source-freq-id-regex", default=None)
+    chime_control_scan.add_argument("--source-event-regex", default=None)
+    chime_control_scan.add_argument("--max-files", type=int, default=None)
+    chime_control_scan.add_argument(
+        "--max-frames-per-file",
+        type=int,
+        default=None,
+    )
+    chime_control_scan.add_argument(
+        "--checkpoint-every",
+        type=int,
+        default=50,
+    )
+    chime_control_scan.add_argument("--tmp-dir", type=Path, default=None)
+    chime_control_scan.add_argument("--quarantine", type=Path, default=None)
+    chime_control_scan.add_argument(
+        "--no-quarantine",
+        action="store_true",
+    )
+    chime_control_scan.add_argument(
+        "--allow-partial",
+        action="store_true",
+        help="Accept capped, failed, or quarantined input while recording it.",
+    )
+    chime_control_scan.add_argument(
+        "--gpu",
+        action="store_true",
+        help="Use CuPy for the control FFTs when available.",
+    )
+    chime_control_scan.add_argument(
+        "--set",
+        dest="set_option",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="Control analyzer option; repeat as needed.",
+    )
+    chime_control_scan.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="List matching units without staging or analyzing them.",
+    )
+    chime_control_scan.set_defaults(func=_cmd_chime_control_scan)
+
     chime_run = _add_command(
         "chime-run",
         "Run the detector over a directory of already-staged CHIME baseband "
@@ -1437,7 +1672,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     chime_scan = _add_command(
         "chime-scan",
-        "Stream CHIME data through the datatrawl engine (one resumable "
+        "Stream CHIME data through the archive engine (one resumable "
         "product per pilot), then combine compatible products. The "
         "recommended archive-scale entry point; chime-run remains for "
         "pre-staged local directories.",
@@ -1454,14 +1689,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--inventory-name", "--name",
         dest="inventory_name",
         default=None,
-        help="Named datatrawl inventory, resolved through datatrawl's "
+        help="Named archive inventory, resolved through the managed "
              "inventory root (default ~/datatrawl-inventories/<name>/). With "
              "--source-root <r>, resolves as <r>/data/<name>/inventory.jsonl.",
     )
     chime_scan.add_argument("--source-root", type=Path, default=None,
                             help="For --source local, an input directory alternative "
                                  "to --input-dir. For --source cadc-datatrail, the "
-                                 "datatrawl survey root used with --inventory-name.")
+                                 "chime-survey root used with --inventory-name.")
     chime_scan.add_argument("--source", choices=["local", "cadc-datatrail"],
                             default=None,
                             help="local: files on disk; cadc-datatrail: stream from "
@@ -1524,7 +1759,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Filename->freq_id regex (one capturing group) for --source local, "
-            "stored as source_freq_id_regex for the paired datatrawl source. "
+            "stored as source_freq_id_regex for the local archive source. "
             "An explicit --set 'source_freq_id_regex=...' takes precedence "
             "over this flag."
         ),

@@ -291,7 +291,7 @@ The file also stores keys needed for resume and channel alignment:
 
 | Array | Shape | Meaning |
 |---|---:|---|
-| `unit_keys` | `(U,)` | Sorted set of committed datatrawl unit keys |
+| `unit_keys` | `(U,)` | Sorted set of committed archive unit keys |
 | `unit_order` | `(U,)` | Unit keys in analyzer consumption order |
 | `source_event_keys` | `(U,)` | Namespaced event identity derived from the aligned `unit_order` entry and `freq_id`; combine recomputes and verifies every value |
 

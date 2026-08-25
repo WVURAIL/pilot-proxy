@@ -19,8 +19,8 @@ The package has two main workflows:
    generation, quantization, CUDA-kernel evaluation, and controlled SNR sweeps.
 2. **CHIME real-data mode** for baseband HDF5 data. The recommended archive-scale
    entry point is `pilot-proxy chime-scan`. This command runs the PilotProxy
-   analyzer through the `datatrawl` streaming engine, then attempts to combine
-   the per-pilot products into the canonical CHIME outputs.
+   analyzer through the bundled archive engine, then attempts to combine the
+   per-pilot products into the canonical CHIME outputs.
 
 The detector core is telescope-independent. A receiver integration supplies the
 metadata and arrays needed to satisfy the CUDA kernel contract; it does not
@@ -33,7 +33,7 @@ change that contract.
 The repository supports several workflows with different dependencies. Choose
 the row that matches the result you need:
 
-| Goal | Guide to follow | Needs GPU? | Needs datatrawl? |
+| Goal | Guide to follow | Needs GPU? | Needs archive extras? |
 | --- | --- | :---: | :---: |
 | Run the CHIME detector on the CADC archive (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) | Yes | Yes |
 | Check the package installs and the CLI loads | This README: minimal CPU-only smoke test (below) | No | No |
@@ -43,8 +43,8 @@ the row that matches the result you need:
 
 For a CANFAR run, begin with the
 [runbook](docs/CANFAR_RUNBOOK.md). It gives the required order: launch the
-session, clone both repositories, run `setup_env.sh` to build the environment
-and CUDA kernel, survey the archive, and run the scan. The standalone sections
+session, clone this repository, run `setup_env.sh` to build the environment and
+CUDA kernel, survey the archive, and run the scan. The standalone sections
 below are not prerequisites. `setup_env.sh` performs its own sanity checks, so
 the README smoke test is also optional on that path.
 
@@ -60,7 +60,7 @@ to be inside the source checkout. The selected Python must include `venv` and
 provides them.
 
 ```bash
-export VENV_DIR="${VENV_DIR:-$HOME/.venvs/pilot-proxy-datatrawl}"
+export VENV_DIR="${VENV_DIR:-$HOME/.venvs/pilot-proxy-archive}"
 export PYTHON_BIN="${PYTHON_BIN:-python3}"
 mkdir -p "$(dirname "$VENV_DIR")"
 "$PYTHON_BIN" -m venv --system-site-packages "$VENV_DIR"
@@ -81,7 +81,7 @@ environment; do not create that environment by hand.
 ## Fresh clone and minimal CPU-only smoke test
 
 This smoke test checks the Python package, CLI entry point, and reference
-detector metadata. It does **not** require GNU Radio, datatrawl, CADC
+detector metadata. It does **not** require GNU Radio, CADC
 credentials, CUDA, or CHIME HDF5 data. Run it inside the
 [environment](#environment) above before using a standalone workflow.
 
@@ -112,8 +112,8 @@ make test-python
 
 The `test` extra includes `h5py` because the checked-in tests exercise the CHIME
 HDF5 adapters. These tests generate or mock their inputs, so they do not require
-CHIME data files. Tests that import optional packages, including the datatrawl
-integration suite, are skipped when those packages are not installed.
+CHIME data files. CADC-backed checks are skipped when archive credentials are
+not available.
 
 `make test` runs `test-kernel` before `test-python`; therefore, it is **not** a
 CPU-only target. Use it on a CUDA build host after checking both the driver and
@@ -143,19 +143,19 @@ operating documentation as follows:
   workflows.
 - `src/pilot_proxy/testbench/` - GNU Radio ATSC generation, waveform audit,
   AWGN generation, quantization, and SNR evaluation.
-- `src/pilot_proxy/datatrawl_plugins/` - PilotProxy readers/analyzers used by
-  `datatrawl` and by `pilot-proxy chime-scan`.
+- `src/pilot_proxy/archive/` - bounded inventory, staging, streaming, CHIME
+  sources and readers, detector and control analyzers, scan, and combine support.
 - `weights/` - prebuilt ATSC reference detector weights for
   `detector_window_samples=128`, `num_weight_terms=3`,
   `skipped_guard_bins=1`, `reference_offset_bins=2`, physical channels 14-36,
   and 4+4 bit samples.
 - `configs/` - detector-core, receiver-profile, and stream-map JSON examples for
   standalone and integration workflows.
-- `scripts/setup_env.sh` - one-shot CANFAR / datatrawl setup script for the
+- `scripts/setup_env.sh` - one-shot CANFAR archive setup script for the
   integrated CHIME workflow.
 - `scripts/launch_gpu_session.py` - launch, reuse, or tear down a CANFAR CUDA GPU
   notebook session (skaha / `canfar` client) for the detector path.
-- `INTEGRATION.md` - detailed `pilot-proxy` <-> `datatrawl` integration notes.
+- `INTEGRATION.md` - detailed standalone archive integration notes.
 - `docs/METHOD_SPEC.md` - equation-first method contract for CHIME products.
 - `docs/PRODUCT_SCHEMA.md` - the only supported per-pilot product contract.
 - `docs/PER_PILOT_PRODUCT_FIELDS.md` - detailed shared-field reference.
@@ -190,14 +190,14 @@ checkout and stage it under ``~/.cache/pilot_proxy/libfstatistic.so``.
 
 ## Setup for the CHIME / CANFAR workflow
 
-The integrated workflow uses checkouts of both `pilot-proxy` and `datatrawl`.
-The `scripts/setup_env.sh` script recreates a virtual environment, installs both
-repositories in editable mode with the CADC, survey, CHIME, and test extras,
-resolves CuPy through datatrawl's `accel` module, and checks plugin discovery.
+The integrated workflow uses this repository and the pinned archive client in
+`requirements/archive.txt`. The `scripts/setup_env.sh` script recreates a
+virtual environment and installs `.[archive,chime,test]`. It checks the bundled
+source, reader, and analyzer classes directly.
 On a GPU node, it also requires `nvcc`, builds the CUDA kernel, and checks that
 the kernel loads. Because the script **removes and recreates** the target
 environment, do not set `VENV_DIR` to an environment you need to preserve. The
-script refuses the home directory, either checkout, overlapping directories,
+script refuses the home directory, the checkout, overlapping directories,
 and unowned non-empty targets. On the first guarded rerun of a genuine virtual
 environment created by an older checkout, explicitly acknowledge adoption with
 `PILOT_PROXY_ADOPT_LEGACY_VENV=1`; subsequent rebuilds use the durable ownership
@@ -209,6 +209,13 @@ It gives the exact `setup_env.sh` invocation, a manual setup that does not
 recreate an environment, GPU-session launch, Harbor registry credentials,
 required inputs, and bounded run sequences. Integration-specific details are in
 [INTEGRATION.md](INTEGRATION.md#setup).
+
+For a manual installation in an active virtual environment:
+
+```bash
+python -m pip install -r requirements/archive.txt
+python -m pip install -e ".[archive,chime,test]"
+```
 
 ---
 
@@ -366,7 +373,7 @@ decimal point to obtain it:
 | 9.0 | 90 |
 
 The Python GPU path uses CuPy. In the integrated CHIME/CANFAR workflow,
-`setup_env.sh` resolves CuPy through datatrawl's `accel` API. For a standalone
+`setup_env.sh` resolves CuPy through the bundled archive accelerator API. For a standalone
 CUDA 12.x workflow, use `python -m pip install -e ".[cuda]"`. The `cuda` extra
 installs `cupy-cuda12x`; use the corresponding `cupy-cudaXXx` package when the
 runtime is not CUDA 12.x.
@@ -490,16 +497,26 @@ make test-kernel
 
 ---
 
-## CHIME / datatrawl archive workflow
+## CHIME archive workflow
 
-To retain datatrawl's staging bound during an archive-scale run, we use
-`pilot-proxy chime-scan`. It runs the PilotProxy analyzer through datatrawl,
-writes one product for each selected pilot with usable input, and attempts to
-combine those products into the canonical CHIME outputs. If no `(event,
-frame-in-file)` identity is common to every completed pilot, the scan preserves
-the per-pilot products and defers stacking until a compatible channel subset is
-chosen with `pilot-proxy chime-combine`. Two constraints determine how we run
-it:
+To retain a fixed staging bound during an archive-scale run, we use
+`pilot-proxy chime-scan`. It runs the PilotProxy analyzer through the bundled
+archive engine, writes one product for each selected pilot with usable input,
+and attempts to combine those products into the canonical CHIME outputs. If no
+`(event, frame-in-file)` identity is common to every completed pilot, the scan
+preserves the per-pilot products and defers stacking until a compatible channel
+subset is chosen with `pilot-proxy chime-combine`.
+
+The archive command sequence is:
+
+```bash
+pilot-proxy chime-survey --name chime-pilots --freq-ids <freq_ids>
+pilot-proxy chime-inventory --inventory-name chime-pilots
+pilot-proxy chime-scan --inventory-name chime-pilots --output-dir <detector_run>
+pilot-proxy chime-control-scan --inventory-name chime-controls --select <freq_ids> --output-dir <control_run>
+```
+
+Two constraints determine how we run it:
 
 - **Selection uses the CHIME `freq_id` coarse-channel namespace** instead
   of ATSC physical-channel numbers. For `--source cadc-datatrail`, omitting `--select`
@@ -512,13 +529,12 @@ it:
   the single-channel smoke-test value for the ATSC 14 pilot.
 - **Use `chime-scan` for the supported path.** The analyzer appends frames in
   delivery order. `chime-scan` forces one download worker and one staged file so
-  that file delivery follows source order. A raw `datatrawl scan` must reproduce
-  this constraint and explicitly select `chime-baseband-packed`.
+  that file delivery follows source order.
 
 The following documents give the complete selection rules, local and
 CADC/CANFAR sequences, order constraint, and post-processing commands:
 
-- **[INTEGRATION.md](INTEGRATION.md)** --- datatrawl integration contract.
+- **[INTEGRATION.md](INTEGRATION.md)** --- standalone archive integration contract.
 - **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- step-by-step CANFAR
   operating procedure.
 
@@ -630,13 +646,14 @@ make release-clean
 make commit-check
 ```
 
-## Compatibility note: datatrawl inventory metadata
+## Inventory migration note
 
-`pilot-proxy chime-scan` selects `chime-baseband-packed` for
-`pilot-proxy-detector`, overriding the inventory's canonical-reader metadata on
-the supported path. [INTEGRATION.md](INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata)
-explains why this override is required and how to supply it when invoking raw
-`datatrawl scan` directly.
+Completed `inventory.jsonl` files remain readable, including inventories under
+the default `~/datatrawl-inventories` compatibility path. Start an old
+in-progress survey with a fresh `--name` or `--out`; its saved survey state is
+not resumed across the runtime change. Detector checkpoints fail closed after
+source changes. [INTEGRATION.md](INTEGRATION.md#inventory-and-resume-compatibility)
+records the full compatibility contract.
 
 ## Citation
 

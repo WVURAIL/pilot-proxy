@@ -4,7 +4,7 @@
 
 Run this before committing a machine to the multi-week archive re-run. It
 streams one capture through the real archive entry point (``chime-scan``, the
-datatrawl analyzer path) at the real 2048-stream geometry, then checks that the
+archive analyzer path) at the real 2048-stream geometry, then checks that the
 emitted per-pilot product carries what an offline threshold replay needs:
 
   * ``fine_power_u64`` -- the three fine-power accumulators per bin, exact
@@ -43,9 +43,9 @@ _DEFAULT_FREQ_ID = {36: 506, 14: 844}
 def _synthesise(dest: Path, physical_channel: int, freq_id: int,
                 streams: int, frames: int) -> Path:
     """Write one deterministic baseband file at the real stream count."""
-    from datatrawl.plugins.readers._baseband_format import make_synth_file
+    from pilot_proxy.chime.baseband_format import make_synth_file
     from pilot_proxy.atsc_channels import physical_channel_to_pilot_hz
-    from pilot_proxy.datatrawl_plugins._chime_coarse import (
+    from pilot_proxy.archive.chime_coarse import (
         CHIME_BAND_TOP_HZ,
         CHIME_COARSE_WIDTH_HZ,
     )

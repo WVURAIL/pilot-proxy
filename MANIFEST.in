@@ -1,5 +1,7 @@
 include setup.py
+include requirements/archive.txt
 recursive-include configs *.json
+recursive-include src/pilot_proxy/archive/instruments *.yaml
 include weights/chime_dtv_weights_k128.bin
 include weights/chime_dtv_weights_k128.bin.manifest.json
 include weights/chord_dtv_weights_k64.bin

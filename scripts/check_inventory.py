@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-flight coverage report for a datatrawl CHIME-baseband survey inventory.
+"""Pre-flight coverage report for a CHIME baseband survey inventory.
 
 Groups the inventory's file records by freq_id; reports per-channel file count and
 data volume; flags channels missing or short against an expected set; and estimates

@@ -7,9 +7,8 @@ copy of a real baseband file, run the untouched production pipeline over the
 copy, and show recovered pilot excess tracks injected amplitude.
 
 The harness works entirely in the file's own integer domain. On-disk baseband
-is offset-binary 4+4-bit uint8 with components spanning exactly [-8, 7]
-(``datatrawl``'s ``_baseband_format`` is the single source of that format
-truth, shared with the ``chime-baseband-packed`` reader). Injection decodes
+is offset-binary 4+4-bit uint8 with components spanning exactly [-8, 7]. The
+archive reader and injection path share one format module. Injection decodes
 the integer components, adds the float tone, rounds the *sum*, and clips to
 [-8, 7] --- so a zero-amplitude pass is byte-identical to the source
 unconditionally (including components at -8, which a symmetric +/-7 quantizer
@@ -44,14 +43,13 @@ INJECTION_MANIFEST_FILENAME = "injection_manifest.json"
 
 
 def _format_module():
-    """datatrawl's baseband-format module (lazy: only the CHIME path needs it)."""
+    """Load the CHIME baseband format helpers when needed."""
     try:
-        from datatrawl.plugins.readers import _baseband_format as fmt
+        from pilot_proxy.chime import baseband_format as fmt
     except ImportError as exc:  # pragma: no cover - exercised via CLI error path
         raise SystemExit(
-            "inject-pilot-tone requires datatrawl for the on-disk baseband "
-            "format (install it editable alongside pilot-proxy: "
-            "pip install -e path/to/datatrawl)."
+            "inject-pilot-tone could not load the CHIME baseband format. "
+            "Reinstall Pilot Proxy with the chime extra."
         ) from exc
     return fmt
 

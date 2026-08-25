@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 BASE_MODULES = ("h5py", "matplotlib")
-INTEGRATION_MODULES = ("datatrawl",)
+INTEGRATION_MODULES = ("cadcdata", "cadcutils", "dtcli", "yaml")
 
 
 def _module_path(module: object) -> str:
@@ -23,7 +23,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--integration",
         action="store_true",
-        help="also require datatrawl for the integration test suite",
+        help="also require archive dependencies for the integration test suite",
     )
     args = parser.parse_args(argv)
 
@@ -48,7 +48,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         if args.integration:
             print(
-                "install the current datatrawl checkout before running integration-check",
+                'install archive dependencies with: python -m pip install -e ".[archive,chime,plot,test]"',
                 file=sys.stderr,
             )
         return 1

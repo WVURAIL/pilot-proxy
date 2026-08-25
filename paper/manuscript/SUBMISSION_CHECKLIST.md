@@ -352,7 +352,7 @@ hence `provenance/`; avoid categorical no-bug wording in the paper.
 
 ## 5. Release engineering (unchanged from v1)
 
-- [ ] Tag pilot-proxy + datatrawl; Zenodo DOIs; DS001/UG001; CITATION.cff.
+- [ ] Tag pilot-proxy; Zenodo DOI; DS001/UG001; CITATION.cff.
 - [ ] Archive CSVs + per-frame dumps + results bundle.
 - [ ] Data statement vs CHIME policy (§ Data Availability, now unnumbered endmatter).
 

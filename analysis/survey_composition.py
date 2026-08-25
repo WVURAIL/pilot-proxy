@@ -7,7 +7,7 @@ do the secular rate transitions survive restriction to a single uniform
 trigger class (classified.FRB)?
 
 Inputs (env-overridable):
-  PP_INVENTORY  datatrawl inventory.jsonl        (default
+  PP_INVENTORY  archive inventory.jsonl          (default
                 ~/datatrawl-inventories/chime-pilots/inventory.jsonl)
   PP_EVENTKEYS  event_presence_keys.csv.gz       (default: the copy committed
                 in data/provenance/survey_stratum_20260718/)

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# setup_env.sh -- one-shot CANFAR setup for the pilot-proxy -> datatrawl pipeline.
+# setup_env.sh -- one-shot CANFAR setup for Pilot Proxy archive runs.
 #
-# Builds a clean Python venv, installs both repos editable, and -- on a GPU node
+# Builds a clean Python venv, installs Pilot Proxy, and -- on a GPU node
 # -- installs CuPy (a pip wheel matched to the node's CUDA) and compiles/stages
 # the CUDA kernel for the visible GPU. Idempotent: re-running rebuilds the venv
 # from scratch (python -m venv --clear).
@@ -11,17 +11,16 @@
 #
 # Override defaults via environment variables:
 #   VENV_DIR=~/envs/pilot-proxy PYTHON=python3.12 \
-#     DATATRAWL_DIR=~/src/datatrawl PILOT_PROXY_DIR=~/src/pilot-proxy \
+#     PILOT_PROXY_DIR=~/src/pilot-proxy \
 #     bash scripts/setup_env.sh
 # To deliberately adopt and clear a genuine pre-guard Python venv, also set:
 #   PILOT_PROXY_ADOPT_LEGACY_VENV=1
 # =============================================================================
 set -euo pipefail
 
-VENV_DIR="${VENV_DIR:-$HOME/pilot-proxy-datatrawl}"
+VENV_DIR="${VENV_DIR:-$HOME/pilot-proxy-venv}"
 PILOT_PROXY_ADOPT_LEGACY_VENV="${PILOT_PROXY_ADOPT_LEGACY_VENV:-0}"
 PYTHON="${PYTHON:-python3.12}"
-DATATRAWL_DIR="${DATATRAWL_DIR:-$HOME/datatrawl}"
 PILOT_PROXY_DIR="${PILOT_PROXY_DIR:-$HOME/pilot-proxy}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 VENV_GUARD="${SCRIPT_DIR}/setup_env_guard.py"
@@ -31,7 +30,7 @@ if ! command -v "${PYTHON}" >/dev/null 2>&1; then
     exit 1
 fi
 
-for d in "${DATATRAWL_DIR}" "${PILOT_PROXY_DIR}"; do
+for d in "${PILOT_PROXY_DIR}"; do
     if [[ ! -d "${d}" ]]; then
         echo "ERROR: directory does not exist: ${d}" >&2
         exit 1
@@ -61,7 +60,6 @@ VENV_DIR="$(
     "${PYTHON}" "${VENV_GUARD}" check \
         --venv "${VENV_DIR}" \
         --home "${HOME}" \
-        --checkout "${DATATRAWL_DIR}" \
         --checkout "${PILOT_PROXY_DIR}" \
         --checkout "${SCRIPT_DIR}/.." \
         "${_venv_adoption_args[@]}"
@@ -69,7 +67,7 @@ VENV_DIR="$(
 unset _venv_adoption_args
 echo "==> (re)creating venv at '${VENV_DIR}' with ${PYTHON}"
 # --system-site-packages so the session image's CuPy/CUDA stack stays importable
-# (datatrawl prefers the image's CuPy); PYTHONNOUSERSITE=1 below still blocks
+# Pilot Proxy prefers the image's CuPy; PYTHONNOUSERSITE=1 below still blocks
 # ~/.local. The venv's own installs take precedence over the image's packages.
 "${PYTHON}" -m venv --clear --system-site-packages "${VENV_DIR}"
 # A successfully created environment also receives a human-visible marker
@@ -131,16 +129,16 @@ python -m pip install -U pip setuptools wheel
 echo "==> installing scientific stack"
 python -m pip install numpy scipy h5py pandas matplotlib pytest
 
-echo "==> installing datatrawl (editable, + CADC client + survey/datatrail)"
-python -m pip install -e "${DATATRAWL_DIR}[cadc,survey]"
+echo "==> installing the tested Datatrail revision"
+python -m pip install -r "${PILOT_PROXY_DIR}/requirements/archive.txt"
 
-echo "==> installing pilot-proxy (editable, + datatrawl/chime/test extras)"
-python -m pip install -e "${PILOT_PROXY_DIR}[datatrawl,chime,test]"
+echo "==> installing pilot-proxy (editable, + archive/chime/test extras)"
+python -m pip install -e "${PILOT_PROXY_DIR}[archive,chime,test]"
 
-# Survey shells out to datatrail; force it into this venv if PATH resolves wrong.
+# Survey shells out to Datatrail, which must resolve inside this venv.
 if [[ "$(command -v datatrail || true)" != "${VIRTUAL_ENV}/bin/datatrail" ]]; then
-    echo "==> datatrail is not resolving inside the venv; installing it into the venv"
-    python -m pip install --ignore-installed --no-deps datatrail-cli click-aliasing mergedeep
+    echo "ERROR: datatrail is not resolving inside the venv." >&2
+    exit 1
 fi
 
 # --- canfar client (Science Platform / skaha; for launch_gpu_session.py) -----
@@ -148,15 +146,14 @@ echo "==> installing canfar (skaha client used by launch_gpu_session.py)"
 python -m pip install canfar \
     || echo "WARNING: 'pip install canfar' failed; launch_gpu_session.py will not work until it is installed."
 
-# --- CuPy: resolve via datatrawl's installed accel API (layout-independent) ---
-# datatrawl.accel is the same resolver a scan uses: it prefers the CuPy the
+# --- CuPy: resolve through Pilot Proxy's archive runtime ----------------------
+# The scan resolver prefers the CuPy the
 # session image ships, and on a GPU node with no image CuPy installs the
-# matching wheel. Calling the module (not a script path) survives datatrawl
-# repo reorganizations.
-echo "==> CuPy (via datatrawl.accel)"
+# matching wheel.
+echo "==> CuPy"
 python - <<'PYEOF' || true
 import shutil
-from datatrawl import accel
+from pilot_proxy.archive import accel
 cp = accel.import_cupy()
 if cp is not None:
     print(f"    CuPy {cp.__version__} already importable (from the session image)")
@@ -190,7 +187,7 @@ PY
         echo "==> CuPy JIT: CUDA headers already available"
     else
         pkg="$(python - <<'PY' 2>/dev/null
-from datatrawl import accel
+from pilot_proxy.archive import accel
 print(accel.cupy_package(accel.detect_cuda_major() or 12))
 PY
 )"
@@ -238,7 +235,7 @@ python - <<'PY'
 import importlib.util
 import sys
 print("    python", sys.version.split()[0], sys.executable)
-for name in ["numpy", "scipy", "h5py", "pandas", "matplotlib", "pytest", "datatrawl", "pilot_proxy"]:
+for name in ["numpy", "scipy", "h5py", "pandas", "matplotlib", "pytest", "dtcli", "pilot_proxy"]:
     ok = importlib.util.find_spec(name) is not None
     print(f"    {name:12s}: {'OK' if ok else 'MISSING'}")
     if not ok:
@@ -254,9 +251,16 @@ else:
 print("    canfar     :", "OK" if importlib.util.find_spec("canfar") else "MISSING (needed by launch_gpu_session.py)")
 PY
 
-echo "==> verifying datatrawl plugin discovery"
-datatrawl list | grep -E 'pilot-proxy-detector|chime-baseband-packed' \
-    || { echo "ERROR: PilotProxy plugins not discovered" >&2; exit 1; }
+echo "==> verifying archive components"
+python - <<'PY'
+from pilot_proxy.archive.sources import CadcDatatrailSource, LocalDirectorySource
+from pilot_proxy.archive.detector import PilotProxyDetectorAnalyzer
+from pilot_proxy.archive.packed_reader import ChimeBasebandPackedReader
+
+print("    sources :", LocalDirectorySource.info.name, CadcDatatrailSource.info.name)
+print("    reader  :", ChimeBasebandPackedReader.info.name)
+print("    analyzer:", PilotProxyDetectorAnalyzer.info.name)
+PY
 echo "    survey CLI : datatrail -> $(command -v datatrail || echo 'NOT FOUND')"
 
 if command -v nvidia-smi >/dev/null 2>&1; then
@@ -271,8 +275,8 @@ PY
     )
 fi
 
-echo "==> running offline datatrawl integration tests"
-(cd "${PILOT_PROXY_DIR}" && PYTHONPATH=src python -m pytest tests/datatrawl -q)
+echo "==> running offline archive integration tests"
+(cd "${PILOT_PROXY_DIR}" && PYTHONPATH=src python -m pytest tests/archive -q)
 
 echo
 echo "==> done. In a new shell, activate with:"

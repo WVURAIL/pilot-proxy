@@ -1,15 +1,9 @@
 # coding=utf-8
-"""Semantic stream kinds shared by PilotProxy's datatrawl plugins.
-
-Stream kinds describe the in-memory reader/analyzer boundary, independently of
-the receiver or on-disk container that supplied the samples.
-"""
+"""Compatibility import for archive stream kinds."""
 from __future__ import annotations
 
+import sys
 
-# One uint8 per complex sample: offset-binary int4 real in the high nibble and
-# offset-binary int4 imaginary in the low nibble, yielded as baseband frames.
-STREAM_PACKED_COMPLEX_INT4_BASEBAND = "packed-complex-int4-baseband-frame"
+from pilot_proxy.archive import stream_kinds as _implementation
 
-
-__all__ = ["STREAM_PACKED_COMPLEX_INT4_BASEBAND"]
+sys.modules[__name__] = _implementation

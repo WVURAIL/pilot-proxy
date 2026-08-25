@@ -64,7 +64,7 @@ Run order — (1) first, the rest in any order:
 
 ## Where things go (path conventions, recorded 2026-07-20)
 
-    ~/datatrawl-inventories/<name>/  datatrawl inventories (one per survey name)
+    ~/datatrawl-inventories/<name>/  archive inventories (one per survey name)
     ~/pilot_proxy_runs/<name> scan products (chime-pilots, chime-controls, ...)
     ~/paper/                  analysis data home: dumps/, out/, results_bundle/
     ~/archive/                transfer tarballs and completed-run bundles
