@@ -320,6 +320,26 @@ def _cmd_n2_index(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_associate_files(args: argparse.Namespace) -> None:
+    from pilot_proxy.archive.association import build_association
+
+    result = build_association(
+        primary=args.primary,
+        companion=args.companion,
+        output=args.output,
+        mode=args.mode,
+        primary_field=args.primary_field,
+        companion_field=args.companion_field,
+        companion_start_field=args.companion_start_field,
+        companion_end_field=args.companion_end_field,
+        allow_unmatched=args.allow_unmatched,
+    )
+    print(
+        f"Association: {result.matched} matched, {result.missing} missing, "
+        f"{result.ambiguous} ambiguous -> {args.output}"
+    )
+
+
 def _cmd_chime_control_scan(args: argparse.Namespace) -> None:
     from pilot_proxy.archive.commands import run_chime_control_scan
 
@@ -1352,6 +1372,21 @@ def build_parser() -> argparse.ArgumentParser:
     n2_index.add_argument("--source-glob", default="*.h5")
     n2_index.add_argument("--allow-partial", action="store_true")
     n2_index.set_defaults(func=_cmd_n2_index)
+
+    associate_files = _add_command(
+        "associate-files",
+        "Require one matching companion for each primary file.",
+    )
+    associate_files.add_argument("--primary", type=Path, required=True)
+    associate_files.add_argument("--companion", type=Path, required=True)
+    associate_files.add_argument("--output", type=Path, required=True)
+    associate_files.add_argument("--mode", choices=["key", "time"], required=True)
+    associate_files.add_argument("--primary-field", required=True)
+    associate_files.add_argument("--companion-field", default=None)
+    associate_files.add_argument("--companion-start-field", default=None)
+    associate_files.add_argument("--companion-end-field", default=None)
+    associate_files.add_argument("--allow-unmatched", action="store_true")
+    associate_files.set_defaults(func=_cmd_associate_files)
 
     chime_control_scan = _add_command(
         "chime-control-scan",
