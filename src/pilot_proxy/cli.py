@@ -306,6 +306,20 @@ def _cmd_chime_inventory(args: argparse.Namespace) -> None:
     )
 
 
+def _cmd_n2_index(args: argparse.Namespace) -> None:
+    from pilot_proxy.outrigger.index import build_n2_index
+
+    build_n2_index(
+        output=args.output,
+        input_dir=args.input_dir,
+        inventory=args.inventory,
+        scratch=args.tmp_dir,
+        site=args.site,
+        source_glob=args.source_glob,
+        allow_partial=args.allow_partial,
+    )
+
+
 def _cmd_chime_control_scan(args: argparse.Namespace) -> None:
     from pilot_proxy.archive.commands import run_chime_control_scan
 
@@ -1325,6 +1339,19 @@ def build_parser() -> argparse.ArgumentParser:
     chime_inventory.add_argument("--source-freq-id-regex", default=None)
     chime_inventory.add_argument("--source-event-regex", default=None)
     chime_inventory.set_defaults(func=_cmd_chime_inventory)
+
+    n2_index = _add_command(
+        "n2-index",
+        "Cache the time coverage recorded in outrigger N2 file headers.",
+    )
+    n2_index.add_argument("--output", type=Path, required=True)
+    n2_index.add_argument("--input-dir", type=Path, default=None)
+    n2_index.add_argument("--inventory", type=Path, default=None)
+    n2_index.add_argument("--tmp-dir", type=Path, default=None)
+    n2_index.add_argument("--site", choices=["gbo", "hco", "kko"], default="gbo")
+    n2_index.add_argument("--source-glob", default="*.h5")
+    n2_index.add_argument("--allow-partial", action="store_true")
+    n2_index.set_defaults(func=_cmd_n2_index)
 
     chime_control_scan = _add_command(
         "chime-control-scan",
