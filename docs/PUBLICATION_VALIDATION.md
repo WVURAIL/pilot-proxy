@@ -438,8 +438,7 @@ checks produce:
    version consistency, so an unedited `_version.py` will silently stamp the
    dev version into every product's `detector_version`.
 2. Archive the tagged release. Add the resulting DOI to the `doi` field in
-   `CITATION.cff` and to the manuscript software citation. Repeat this step
-   for datatrawl.
+   `CITATION.cff` and to the manuscript software citation.
 3. Build both formal documents from the tag and attach their PDFs to the
    release. `PILOT_PROXY_USE_TEX` does not affect these LaTeX documents.
 4. Run `make release-check` and the kernel suite on the GPU node at the tag.

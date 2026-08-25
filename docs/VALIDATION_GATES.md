@@ -29,7 +29,7 @@ PAPER_PLAN Amendment A1).
 
 3. **Full test tree.**
    `PYTHONPATH=src python3 -m pytest tests -q`
-   Pass: zero failures. GPU- and datatrawl-dependent tests may skip only when
+   Pass: zero failures. GPU- and archive-dependent tests may skip only when
    their optional runtime dependencies are absent.
 
 4. **CPU kernel-reference self-test.**
@@ -89,7 +89,7 @@ failure.
    Optional belt-and-braces on the A100: one odd-freq_id baseband file
    through `tools/framing_audit.py` (expect ALIGNED).
 
-5. **End-to-end smoke on real infrastructure.** One short datatrawl run
+5. **End-to-end smoke on real infrastructure.** One short `pilot-proxy chime-scan` run
    (a handful of files, one even and one odd freq_id) with the current
    analyzer:
    pass criteria, all from the produced npz:

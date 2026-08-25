@@ -1,7 +1,7 @@
 # CANFAR Runbook
 
 This runbook describes bounded pre-production CHIME DTV pilot runs with
-`pilot-proxy` and `datatrawl`. We begin with one file and one chunk because the
+`pilot-proxy`. We begin with one file and one chunk because the
 detector needs a GPU, a matching weight bank, and archive metadata that agrees
 with the requested CHIME coarse channel. After that run validates, we expand the
 same workflow to the selected archive.
@@ -76,23 +76,22 @@ environment setup in that session's terminal.
 
 ## Environment setup
 
-Clone both repositories before running the setup script. The script requires
-both checkouts and recreates the target virtual environment from scratch.
+Clone this repository before running the setup script. The script recreates the
+target virtual environment from scratch.
 
 ```bash
 git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
-git clone https://github.com/WVURAIL/datatrawl.git ~/datatrawl
 cd ~/pilot-proxy
 
-VENV_DIR=~/pilot-proxy-datatrawl DATATRAWL_DIR=~/datatrawl PILOT_PROXY_DIR=~/pilot-proxy bash scripts/setup_env.sh
+VENV_DIR=~/pilot-proxy-venv PILOT_PROXY_DIR=~/pilot-proxy bash scripts/setup_env.sh
 
-source ~/pilot-proxy-datatrawl/bin/activate
+source ~/pilot-proxy-venv/bin/activate
 ```
 
 Do not point `VENV_DIR` at an environment that must be preserved. The script
-uses `python -m venv --clear`, installs both repositories in editable mode,
-checks plugin discovery, and builds the CUDA library when a GPU and `nvcc` are
-available. It refuses protected, checkout-overlapping, and unowned non-empty
+uses `python -m venv --clear`, installs this repository in editable mode,
+checks the bundled archive components, and builds the CUDA library when a GPU
+and `nvcc` are available. It refuses protected, checkout-overlapping, and unowned non-empty
 targets and keeps its ownership record beside the environment so an interrupted
 rebuild can be retried. If this is the first guarded rerun of a genuine virtual
 environment created by an older checkout, add
@@ -108,17 +107,20 @@ Rerun `setup_env.sh` only when the environment should be rebuilt.
 If the environment should not be cleared, use the manual installation path:
 
 ```bash
-python3.12 -m venv --system-site-packages ~/pilot-proxy-datatrawl   # keeps the image's CuPy importable
-source ~/pilot-proxy-datatrawl/bin/activate
+python3.12 -m venv --system-site-packages ~/pilot-proxy-venv
+source ~/pilot-proxy-venv/bin/activate
 python -m pip install -U pip setuptools wheel
-python -m pip install -e "$HOME/datatrawl[cadc,survey]"
-python -m pip install -e "$HOME/pilot-proxy[datatrawl,chime,test]"   # CuPy comes from the image via datatrawl's accel, so no cuda extra
+python -m pip install -r "$HOME/pilot-proxy/requirements/archive.txt"
+python -m pip install -e "$HOME/pilot-proxy[archive,chime,test]"
 ```
 
-Then confirm that datatrawl can discover both PilotProxy plugins:
+Then confirm that the archive commands load:
 
 ```bash
-datatrawl list | grep -E 'pilot-proxy-detector|chime-baseband-packed'
+pilot-proxy chime-survey --help
+pilot-proxy chime-inventory --help
+pilot-proxy chime-scan --help
+pilot-proxy chime-control-scan --help
 ```
 
 The production analyzer also needs a working CUDA/CuPy runtime and a built or
@@ -150,7 +152,7 @@ make -C cuda test_cuda
 #        These FAIL (not skip) on a stale library.
 python -m pytest tests/kernel -q
 
-# Full suite (GPU + datatrawl tests now run instead of skipping)
+# Full suite (GPU + archive tests now run instead of skipping)
 python -m pytest tests -q
 ```
 
@@ -173,13 +175,13 @@ interrupt/resume check are listed at the end of that section.
 For a local scan, provide CHIME HDF5 baseband files whose names end in the
 selected `freq_id`, such as `baseband_<event>_844.h5`. For other layouts, pass
 `--source-freq-id-regex '<regex-with-one-capturing-group>'`; the value is
-stored as `source_freq_id_regex` for the datatrawl source, and an explicit
+stored as `source_freq_id_regex` for the bundled local source, and an explicit
 `--set 'source_freq_id_regex=...'` takes precedence over the flag.
 
 For a CADC/CANFAR scan, provide:
 
 - a valid CADC proxy certificate;
-- an `inventory.jsonl` produced by `datatrawl survey`;
+- an `inventory.jsonl` produced by `pilot-proxy chime-survey`;
 - the CHIME `freq_id` values to scan, or an inventory from which they can be
   inferred.
 
@@ -239,15 +241,13 @@ cadc-get-cert -u <your-cadc-username>
 Begin with a bounded inventory:
 
 ```bash
-datatrawl survey \
-  --telescope chime \
-  --source cadc-datatrail \
+pilot-proxy chime-survey \
   --freq-ids 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844 \
   --name chime-pilots \
   --max-events 5
 ```
 
-The survey resolves its output location through datatrawl's canonical
+The survey resolves its output location through PilotProxy's canonical
 inventory root and prints the path it wrote, for example:
 
 ```text
@@ -257,14 +257,12 @@ inventory root and prints the path it wrote, for example:
 Inspect the inventory without downloading baseband data:
 
 ```bash
-datatrawl explore \
-  --source cadc-datatrail \
-  --telescope chime \
+pilot-proxy chime-inventory \
   --inventory ~/datatrawl-inventories/chime-pilots/inventory.jsonl
 ```
 
 With `--inventory-name`, `chime-scan` resolves the inventory through the same
-datatrawl resolver, so it works from any directory. For an inventory stored
+bundled resolver, so it works from any directory. For an inventory stored
 elsewhere, pass `--source-root <survey-root>` or `--inventory <path>`
 explicitly. Increase `--max-events` only after the bounded scan succeeds.
 
@@ -432,7 +430,7 @@ a hypothetical one.
    interrupt/resume rehearsal is mandatory, since a multi-day run will
    cross session restarts, and resume is the mechanism that makes a
    session death cost minutes instead of days.
-2. **Binary insurance at launch.** The survey pins
+2. **Binary insurance at launch.** Detector products pin
    `kernel_sha256`, and kernel builds are not byte-reproducible: identical
    sources, flags, and toolkit produce different bytes on each invocation
    (nvcc embeds per-invocation artifacts). The copy is the insurance,
@@ -586,8 +584,8 @@ one capturing group:
 --source-freq-id-regex '<regex-with-one-capturing-group>'
 ```
 
-The flag is stored as `source_freq_id_regex` for the datatrawl
-`LocalDirectorySource`; an explicit `--set 'source_freq_id_regex=...'` takes
+The flag is stored as `source_freq_id_regex` for the bundled local source; an
+explicit `--set 'source_freq_id_regex=...'` takes
 precedence over the flag.
 
 ---
@@ -597,15 +595,20 @@ precedence over the flag.
 `pilot-proxy-detector` is undefined on a coarse channel without a pilot: it
 marks every frame invalid or refuses at `begin()`. Control bins (the protected
 608–614 MHz null band, mid-allocation transfer bins, canary bins) go through
-the `pilot-proxy-control` analyzer instead, via raw `datatrawl scan` against a
-surveyed control inventory:
+`pilot-proxy chime-control-scan` against a surveyed control inventory:
 
 ```bash
-datatrawl scan \
-  --inventory ~/datatrawl-inventories/chime-controls/inventory.jsonl \
-  --analyzer pilot-proxy-control \
+pilot-proxy chime-survey \
+  --name chime-controls \
+  --freq-ids 484,491,515,545,591,745
+
+pilot-proxy chime-control-scan \
+  --output-dir "$HOME/pilot_proxy_runs/chime-controls-smoke" \
+  --inventory-name chime-controls \
   --select 484,491,515,545,591,745 \
-  --max-files 2 --max-frames-per-file 4     # drop the caps for the full pass
+  --max-files 2 \
+  --max-frames-per-file 4 \
+  --allow-partial
 ```
 
 No GPU is needed (these scans are network-bound; a CPU-only session is fine),
@@ -613,7 +616,8 @@ and one resumable `<freq_id>.npz` is written per selected bin — see
 `docs/DATA_PRODUCTS.md`, "Control-Band NPZ", for the schema, the
 deployed-geometry `F(b)` recipe, and the Parseval self-check. A capped
 smoke-test product is stamped and cannot be resumed by an uncapped pass;
-point the full run at a fresh `--out`.
+drop the caps and `--allow-partial`, then point the full run at a fresh
+`--output-dir`.
 
 Before trusting control-bin `F` values, run the same analyzer once on a pilot
 `freq_id` and compare against the detector product (powers should match
@@ -629,7 +633,7 @@ weight-quantization level, not bit-exactly).
 | `nvidia-smi: command not found` | CPU-only host or unavailable driver utility | Move the detector run to a GPU node |
 | `nvcc: command not found` | CUDA compiler toolkit is not on `PATH` | Load the CUDA toolkit/module or set `NVCC`/`PATH` |
 | `pilot-proxy-detector needs cupy/CUDA` | Production detector started in a CPU-only environment | Use a GPU node |
-| `no files matched` | `--select` does not match the inventory or local filename `freq_id` | Run `datatrawl explore` or inspect the filenames |
+| `no files matched` | `--select` does not match the inventory or local filename `freq_id` | Run `pilot-proxy chime-inventory` or inspect the filenames |
 | first file's center implies a different `freq_id` | Inventory or filename label disagrees with HDF5 metadata | For local data, pass the current parser with `--set source_freq_id_regex=...`; for archive data, rebuild the inventory |
 | combine finds no common events | The selected channels contain different event sets | Run `chime-combine --report`, choose a stated subset, and recombine with `--drop` |
 | all frames are invalid | The selected coarse channel does not contain the nominal pilot, or the reference denominator is zero | Check `freq_id`, HDF5 frequency metadata, and the detector weights |
@@ -644,16 +648,14 @@ weights, detector geometry, and provenance. The analyzer rejects several
 incompatible resume cases, but that validation does not classify a scientifically
 bad run.
 
-**Rebuilding the kernel mid-survey.** Resumed products pin the kernel by
-hash (`kernel_sha256=` in `detector_version`), and that token is strict:
-resume forgiveness covers only the Python `source=` stamp. Any
-`make build-kernel` therefore makes existing partial products refuse to
-resume under the new `.so`, even for an additive ABI change. Before
-rebuilding on a machine with an in-progress survey, preserve the current
+**Changing code or rebuilding the kernel mid-run.** Detector checkpoints bind
+the PilotProxy source tree and pin the kernel by hash (`kernel_sha256=` in
+`detector_version`). Either change makes existing partial products refuse to
+resume. Before rebuilding on a machine with an in-progress detector scan, preserve the current
 library (for example
 `cp cuda/libfstatistic.so cuda/libfstatistic.so.<git-short-hash>`) and
-resume with the detector option `lib_path=<preserved copy>`; move the
-survey to the new build only at a survey epoch boundary.
+resume with the detector option `lib_path=<preserved copy>`. After a source
+change, start a fresh output directory.
 
 Keep a failed run until its failure has been classified. Do not commit generated
 products while diagnosing the run.
@@ -701,11 +703,11 @@ For each accepted run, archive:
 Do not commit CANFAR products, local HDF5 files, generated figures, or CUDA build
 artifacts to the source repository.
 
-## Compatibility note: datatrawl inventory metadata
+## Inventory migration note
 
-`pilot-proxy chime-scan` selects the `chime-baseband-packed` reader for the
-`pilot-proxy-detector` analyzer. A raw `datatrawl scan` may instead infer the
-canonical unpacked CHIME reader from inventory metadata. In that case, pass the
-packed reader explicitly. See
-[INTEGRATION.md](../INTEGRATION.md#compatibility-note-datatrawl-inventory-metadata)
-for the direct datatrawl commands and the reason for the override.
+Completed `inventory.jsonl` files remain readable, including inventories under
+the default `~/datatrawl-inventories` compatibility path. Do not resume old
+in-progress survey state; use a fresh `pilot-proxy chime-survey --name` or
+`--out`. Detector checkpoints fail closed after source changes, so use a fresh
+scan output directory after updating the checkout. See
+[INTEGRATION.md](../INTEGRATION.md#inventory-and-resume-compatibility).

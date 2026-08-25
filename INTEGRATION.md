@@ -1,214 +1,157 @@
-# pilot-proxy <-> datatrawl integration
+# PilotProxy archive integration
 
-CHIME archive runs require bounded staging, restartable products, and one
-detector product per selected pilot. We use `datatrawl` for that data movement
-while keeping the DTV analysis in `pilot-proxy`.
+CHIME archive runs need bounded staging, restartable products, and one detector
+product per selected pilot. PilotProxy now owns that runtime. Archive discovery
+uses the pinned `datatrail-cli` client; file inspection and transfer use CADC
+clients directly.
 
-The design rule is:
+The bundled archive engine enumerates files, limits the staging area, streams
+arrays, requests checkpoints, and fans a run out by channel. PilotProxy supplies
+the packed CHIME reader, detector and control analyzers, CUDA detector call, and
+product writers.
 
-```text
-shared streaming engine, private science analyzers
-```
+## Runtime layout
 
-Under this rule, `datatrawl` enumerates files, bounds the staging area, streams
-arrays, requests checkpoints, and fans the run out by channel. `pilot-proxy`
-provides the packed CHIME reader, DTV analyzer, CUDA detector call, and canonical
-product writers. A conforming analyzer remains responsible for implementing its
-checkpoint and resume contract; the supplied PilotProxy analyzer does so in its
-per-pilot product.
-
----
-
-## How it fits together
-
-| datatrawl axis | pilot-proxy integration |
+| Part | Implementation |
 |---|---|
-| instrument | datatrawl's bundled `chime` target geometry: 800 MHz band top, 1024 coarse channels, `nfft=16384`, inverted spectral sense |
-| source | datatrawl's `local` and `cadc-datatrail` sources |
-| reader | `chime-baseband-packed` for detector runs |
-| analyzer | `pilot-proxy-detector` |
+| instrument | bundled CHIME target geometry: 800 MHz band top, 1024 coarse channels, `nfft=16384`, inverted spectral sense |
+| source | bundled `local` and `cadc-datatrail` sources |
+| reader | bundled packed CHIME reader for detector runs |
+| analyzer | bundled detector and control analyzers |
+| discovery client | tested revision pinned in `requirements/archive.txt`; indexed release required by the `archive` extra |
 
-We keep one implementation of the detector path:
-
-- `pilot-proxy-detector` calls `pack_chime_block_for_detector` and then the
-  detector. The operational path uses the CUDA kernel by default.
-
-The analyzer writes one `<freq_id>.npz` product for each selected pilot with
-usable input. When the products share `(event, frame-in-file)` identities, the
-combine step aligns the common identities, stacks the per-pilot arrays, and
-writes the canonical PilotProxy outputs:
+`pilot-proxy chime-scan` writes one `<freq_id>.npz` product for each selected
+pilot with usable input. When products share `(event, frame-in-file)` identities,
+the combine step aligns the common identities and writes:
 
 - `chime_detector_outputs.npz`
 - `chime_spectrogram_cache.npz`
 - `chime_reductions_10s.npz`
 - CSV summaries under `tables/`
-- JSON provenance under `run_config.json`, `stats.json`, and `input_manifest.json`
+- JSON provenance in `run_config.json`, `stats.json`, and `input_manifest.json`
 
-If the intersection across all completed pilots is empty, `chime-scan` does not
-write a misleading empty stack. It leaves the completed per-pilot products under
-`_per_pilot/` and reports how to choose a compatible subset with
-`pilot-proxy chime-combine --report` and `--drop`.
+If the intersection across all completed pilots is empty, the scan leaves the
+completed per-pilot products under `_per_pilot/`. Use
+`pilot-proxy chime-combine --report` to inspect compatible subsets.
 
 The `nfft=16384` value is the target frame size for the CHIME F-engine upgrade.
-It is not a statement that the currently deployed CHIME frame has this size.
-Both the datatrawl geometry and `chime_dtv_fengine.json` currently encode this
-target. The receiver profile records the DC-centered baseband-frame
-verification (`profile_status = baseband_frame_verified_2026_07_29`), but that
-does not verify a planned frame size or stream layout for every data lineage.
-Verify those remaining values against the data product used for each
-operational run.
-
----
+It is not a statement that every deployed CHIME product uses this size. Verify
+the frame size and stream layout against the data product used for each run.
 
 ## Setup
 
-The integrated workflow uses `scripts/setup_env.sh`. The script recreates a
-virtual environment, installs both repositories in editable mode, checks plugin
-discovery, and runs the offline datatrawl integration tests. On a GPU node, it
-requires `nvcc`, resolves CuPy, builds the CUDA kernel, and verifies that the
-kernel loads. The exact invocation and the manual fallback are in
-[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup).
-The safety guard refuses protected, checkout-overlapping, and unowned non-empty
-targets. To adopt a genuine virtual environment created by an older checkout,
-set `PILOT_PROXY_ADOPT_LEGACY_VENV=1` for that first guarded rerun; the durable
-ownership record then survives `venv --clear` and makes interrupted rebuilds
-retryable.
+Clone this repository and install its archive workflow:
 
-The operational detector has no CPU fallback in `chime-scan`. Run it on a GPU
-node with a CuPy build that matches the CUDA runtime. The CPU detector injections
-used in the test suite are fixtures for parity and orchestration tests.
+```bash
+git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
+cd ~/pilot-proxy
+python -m pip install -r requirements/archive.txt
+python -m pip install -e ".[archive,chime,test]"
+```
 
----
+`scripts/setup_env.sh` performs the same installation in a guarded virtual
+environment, checks the bundled source, reader, and analyzers directly, and
+builds the CUDA kernel when a GPU and `nvcc` are available. See
+[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#environment-setup) for the exact
+CANFAR sequence.
 
-## Selection: CHIME `freq_id` instead of ATSC channel
+The detector has no CPU fallback in `chime-scan`. Run detector scans on a GPU
+node with CuPy matched to the CUDA runtime. `chime-survey`, `chime-inventory`,
+and the default `chime-control-scan` path do not require a GPU.
+
+## Selection uses CHIME `freq_id`
 
 `pilot-proxy chime-scan --select` accepts CHIME coarse-channel identifiers,
-called `freq_id`s. It does not accept ATSC physical-channel numbers. For
-`--source cadc-datatrail`, `--select` is optional. When it is omitted, we read
-the distinct `freq_id`s from the inventory and print the resolved set before
-staging any file. Either form plans one product per selected `freq_id`; a
-selection with no matching file is skipped. A local source has no inventory from
-which to infer this scope, so `--select` remains required.
+called `freq_id`s. It does not accept ATSC physical-channel numbers. For the
+`cadc-datatrail` source, `--select` is optional. When omitted, the command reads
+the distinct `freq_id`s from the inventory and prints the resolved set before
+staging any file. A local source has no inventory from which to infer the scope,
+so `--select` is required.
 
-A CHIME baseband file contains one coarse channel. Both the local source and the
-CADC inventory identify that channel by `freq_id`. Archive-style filenames use:
+Archive-style filenames use:
 
 ```text
 baseband_<event>_<freq_id>.h5
 ```
 
 For the default DTV physical-channel range 14-36, use the 23 pilot `freq_id`s in
-[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention).
+[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention). Under the
+bundled geometry, the physical-channel 14 pilot maps to `freq_id=844`.
 
-For a single-channel smoke test, select a `freq_id` present in the inventory or
-local filenames. Under the bundled CHIME geometry, the coarse-channel center
-used for the ATSC physical-channel 14 pilot is 470.3125 MHz, which maps to
-`freq_id=844`. This mapping is conditional on that configured geometry.
+## Local source
 
----
-
-## Local source workflow
-
-The local source must recover a `freq_id` from each filename. Its default regular
-expression is:
-
-```text
-_(\d+)\.h5$
-```
-
-Therefore, filenames ending in an underscore, an integer, and `.h5` match:
-
-```text
-baseband_<event>_844.h5
-baseband_<event>_829.h5
-```
-
-The `chime-scan` flag `--source-freq-id-regex` stores its value as
-`source_freq_id_regex` (read by the paired datatrawl local source), so the
-flag overrides the filename parser directly. An explicit
-`--set 'source_freq_id_regex=...'` takes precedence over the flag. The
-equivalent explicit form remains available:
+The default local filename expression is `_(\d+)\.h5$`. Inspect the identifiers
+before selecting one:
 
 ```bash
-pilot-proxy chime-scan ... --set 'source_freq_id_regex=<regex-with-one-capturing-group>'
+find "$LOCAL_H5" -maxdepth 1 -name "*.h5" \
+  | sed -E 's/.*_([0-9]+)\.h5$/\1/' \
+  | sort -n | uniq
 ```
 
-The regular expression must contain one capture group for the integer
-`freq_id`.
-
-Inspect the identifiers present in a local directory before selecting one:
-
-```bash
-find "$LOCAL_H5" -maxdepth 1 -name "*.h5"   | sed -E 's/.*_([0-9]+)\.h5$/\1/'   | sort -n | uniq
-```
-
-Then run one file and one chunk as a bounded GPU smoke test:
-
-```bash
-pilot-proxy chime-scan   --input-dir "$LOCAL_H5"   --output-dir "$HOME/pilot_proxy_runs/detector_smoke_844"   --source local   --analyzer pilot-proxy-detector   --select 844   --max-files 1   --max-chunks-per-file 1   --allow-partial
-```
-
----
-
-## CADC / CANFAR workflow
-
-The archive path begins with a bounded inventory. The following request limits
-the inventory to five events:
-
-```bash
-cadc-get-cert -u <your-cadc-username>
-
-datatrawl survey \
-  --telescope chime \
-  --source cadc-datatrail \
-  --freq-ids 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844 \
-  --name chime-pilots \
-  --max-events 5
-```
-
-The survey resolves its output location through datatrawl's canonical
-inventory root and prints the path it wrote, for example:
-
-```text
-~/datatrawl-inventories/chime-pilots/inventory.jsonl
-```
-
-Inspect the inventory before downloading any baseband file:
-
-```bash
-datatrawl explore \
-  --source cadc-datatrail \
-  --telescope chime \
-  --inventory <path printed by survey>
-```
-
-With `--inventory-name`, `pilot-proxy chime-scan` resolves the inventory
-through the same datatrawl resolver, so it works from any directory. For an
-inventory stored elsewhere, pass `--source-root <survey-root>` or
-`--inventory <path>` explicitly.
-
-First run one selected `freq_id`, one file, and one chunk:
+Then run one file and one chunk:
 
 ```bash
 pilot-proxy chime-scan \
+  --input-dir "$LOCAL_H5" \
   --output-dir "$HOME/pilot_proxy_runs/detector_smoke_844" \
-  --source cadc-datatrail \
-  --inventory-name chime-pilots \
-  --analyzer pilot-proxy-detector \
+  --source local \
   --select 844 \
   --max-files 1 \
   --max-chunks-per-file 1 \
   --allow-partial
 ```
 
-`--allow-partial` is required here because the smoke-test cap deliberately
-leaves inventoried files unprocessed. The resulting `scan_scope.json` still
-records that incomplete scope; omit the flag for production scans so an
-incomplete requested inventory fails closed.
+For another filename layout, pass
+`--source-freq-id-regex '<regex-with-one-capturing-group>'`. An explicit
+`--set 'source_freq_id_regex=...'` still takes precedence.
 
-After the bounded run succeeds, the following command scans every `freq_id`
-present in the inventory. `--select` defaults to that set, `--source` is inferred
-from `--inventory-name`, and `pilot-proxy-detector` is the default analyzer:
+## CADC inventory and scan
+
+Renew the CADC proxy certificate, then build a bounded inventory:
+
+```bash
+cadc-get-cert -u <your-cadc-username>
+
+pilot-proxy chime-survey \
+  --freq-ids 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844 \
+  --name chime-pilots \
+  --max-events 5
+```
+
+The managed inventory is written under the canonical inventory root and the
+command prints the exact `inventory.jsonl` path. The default remains:
+
+```text
+~/datatrawl-inventories/chime-pilots/inventory.jsonl
+```
+
+Set `PILOT_PROXY_INVENTORY_ROOT` to an absolute path to change that root. The
+older `DATATRAWL_INVENTORY_ROOT` name remains a read-compatible fallback.
+
+Inspect the inventory without staging baseband data:
+
+```bash
+pilot-proxy chime-inventory --inventory-name chime-pilots
+```
+
+For an inventory stored elsewhere, pass `--inventory <path>` or
+`--source-root <survey-root>`.
+
+First run one selected channel, one file, and one chunk:
+
+```bash
+pilot-proxy chime-scan \
+  --output-dir "$HOME/pilot_proxy_runs/detector_smoke_844" \
+  --inventory-name chime-pilots \
+  --select 844 \
+  --max-files 1 \
+  --max-chunks-per-file 1 \
+  --allow-partial
+```
+
+`--allow-partial` is required because the cap deliberately leaves inventoried
+files unprocessed. Omit the caps and that acknowledgement for a production run:
 
 ```bash
 pilot-proxy chime-scan \
@@ -216,134 +159,115 @@ pilot-proxy chime-scan \
   --inventory-name chime-pilots
 ```
 
-To scan only part of the inventory, pass the subset explicitly:
+## Control channels
+
+Control bins use the bundled control analyzer and complex CHIME reader:
 
 ```bash
-pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/chime-pilots" \
-  --inventory-name chime-pilots \
-  --select 660,675,690,752
+pilot-proxy chime-survey \
+  --name chime-controls \
+  --freq-ids 484,491,515,545,591,745
+
+pilot-proxy chime-control-scan \
+  --output-dir "$HOME/pilot_proxy_runs/chime-controls-smoke" \
+  --inventory-name chime-controls \
+  --select 484,491,515,545,591,745 \
+  --max-files 2 \
+  --max-frames-per-file 4 \
+  --allow-partial
 ```
 
----
+Drop the caps and `--allow-partial`, and use a fresh output directory for the
+full pass. The default control path is CPU-only; pass `--gpu` only when CuPy
+acceleration is wanted.
 
 ## Post-processing
 
-Validate the combined detector products before plotting them:
+Validate and plot combined detector products:
 
 ```bash
 pilot-proxy validate-products --run-dir <detector_run>
 pilot-proxy chime-plot --run-dir <detector_run>
 ```
 
----
+For ragged archives, inspect and combine a compatible channel subset:
+
+```bash
+pilot-proxy chime-combine --report --work-dir <detector_run>/_per_pilot
+pilot-proxy chime-combine \
+  --work-dir <detector_run>/_per_pilot \
+  --drop 598,690 \
+  --output-dir <subset_run>
+```
 
 ## Order-safety constraint
 
-The PilotProxy analyzer appends frames in the order files are delivered. When
-more than one file can download or remain staged, datatrawl may deliver files in
-completion order rather than source order. That would change `frame_index` and
-`relative_time_s`. Therefore, `pilot-proxy chime-scan` overrides caller values
-and forces `download_workers=1` and `max_staged_files=1`.
+The detector analyzer appends frames in file delivery order. `chime-scan` forces
+one download worker and one staged file so that concurrent delivery cannot
+change `frame_index` or `relative_time_s`.
 
-A raw `datatrawl scan` does not apply this PilotProxy-specific override. Use the
-same single-worker, single-staged-file constraint, or make the analyzer
-order-insensitive before enabling concurrency.
+## Inventory and resume compatibility
 
----
+Completed `inventory.jsonl` files remain readable. This includes managed
+inventories under the default `~/datatrawl-inventories` path and inventories
+whose sidecar still records the canonical unpacked CHIME reader. The supported
+commands choose the packed reader for detector scans and the complex reader for
+control scans.
 
-## Current verification status
+Do not resume survey state created by the earlier runtime. Start the survey with
+a fresh `--name` or explicit `--out`. Reusing a completed `inventory.jsonl` is
+safe; reusing its in-progress survey state is not.
 
-The offline `tests/datatrawl/` suite checks the integration without GPU or CADC
-access. Its parity tests inject a CPU detector fixture and compare synthetic
-`chime-scan` products against products from the earlier PilotProxy runner. These
-tests cover array layout, orchestration, resume behavior, product combination,
-selection, and metadata inference for the tested fixtures.
+Detector checkpoints bind the PilotProxy source tree. After source changes, an
+in-progress detector checkpoint fails closed. Start a fresh output directory.
+Completed current products remain valid inputs to `chime-combine`.
 
-They do not replace the following operational CANFAR/GPU checks:
+Compatibility fields and storage tokens are retained so completed inventories
+and current products remain readable. They are data-format identifiers, not a
+runtime dependency. The older `pilot_proxy.datatrawl_plugins` import paths are
+forwarding shims for source compatibility.
 
-- end-to-end execution of the CUDA detector on a GPU node;
-- streaming through the CADC `cadc-datatrail` source;
+## Verification
+
+The offline archive suite checks array layout, orchestration, resume behavior,
+product combination, selection, metadata inference, and parity against the
+earlier PilotProxy runner. It does not replace these operational gates:
+
+- CUDA detector execution on a GPU node;
+- authenticated streaming through `cadc-datatrail`;
 - real-data parity against a separately validated CHIME run.
 
----
-
-## File manifest
-
-The integration is implemented in these files:
-
-```text
-INTEGRATION.md
-src/pilot_proxy/datatrawl_plugins/__init__.py
-src/pilot_proxy/datatrawl_plugins/_chime_coarse.py
-src/pilot_proxy/datatrawl_plugins/detector.py
-src/pilot_proxy/datatrawl_plugins/packed_reader.py
-src/pilot_proxy/datatrawl_plugins/combine.py
-src/pilot_proxy/datatrawl_plugins/scan.py
-tests/datatrawl/          # offline integration suite (15 modules)
-```
-
-It also changes these existing interfaces:
-
-```text
-pyproject.toml          # datatrawl optional extra and plugin entry points
-src/pilot_proxy/cli.py    # chime-scan CLI wrapper
-README.md               # canonical setup and corrected selection examples
-docs/CANFAR_RUNBOOK.md  # CANFAR operating procedure for chime-scan
-scripts/setup_env.sh    # one-shot setup and preflight script
-```
-
-## Compatibility note: datatrawl inventory metadata
-
-`datatrawl survey` writes `inventory.meta.json` beside the inventory. The
-sidecar records the telescope, source, and canonical reader. For CHIME, that
-canonical reader is `chime-baseband`.
-
-However, `chime-baseband` unpacks samples to complex64, while the detector needs
-the native packed bytes. `pilot-proxy-detector` therefore uses
-`chime-baseband-packed`, which converts the native CHIME offset-binary 4+4-bit
-samples to the kernel's two's-complement int4 layout without a float
-requantization step.
-
-Use the supported wrapper:
+Run the archive checks with:
 
 ```bash
-pilot-proxy chime-scan ...
+python -m pip install -r requirements/archive.txt
+python -m pip install -e ".[archive,chime,test]"
+make archive-integration-check
 ```
 
-For `pilot-proxy-detector`, `chime-scan` selects the `chime-baseband-packed`
-reader.
+## Main files
 
-When invoking datatrawl directly, the inventory metadata would select the wrong
-reader for this analyzer. Override it explicitly:
-
-```bash
-# detector: override the inferred canonical reader
-datatrawl scan \
-  --name chime-pilots \
-  --reader chime-baseband-packed \
-  --analyzer pilot-proxy-detector \
-  --select 844
+```text
+requirements/archive.txt
+src/pilot_proxy/archive/
+src/pilot_proxy/archive/detector.py
+src/pilot_proxy/archive/control.py
+src/pilot_proxy/archive/packed_reader.py
+src/pilot_proxy/archive/scan.py
+src/pilot_proxy/archive/combine.py
+src/pilot_proxy/chime/baseband_reader.py
+tests/archive/
 ```
-
-`--name chime-pilots` resolves through datatrawl's inventory root (default
-`~/datatrawl-inventories/chime-pilots/`; `DATATRAWL_INVENTORY_ROOT`
-overrides). For an inventory stored elsewhere, pass `--inventory <path>` or
-`--root <survey-root>`.
-
-The analyzer also checks the input dtype: if a reader delivers complex64, the
-analyzer stops with an error before any product is written.
 
 ## Exact profile documents
 
-Receiver profiles and detector-core profiles are current-only contract documents.
-The receiver profile has one nested representation; the detector core has one
-`kernel_contract` representation. Every authoritative field is required, unknown
-structural fields are rejected, and serialization emits exactly the accepted
-shape. Receiver-specific narrative notes belong under `metadata` and do not act
-as alternate sources for numerical parameters.
+Receiver profiles and detector-core profiles are current-only contract
+documents. The receiver profile has one nested representation; the detector
+core has one `kernel_contract` representation. Every authoritative field is
+required, unknown structural fields are rejected, and serialization emits
+exactly the accepted shape.
 
-The receiver profile explicitly declares both the normalized coarse-channel
-center and the normalized physical data-DC location. It also declares whether
-the adapter reverses detector windows before the post-spectral-sense weight bank.
-There is no implicit center-at-Nyquist or spectral-sense fallback.
+The receiver profile declares both the normalized coarse-channel center and the
+normalized physical data-DC location. It also declares whether the adapter
+reverses detector windows before the post-spectral-sense weight bank. There is
+no implicit center-at-Nyquist or spectral-sense fallback.

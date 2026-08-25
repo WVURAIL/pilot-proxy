@@ -371,7 +371,7 @@ the selected detector window. The detector core supports \(K=64\) and
 \(2^{14}=16384\), not a statement about the currently deployed CHIME
 correlator. The software does not infer one universal frame size from HDF5
 metadata: set \code{chime-run --frame-size-samples} from verified product
-information, and set the datatrawl instrument \code{nfft} used by
+information, and set the Pilot Proxy CHIME instrument \code{nfft} used by
 \code{chime-scan}. Record the resolved value with each real-data product.
 
 The output matrix is row-major and has shape \code{(rows, K)} or
@@ -771,7 +771,7 @@ intentionally part of the diagnostic.
 \begin{itemize}
   \item The synthetic testbench models GNU Radio ATSC 1.0 signals. It does not model other broadcast standards or establish telescope performance.
   \item The CHIME real-data workflow (\code{chime-run}, \code{chime-scan}, and the HDF5 reader) is documented in \code{docs/CANFAR_RUNBOOK.md} and \code{docs/PUBLICATION_VALIDATION.md}.
-  \item The checked-in CHIME profile and stream map must still agree with the data product being processed. The 16,384-sample frame is the planned F-engine upgrade profile used by this repository, not a claim about the current deployed frame. \code{chime-run} uses its explicit override, and \code{chime-scan} uses the datatrawl instrument \code{nfft}; neither path should be described as automatically discovering a universal HDF5 frame size.
+  \item The checked-in CHIME profile and stream map must still agree with the data product being processed. The 16,384-sample frame is the planned F-engine upgrade profile used by this repository, not a claim about the current deployed frame. \code{chime-run} uses its explicit override, and \code{chime-scan} uses the Pilot Proxy CHIME instrument \code{nfft}; neither path should be described as automatically discovering a universal HDF5 frame size.
   \item Synthetic threshold tests accept a shelf-SNR threshold. The CHIME path instead uses $F>\mu_0$, with \(\mu_0\) fixed by the weight norms. Neither rule is an empirically calibrated telescope false-positive threshold.
   \item Receiver profiles define an adapter contract; they do not establish that a telescope pipeline has been deployed or validated.
   \item Installed packages carry the weight bank and \code{configs/} resources, so default-resource commands can run outside the repository. Repository-relative examples, helper scripts, second-interpreter subprocesses, and the CUDA build require a checkout or explicit paths. The CUDA kernel itself is not packaged and builds from the cloned source tree (\code{make build-kernel}).

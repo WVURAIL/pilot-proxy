@@ -367,12 +367,15 @@ throughput. Products carry the full provenance needed for exact post-hoc
 analysis: per-frame $P_t$ and $P_r$ as u64 integers, the rational
 thresholds, weight-bank hashes, and per-unit absolute time tags.
 
-\textit{datatrawl} supplies the archive side: storage-safe streaming of
-baseband events from the CHIME archive \citep[captured by the system
-described in][]{michilli2021baseband}, resumable scans with exact
-(event, frame) identity, and inventory provenance. Both packages are open
-source with citation metadata (see the Data Availability statement); the
-detector data sheet and user guide are attached to their releases.
+The internal \textit{pilot-proxy} archive runtime supplies storage-safe
+streaming of baseband events from the CHIME archive \citep[captured by the
+system described in][]{michilli2021baseband}, resumable scans with exact
+(event, frame) identity, and inventory provenance. Its
+\texttt{chime-survey}, \texttt{chime-scan}, and
+\texttt{chime-control-scan} commands use Datatrail for CADC discovery and
+authenticated file resolution. The package is open source with citation
+metadata (see the Data Availability statement); the detector data sheet and
+user guide are attached to its releases.
 
 \section{Validation}
 \label{sec:validation}
@@ -1005,8 +1008,8 @@ propagation: gain steps, packet loss, quantizer-state changes, and
 broadband RFI are also common-mode across this 12.2\,kHz span. The low
 tail is the sharpest case --- frames at 0.35--0.38 of baseline are power
 \emph{deficits}, more naturally missing-sample or gain events than added
-emission. \needsdylan{cross-check tail frames against datatrawl/CHIME
-telemetry (dropped-packet counts, gain states); reclassify or exclude
+emission. \needsdylan{cross-check tail frames against Pilot Proxy archive
+metadata and CHIME telemetry (dropped-packet counts, gain states); reclassify or exclude
 instrumentally flagged frames before attributing the remainder to
 propagation.}
 
@@ -1486,12 +1489,10 @@ exact current CADC/CANFAR standard lines.}
 \section*{Data Availability}
 \label{sec:availability}
 
-\textit{pilot-proxy} and \textit{datatrawl} are open source
-(\texttt{github.com/\allowbreak WVURAIL/\allowbreak pilot-proxy},
-\texttt{github.com/\allowbreak WVURAIL/\allowbreak datatrawl}); tagged
-releases with Zenodo DOIs
-will accompany submission, including the detector data sheet and user
-guide, cited as software per Force11/RASTI policy. The repository's
+\textit{pilot-proxy} is open source
+(\texttt{github.com/\allowbreak WVURAIL/\allowbreak pilot-proxy}); a tagged
+release with a Zenodo DOI will accompany submission, including the detector
+data sheet and user guide, cited as software per Force11/RASTI policy. The repository's
 \texttt{analysis/} directory regenerates every figure and table in this
 paper deterministically from the small archived per-frame products
 (byte-identical CSV regeneration is part of its test;
