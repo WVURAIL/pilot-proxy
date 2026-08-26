@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 h5py = pytest.importorskip("h5py")
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.instruments import load_instrument  # noqa: E402
 from pilot_proxy.archive.interfaces import RunContext  # noqa: E402

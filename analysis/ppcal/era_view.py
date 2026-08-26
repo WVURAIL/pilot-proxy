@@ -1,26 +1,8 @@
 # coding=utf-8
-"""Temporary single-era views of a survey product.
-
-``rfisher.residual.threshold_sweep`` characterises a transmitter-*on* epoch
-and takes its sensitivity floor from the *off* epoch.  That is the right
-shape for a sign-on channel, whose latest era is the loud one, and the wrong
-shape for a sign-off channel, whose latest era is the quiet one: naming the
-quiet era as ``off`` would then sweep the era that no longer exists, and
-naming it as ``on`` would draw the floor from the loud era and inflate every
-residual by the contamination the sign-off removed.
-
-So the era is applied to the frames instead of to the epoch arguments.  This
-module writes a product view holding only the frames of one era, leaving the
-unit axis whole so ``frame_unit_index`` stays valid, and the caller passes
-the floor explicitly -- measured on the quietest era the channel has, which
-is the only population that can bound a transmitter-off level.
-"""
+"""Select a measured sensitivity floor from the quietest era."""
 from __future__ import annotations
 
-import contextlib
 import operator
-import os
-import tempfile
 
 import numpy as np
 
@@ -29,38 +11,6 @@ from pilot_proxy.archived_product_keys import ARCHIVED_DATA_SHELF_SNR_DB
 QUIET_ERA_MAX_LEVEL_DB = 1.0
 QUIET_FLOOR_PERCENTILE = 90.0
 MIN_QUIET_FLOOR_FRAMES = 30
-
-
-@contextlib.contextmanager
-def era_product_view(channel, frame_mask, tmpdir=None):
-    """Write an npz holding only ``frame_mask`` frames; yield its path.
-
-    Frame-indexed arrays are subset and ``frame_index`` renumbered; unit-axis
-    arrays and scalars are copied unchanged.
-    """
-    z = channel._z
-    n_frames = channel.n_frames_raw
-    sel = np.zeros(n_frames, dtype=bool)
-    sel[np.flatnonzero(channel.health_include)[frame_mask]] = True
-
-    out = {}
-    for key in z.files:
-        a = z[key]
-        if a.ndim >= 1 and a.shape[0] == n_frames:
-            out[key] = a[sel]
-        else:
-            out[key] = a
-    out["frame_index"] = np.arange(int(sel.sum()), dtype=np.int64)
-
-    fd, path = tempfile.mkstemp(suffix=".npz", prefix="era_ch%02d_" % channel.ch,
-                                dir=tmpdir)
-    os.close(fd)
-    try:
-        np.savez(path, **out)
-        yield path
-    finally:
-        with contextlib.suppress(OSError):
-            os.remove(path)
 
 
 def quiet_era_floor_db(

@@ -71,29 +71,9 @@ def save_fig(fig, path, pdf=False):
     return path
 
 
-def year_ticks(ax, months, axis="x"):
-    """Label January of each year on a survey-month axis."""
-    from .products import M0
-    pos, lab = [], []
-    for j, m in enumerate(months):
-        if (M0 + m) % 12 == 0:
-            pos.append(j)
-            lab.append(str((M0 + m) // 12))
-    if axis == "x":
-        ax.set_xticks(pos)
-        ax.set_xticklabels(lab)
-    else:
-        ax.set_yticks(pos)
-        ax.set_yticklabels(lab)
-
-
 def annotate_channel(ax, text, loc=(0.015, 0.86), size=10, weight="semibold"):
     ax.annotate(text, xy=loc, xycoords="axes fraction", fontsize=size,
                 color=INK, fontweight=weight)
-
-
-def disposition_color(verdict):
-    return EXCISE_COLOR if verdict == "excise" else KEEP_COLOR
 
 
 def db(x, floor=1e-6):

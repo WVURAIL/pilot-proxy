@@ -26,7 +26,6 @@ import pytest
 
 pytest.importorskip("h5py")
 import h5py  # noqa: E402
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.chime import baseband_format as fmt  # noqa: E402
 from pilot_proxy.archive.instruments import load_instrument  # noqa: E402

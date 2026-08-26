@@ -46,7 +46,7 @@ Clone this repository and install its archive workflow:
 git clone https://github.com/WVURAIL/pilot-proxy.git ~/pilot-proxy
 cd ~/pilot-proxy
 python -m pip install -r requirements/archive.txt
-python -m pip install -e ".[archive,chime,test]"
+python -m pip install -e ".[archive,test]"
 ```
 
 `scripts/setup_env.sh` performs the same installation in a guarded virtual
@@ -226,8 +226,8 @@ Completed current products remain valid inputs to `chime-combine`.
 
 Compatibility fields and storage tokens are retained so completed inventories
 and current products remain readable. They are data-format identifiers, not a
-runtime dependency. The older `pilot_proxy.datatrawl_plugins` import paths are
-forwarding shims for source compatibility.
+runtime dependency. Source integrations import the supported
+`pilot_proxy.archive` namespace directly.
 
 ## Verification
 
@@ -243,7 +243,7 @@ Run the archive checks with:
 
 ```bash
 python -m pip install -r requirements/archive.txt
-python -m pip install -e ".[archive,chime,test]"
+python -m pip install -e ".[archive,test]"
 make archive-integration-check
 ```
 

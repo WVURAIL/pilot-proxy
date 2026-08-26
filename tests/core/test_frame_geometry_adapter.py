@@ -131,7 +131,7 @@ def test_stack_stream_time_blocks() -> None:
     stacked = stack_stream_time_blocks(
         streams,
         detector_window_samples=STACK_DETECTOR_WINDOW_SAMPLES,
-        samples_per_block=STACK_FRAME_SIZE_SAMPLES,
+        frame_size_samples=STACK_FRAME_SIZE_SAMPLES,
         block_step_samples=STACK_FRAME_SIZE_SAMPLES,
         num_blocks=STACK_NUM_BLOCKS,
     )

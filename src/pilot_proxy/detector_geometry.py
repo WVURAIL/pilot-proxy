@@ -277,7 +277,7 @@ def stack_stream_time_blocks(
     streams: np.ndarray,
     *,
     detector_window_samples: int,
-    samples_per_block: int,
+    frame_size_samples: int,
     block_step_samples: int,
     num_blocks: int,
 ) -> np.ndarray:
@@ -296,7 +296,7 @@ def stack_stream_time_blocks(
     blocks = []
     for block_index in range(int(num_blocks)):
         start = block_index * int(block_step_samples)
-        stop = start + int(samples_per_block)
+        stop = start + int(frame_size_samples)
         if stop > streams.shape[1]:
             raise ValueError(
                 "not enough time samples to build requested blocks: "

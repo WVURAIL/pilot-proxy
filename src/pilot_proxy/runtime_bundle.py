@@ -34,6 +34,7 @@ from pilot_proxy.integration.weight_generation import (
     generate_weight_table_from_receiver_profile,
     profile_requires_window_time_reversal,
 )
+from pilot_proxy.fine_decision import FINE_DECISION_VERSION
 from pilot_proxy.fine_reduction import (
     CFAR_DEFAULT_GUARD_FINE_BINS,
     FINE_PAD_FACTOR,
@@ -663,7 +664,6 @@ def _validate_manifest_profile_bindings(
 
 FINE_CALIBRATION_STATUS_PENDING = "pending_campaign"
 FINE_CALIBRATION_STATUS_CALIBRATED = "calibrated"
-FINE_CALIBRATION_DECISION_VERSION = "fine_decision_v1"
 FINE_CALIBRATION_DEFAULT_HALF_WIDTH = 2  # survey window convention
 FINE_CALIBRATION_NUM_BINS = 256
 FINE_CALIBRATION_GUARD_PADDED_BINS = (
@@ -776,7 +776,7 @@ def _default_fine_calibration_block() -> dict[str, Any]:
     """
     return {
         "status": FINE_CALIBRATION_STATUS_PENDING,
-        "decision_version": FINE_CALIBRATION_DECISION_VERSION,
+        "decision_version": FINE_DECISION_VERSION,
         "anchor_bin": None,
         "designated_half_width": FINE_CALIBRATION_DEFAULT_HALF_WIDTH,
         "bulk_mask_words_hex": None,
@@ -889,12 +889,12 @@ def _validate_fine_calibration(
                 f"{field}.required_fields",
                 f"missing required fields: {missing_fields}",
             )
-        if block.get("decision_version") != FINE_CALIBRATION_DECISION_VERSION:
+        if block.get("decision_version") != FINE_DECISION_VERSION:
             _add_error(
                 errors,
                 f"{field}.decision_version",
                 f"decision_version {block.get('decision_version')!r} does "
-                f"not match {FINE_CALIBRATION_DECISION_VERSION!r}",
+                f"not match {FINE_DECISION_VERSION!r}",
             )
         status = block.get("status")
         if status not in (

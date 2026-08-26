@@ -94,9 +94,6 @@ with open(OUT / "table3_fulldepth.csv", "w", newline="") as fh:
                     f"{r['ref_edge']:.2f}", int(r["wrapped"]), r["cls"]])
 
 # ---- Table 3 LaTeX ----------------------------------------------------------
-def tex_num(x, fmt):
-    return f"${x:{fmt}}$"
-
 tex = [r"""% Table 3: per-channel survey summary (full depth, tau = null_power_ratio).
 % Requires \usepackage{booktabs}. Deviation is (mean F - null_power_ratio)/null_power_ratio in units of 1e-3.
 \begin{table*}

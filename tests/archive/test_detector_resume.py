@@ -28,7 +28,6 @@ import numpy as np
 import pytest
 
 pytest.importorskip("h5py")
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.chime import baseband_format as fmt
 from pilot_proxy.archive.instruments import load_instrument

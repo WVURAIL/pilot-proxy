@@ -328,13 +328,6 @@ def power_terms_to_raw_pilot_excess(num, den):
     )
 
 
-def power_terms_to_raw_pilot_excess_db(num, den):
-    """Return diagnostic raw pilot excess in dB without norm correction."""
-    return coarse_power_ratio_to_raw_pilot_excess_db(
-        power_terms_to_coarse_power_ratio(num, den)
-    )
-
-
 def pilot_to_data_power_ratio(
     *,
     pilot_below_data_db: float = PILOT_BELOW_DATA_DB,
@@ -578,32 +571,3 @@ def pilot_excess_to_data_shelf_metadata() -> dict[str, float]:
             PILOT_EXCESS_TO_DATA_SHELF_SNR_OFFSET_DB
         ),
     }
-
-
-def coordinate_convention_metadata() -> dict[str, str]:
-    """Return the current detector and display coordinate convention."""
-    return {
-        "raw_detector_quantity": "coarse_power_ratio",
-        "null_quantity": "null_power_ratio",
-        "normalized_level_coordinate": "normalized_coarse_power_ratio_db",
-        "normalized_pilot_excess_coordinate": "normalized_pilot_excess",
-        "pilot_excess_db_coordinate": "pilot_excess_db",
-        "derived_coordinate": "estimated_data_shelf_snr_db",
-        "detector_mask_rule": (
-            "p_target*reference_norm_sum_sq > "
-            "p_ref_sum*target_norm_sq"
-        ),
-    }
-
-
-def add_data_shelf_snr_secondary_axis(ax):
-    """Add a top axis mapping pilot-excess dB to data-shelf SNR."""
-    secax = ax.secondary_xaxis(
-        "top",
-        functions=(
-            pilot_excess_db_to_data_shelf_snr_db,
-            data_shelf_snr_db_to_pilot_excess_db,
-        ),
-    )
-    secax.set_xlabel("DTV data-shelf SNR [dB]")
-    return secax

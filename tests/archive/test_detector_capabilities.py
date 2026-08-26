@@ -3,9 +3,6 @@ from __future__ import annotations
 
 import inspect
 
-import pytest
-
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.detector import (  # noqa: E402
     PilotProxyDetectorAnalyzer,

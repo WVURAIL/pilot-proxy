@@ -8,8 +8,9 @@ from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
 from pilot_proxy import cli
+from pilot_proxy import detect as detect_module
+from pilot_proxy.detector_contract import WEIGHT_COORDINATE_POST_SPECTRAL_SENSE
 from pilot_proxy.paths import CONFIGS_DIR, DEFAULT_WEIGHTS_PATH, PACKAGE_ROOT
 
 CUSTOM_GNURADIO_PYTHON = "/custom/gnuradio-python"
@@ -246,8 +247,20 @@ def test_detect_wrapper_forwards_public_calibration_controls(monkeypatch, tmp_pa
     assert cmd[cmd.index("--pilot-frequency-tolerance-hz") + 1] == (
         NORMALIZED_PILOT_FREQUENCY_TOLERANCE_HZ_TEXT
     )
-    assert "--threshold-data-shelf-snr-db" not in cmd
-    assert "--max-denominator" not in cmd
+
+
+@pytest.mark.parametrize(
+    "removed_option",
+    ("--threshold-data-shelf-snr-db", "--max-denominator"),
+)
+def test_detect_parsers_reject_removed_noop_options(removed_option: str) -> None:
+    for parser, prefix in (
+        (cli.build_parser(), ["detect"]),
+        (detect_module.build_parser(), []),
+    ):
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args([*prefix, removed_option, "1"])
+        assert exc_info.value.code == 2
 
 
 def test_detect_wrapper_has_default_detector_input(monkeypatch) -> None:

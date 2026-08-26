@@ -25,7 +25,6 @@ import numpy as np
 import pytest
 
 pytest.importorskip("h5py")
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.chime import baseband_format as fmt
 
@@ -380,14 +379,11 @@ def test_invariants_allow_release_version_bump_same_geometry():
 
 def test_combine_provenance_token_policy():
     """Combine may retain distinct builds; resume is tested as exact elsewhere."""
-    from pilot_proxy.provenance import detector_version_geometry as geom
-    from pilot_proxy.archive import combine
+    from pilot_proxy.provenance import detector_version_geometry
 
     a, b = _ver("aaa111"), _ver("bbb222")
-    assert a != b and geom(a) == geom(b)                    # stack, retaining both
+    assert a != b and detector_version_geometry(a) == detector_version_geometry(b)
     c = _ver("aaa111", version="1.0.0")
-    assert a != c and geom(a) == geom(c)
+    assert a != c and detector_version_geometry(a) == detector_version_geometry(c)
     d = _ver("aaa111", kernel="other")
-    assert geom(a) != geom(d)
-
-    assert combine._version_geometry(a) == geom(a)
+    assert detector_version_geometry(a) != detector_version_geometry(d)

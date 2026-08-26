@@ -51,7 +51,6 @@ _STATUS_ORDER = {READY: 0, EXPERIMENTAL: 1, STUB: 2}
 # the reader/analyzer boundary. A new kind should be specific enough that two
 # plugins declaring the same value really can be composed without guessing.
 STREAM_COMPLEX_BASEBAND = "complex-baseband-frame"
-STREAM_COMPLEX_GAINS = "complex-gain-solution"
 STREAM_VISIBILITY_CHUNK = "visibility-chunk"
 STREAM_ANY = "*"          # analyzer only: deliberately accepts every stream kind
 

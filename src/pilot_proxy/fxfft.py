@@ -250,13 +250,15 @@ def twiddle_table(n: int) -> tuple[tuple[int, int], ...]:
 # The frozen fxfft256 v1 literal must be exactly what the family produces at
 # n = 256. This is the join between the frozen artifact and the general
 # construction; if it ever fails, the fault is in the family rather than the literal table.
-assert master_twiddle_sha256() == MASTER_TWIDDLE_SHA256, (
-    "master twiddle table does not match its frozen hash; the host libm "
-    "disagrees with the recorded rounding, which would break bit-reproducibility"
-)
-assert twiddle_table(N) == TWIDDLE_Q15, (
-    "master-table decimation does not reproduce the frozen fxfft256 twiddles"
-)
+if master_twiddle_sha256() != MASTER_TWIDDLE_SHA256:
+    raise RuntimeError(
+        "master twiddle table does not match its frozen hash; the host libm "
+        "disagrees with the recorded rounding, which would break bit-reproducibility"
+    )
+if twiddle_table(N) != TWIDDLE_Q15:
+    raise RuntimeError(
+        "master-table decimation does not reproduce the frozen fxfft256 twiddles"
+    )
 
 _BUTTERFLY_GROWTH = 1.0 + 1.41422 + (1.0 / 32768.0)
 

@@ -6,12 +6,11 @@ from __future__ import annotations
 import ctypes
 import operator
 import os
-import re
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
-from .paths import DEFAULT_CONFIG_H, DEFAULT_LIB_PATH
+from .paths import DEFAULT_LIB_PATH
 
 FINE_WINDOWS_PER_STREAM = 128
 
@@ -959,43 +958,3 @@ class _KernelHandle:
         """Destroy the underlying handle when exiting the context."""
         self._lib.FStat_Destroy(self._handle)
         _raise_library_error(self._lib, "FStat_Destroy")
-
-
-# =============================================================================
-# Config Parsing
-# =============================================================================
-
-
-def read_kernel_config_h(
-    config_h_path: str | os.PathLike = DEFAULT_CONFIG_H,
-) -> Optional[dict[str, int]]:
-    """Parse detector-window, weight-term, and reference offset from config.h."""
-    from pathlib import Path
-
-    try:
-        text = Path(config_h_path).read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return None
-
-    def find_define(name: str) -> Optional[int]:
-        match = re.search(
-            rf"^\s*#\s*define\s+{re.escape(name)}\s+(\d+)",
-            text,
-            flags=re.MULTILINE,
-        )
-        if not match:
-            return None
-        return int(match.group(1))
-
-    k_val = find_define("FSTAT_DETECTOR_WINDOW_SAMPLES")
-    n_val = find_define("FSTAT_NUM_WEIGHT_TERMS")
-    reference_offset_bins = find_define("FSTAT_REFERENCE_BIN_OFFSET")
-    if k_val is None or reference_offset_bins is None:
-        return None
-    return {
-        "detector_window_samples": k_val,
-        "num_weight_terms": n_val if n_val is not None else 0,
-        "reference_offset_bins": reference_offset_bins,
-        "K": k_val,
-        "N": n_val if n_val is not None else 0,
-    }

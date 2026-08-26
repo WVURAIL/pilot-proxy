@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from pilot_proxy.archive import invpaths
 from pilot_proxy.archive.scan import _named_inventory_path
 
 
@@ -25,6 +26,5 @@ def test_named_inventory_path_requires_canonical_resolver(monkeypatch) -> None:
 
 def test_named_inventory_path_delegates_to_archive_invpaths() -> None:
     # The archive resolver is the source of truth for named inventories.
-    invpaths = pytest.importorskip("pilot_proxy.archive.invpaths")
     expected = Path(invpaths.resolve_inventory("chime-ch614-706"))
     assert _named_inventory_path("chime-ch614-706", None) == expected

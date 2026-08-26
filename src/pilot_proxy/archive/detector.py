@@ -4,7 +4,7 @@
 The detector functionality of ``pilot_proxy.chime.runner.run_chime_analysis`` as a
 streaming analyzer. It reimplements no DSP: it wraps
 PilotProxy's own ``pack_chime_block_for_detector`` -> ``detector_fn`` (the CUDA kernel
-via ``detect_packed_for_positive_excess`` by default) -> ``_append_detection_rows``
+via ``detect_packed_detector_input`` by default) -> ``_append_detection_rows``
 maths, so the per-frame product matches the runner by construction.
 
 Data path (per coarse channel / pilot, fanned out one ``<channel>.npz`` each):
@@ -47,6 +47,7 @@ from pilot_proxy.chime.hdf5_input import (
 )
 from pilot_proxy.chime.frame_adapter import pack_chime_block_for_detector
 from pilot_proxy.chime.products import SAMPLE_RATE_HZ, atomic_savez_compressed
+from pilot_proxy.detect import detect_packed_detector_input
 from pilot_proxy.detector_contract import (
     NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
     WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
@@ -87,14 +88,15 @@ from pilot_proxy.fine_reduction import (
 from pilot_proxy.detector_reference import REFERENCE_WEIGHT_TERMS
 from pilot_proxy.fxfft import fine_power_fx
 from pilot_proxy.product_contract import (
-    PSD_DB_INVALID as _PSD_DB_INVALID,
-    PSD_DB_MAX as _PSD_DB_MAX,
-    PSD_DB_MIN as _PSD_DB_MIN,
     CurrentProductContractError,
     FINE_STATUS_WITHOUT_TERMS,
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
+    PSD_DB_INVALID,
+    PSD_DB_MAX,
+    PSD_DB_MIN,
+    PSD_DB_STEP,
     SOURCE_EVENT_KEY_SCHEMA_VERSION,
     current_decision_contract,
     current_decision_contract_json,
@@ -114,7 +116,6 @@ _FINE_MODE_CODES = {
     CFAR_MODE_MEDIAN_LEFT: 1,
     CFAR_MODE_QUANTILE_FALLBACK: 2,
 }
-_FINE_MODE_NAMES = {code: name for name, code in _FINE_MODE_CODES.items()}
 
 
 def _exact_backend_u64(value: object, *, field: str) -> int:
@@ -136,11 +137,6 @@ def _exact_backend_u64(value: object, *, field: str) -> int:
             f"detector analyzer: backend field {field!r} is outside uint64"
         )
     return int(result)
-
-# The public product contract starts at schema revision 1 and records
-# active, diagnostic, and candidate decisions explicitly. Resume accepts only
-# this exact schema and decision contract (docs/PRODUCT_SCHEMA.md).
-_SCHEMA_VERSION = PER_PILOT_PRODUCT_SCHEMA_TOKEN
 
 # Native CHIME baseband packing: one uint8 per complex sample, high nibble = real,
 # low nibble = imag, each a 4-bit offset-binary value (stored = signed + 8). This
@@ -495,7 +491,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         requires=("h5py", "pilot-proxy", "GPU+libfstatistic.so (CUDA kernel)"),
         accepts_stream_kinds=(STREAM_PACKED_COMPLEX_INT4_BASEBAND,),
         notes="Use with the 'chime-baseband-packed' reader. Wraps "
-              "pack_chime_block_for_detector + detect_packed_for_positive_excess; "
+              "pack_chime_block_for_detector + detect_packed_detector_input; "
               "detector_fn/kernel/weights injectable via options (CPU ref for tests).",
     )
 
@@ -661,10 +657,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
 
         # -- compatibility guards (refuse; never silently overwrite/complete) --
         saved_schema = str(data["schema_version"].item())
-        if saved_schema != _SCHEMA_VERSION:
+        if saved_schema != PER_PILOT_PRODUCT_SCHEMA_TOKEN:
             raise SystemExit(
                 f"pilot-proxy-detector: product {path} has schema_version "
-                f"{saved_schema!r}, but this build writes {_SCHEMA_VERSION!r}. "
+                f"{saved_schema!r}, but this build writes "
+                f"{PER_PILOT_PRODUCT_SCHEMA_TOKEN!r}. "
                 f"Remove it to rebuild."
             )
         saved_cap = int(data["max_chunks_per_file"])
@@ -876,9 +873,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         if detector_fn is None:
             detector_fn = opts.get("detector_fn")
         if detector_fn is None:
-            from pilot_proxy.chime.runner import detect_packed_for_positive_excess
-
-            detector_fn = detect_packed_for_positive_excess
+            detector_fn = detect_packed_detector_input
 
         if kernel is None:
             kernel = opts.get("kernel")
@@ -1054,8 +1049,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         ]
         self._detector_fn = opts.get("detector_fn")
         if self._detector_fn is None:
-            from pilot_proxy.chime.runner import detect_packed_for_positive_excess
-            self._detector_fn = detect_packed_for_positive_excess
+            self._detector_fn = detect_packed_detector_input
         self._detector_fn_accepts_matched_filter_row_projections = _callable_accepts_keyword(
             self._detector_fn, "emit_row_projections"
         )
@@ -1374,7 +1368,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._detector_version = (
             f"pilot-proxy/{version} source={package_source_sha256()} "
             f"kernel={kernel_version} kernel_sha256={kernel_sha256} "
-            f"{_SCHEMA_VERSION} K={int(self._K)}"
+            f"{PER_PILOT_PRODUCT_SCHEMA_TOKEN} K={int(self._K)}"
         )
 
     def _validate_resumed_provenance(self) -> None:
@@ -1886,7 +1880,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         width = int(self._nfft)
         if psd is None:
             self._psd_codes.append(
-                np.full(width, _PSD_DB_INVALID, dtype=np.int16)
+                np.full(width, PSD_DB_INVALID, dtype=np.int16)
             )
             self._psd_ref.append(float("nan"))
             return
@@ -1898,8 +1892,12 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             db = 10.0 * np.log10(psd / reference)
         codes = np.where(
             np.isfinite(db),
-            np.clip(np.rint(db * 100.0), _PSD_DB_MIN, _PSD_DB_MAX),
-            _PSD_DB_INVALID,
+            np.clip(
+                np.rint(db * (1.0 / PSD_DB_STEP)),
+                PSD_DB_MIN,
+                PSD_DB_MAX,
+            ),
+            PSD_DB_INVALID,
         ).astype(np.int16)
         self._psd_codes.append(codes)
         self._psd_ref.append(reference)
@@ -1985,8 +1983,8 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             psd_db_reference=col_f(
                 self._psd_ref if self._psd_ref else [float("nan")] * n
             ),
-            psd_db_step_per_code=np.asarray(0.01, dtype=np.float64),
-            psd_db_invalid_code=np.asarray(_PSD_DB_INVALID, dtype=np.int16),
+            psd_db_step_per_code=np.asarray(PSD_DB_STEP, dtype=np.float64),
+            psd_db_invalid_code=np.asarray(PSD_DB_INVALID, dtype=np.int16),
             integrated_spectrum_before_mask=(
                 _to_host(self._spec_before) if self._spec_before is not None
                 else np.zeros(int(self._nfft), dtype=np.float64)
@@ -2000,7 +1998,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             frame_in_unit=np.asarray(self._frame_in_unit, dtype=np.int32),
             rational_overflow_count=np.asarray(self._overflow, dtype=np.uint64),
             # Legacy provenance and resume keys.
-            schema_version=np.asarray(_SCHEMA_VERSION),
+            schema_version=np.asarray(PER_PILOT_PRODUCT_SCHEMA_TOKEN),
             nfft=np.asarray(int(self._nfft), dtype=np.int64),
             sample_rate_hz=np.asarray(self._sample_rate_hz, dtype=np.float64),
             detector_window_samples=np.asarray(int(self._K), dtype=np.int64),

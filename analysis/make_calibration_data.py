@@ -40,7 +40,6 @@ def main(argv=None):
     ap.add_argument("--products", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--thresholds", default=None)
-    ap.add_argument("--bao", dest="thresholds", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     args.products = args.products or str(P.PER_PILOT)
     args.out = args.out or str(P.OUT)

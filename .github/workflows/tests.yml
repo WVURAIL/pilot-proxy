@@ -25,7 +25,7 @@ jobs:
       # CPU-only job: the README smoke-test commands plus the full Python test
       # suite. No CUDA, GNU Radio, CADC, or HDF5 data required.
       - run: python -m pip install -U pip setuptools wheel
-      - run: python -m pip install -e ".[plot,test]"
+      - run: python -m pip install -e ".[test]"
       - run: pilot-proxy --help
       - run: pilot-proxy --version
       - run: python -m pytest tests -q
@@ -42,7 +42,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -U pip setuptools wheel
-      - run: python -m pip install -e ".[chime,plot,test]"
+      - run: python -m pip install -e ".[test]"
       - run: make release-check
 
   archive-integration:
@@ -56,7 +56,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install -U pip setuptools wheel
       - run: python -m pip install -r requirements/archive.txt
-      - run: python -m pip install -e ".[archive,chime,plot,test]"
+      - run: python -m pip install -e ".[archive,test]"
       - run: make archive-integration-check
 
   wheel-resources:

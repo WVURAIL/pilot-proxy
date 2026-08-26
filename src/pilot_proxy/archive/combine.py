@@ -77,9 +77,7 @@ from pilot_proxy.product_contract import (
 from .chime_coarse import source_event_key
 
 
-_PUBLISH_JOURNAL_NAME = CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
 _PUBLISH_JOURNAL_SCHEMA = "pilotproxy_combine_publish_journal_v1"
-_PUBLISH_LOCK_NAME = CHIME_COMBINE_PUBLISH_LOCK_FILENAME
 _PUBLISH_LOCK_SCHEMA = "pilotproxy_combine_publish_lock_v1"
 _TRANSACTION_DIR_PREFIX = ".pilotproxy-combine-transaction."
 _GENERATION_LABEL = "combine_generation_manifest"
@@ -145,7 +143,7 @@ def _exclusive_publish_ownership(run_dir: Path) -> Iterator[_PublishOwnership]:
     """
     run = Path(run_dir).absolute()
     _resolved_directory_root(run, what="run directory")
-    lock_path = run / _PUBLISH_LOCK_NAME
+    lock_path = run / CHIME_COMBINE_PUBLISH_LOCK_FILENAME
     flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
     fd: int | None = None
     for _ in range(16):
@@ -307,14 +305,6 @@ def _label(z: Mapping[str, Any]) -> str:
         z, "freq_id", dtype=np.int64, minimum=0, maximum=1023
     )
     return f"ch{ch}/freq_id {fid}"
-
-
-# Every per-frame array the analyzer writes (length n_frames along axis 0),
-# from the product contract's single authoritative list, so a schema bump that
-# adds a per-frame field is aligned here without a second hand-kept copy.
-# Everything else in a product is per-pilot (scalars), per-unit
-# (time/provenance axes), or per-bin (spectra).
-_PER_FRAME_KEYS = PER_FRAME_PRODUCT_KEYS
 
 
 def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
@@ -546,7 +536,7 @@ def _align_frames(
         pos = {i: r for r, i in enumerate(ids.tolist())}
         rows = np.asarray([pos[i] for i in canonical], dtype=np.int64)
         out = dict(z)
-        for key in _PER_FRAME_KEYS:
+        for key in PER_FRAME_PRODUCT_KEYS:
             if key in out:
                 out[key] = np.asarray(out[key])[rows]
         aligned.append(out)
@@ -761,16 +751,6 @@ def _frame_identity(z: Mapping[str, Any]) -> np.ndarray:
     )
 
 
-def _version_geometry(version: str) -> tuple:
-    """The geometry-bearing tokens of a detector_version string: everything
-    except the `pilot-proxy/<version>` and `source=<tree hash>` tokens, which
-    are build provenance. A release version bump, or patches applied
-    mid-survey, change those without touching detector math; the kernel hash,
-    K, and schema tag are what stacking correctness needs. Defined once in
-    pilot_proxy.provenance and shared with the detector's resume check."""
-    return detector_version_geometry(version)
-
-
 def _check_invariants(products: Sequence[Mapping[str, Any]],
                       keys, what: str) -> dict[str, Any]:
     """Assert all per-pilot products agree on geometry/config scalars before stacking.
@@ -847,7 +827,7 @@ def _check_invariants(products: Sequence[Mapping[str, Any]],
                         f"combine: a product is missing '{key}', needed to "
                         f"verify {what}.")
                 versions.append(str(np.asarray(z[key]).reshape(-1)[0]))
-            geoms = {_version_geometry(v) for v in versions}
+            geoms = {detector_version_geometry(v) for v in versions}
             if len(geoms) > 1:
                 raise ValueError(
                     f"combine: per-pilot products disagree on detector_version "
@@ -1469,7 +1449,7 @@ def _load_publish_journal(
 ) -> tuple[Path, list[dict[str, Any]], str]:
     _resolved_directory_root(run_dir, what="run directory")
     journal_path = _safe_descendant(
-        run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+        run_dir, Path(CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME), what="publish journal"
     )
     if journal_path.is_symlink():
         raise RuntimeError(
@@ -1564,7 +1544,9 @@ def _recover_interrupted_publish(
     destination = Path(run_dir).absolute()
     _resolved_directory_root(destination, what="run directory")
     journal_path = _safe_descendant(
-        destination, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+        destination,
+        Path(CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME),
+        what="publish journal",
     )
     if not journal_path.exists() and not journal_path.is_symlink():
         return False
@@ -1620,7 +1602,10 @@ def _recover_interrupted_publish(
         ownership.assert_owned()
         relative = entry["relative_path"]
         if entry["had_previous"]:
-            assert backup is not None
+            if backup is None:
+                raise RuntimeError(
+                    "validated publish journal is missing a required backup"
+                )
             _restore_file_from_backup(
                 backup,
                 canonical,
@@ -1739,7 +1724,7 @@ def _prepare_publish_transaction(
         ],
     }
     journal_path = _safe_descendant(
-        run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+        run_dir, Path(CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME), what="publish journal"
     )
     if journal_path.exists() or journal_path.is_symlink():
         raise RuntimeError(
@@ -1761,7 +1746,9 @@ def _publish_output_set(
     _validate_staged_outputs(staged_outputs)
     with _exclusive_publish_ownership(run_dir) as ownership:
         journal_path = _safe_descendant(
-            run_dir, Path(_PUBLISH_JOURNAL_NAME), what="publish journal"
+            run_dir,
+            Path(CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME),
+            what="publish journal",
         )
         if journal_path.exists() or journal_path.is_symlink():
             _recover_interrupted_publish(run_dir, ownership)
@@ -1800,7 +1787,7 @@ def _cleanup_unreferenced_staging(run_dir: Path, staging_dir: Path) -> bool:
     """Remove staging unless a valid durable journal names this transaction."""
     run = Path(run_dir).absolute()
     staging = Path(staging_dir).absolute()
-    journal = run / _PUBLISH_JOURNAL_NAME
+    journal = run / CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
     preserve = False
     if journal.exists() or journal.is_symlink():
         try:

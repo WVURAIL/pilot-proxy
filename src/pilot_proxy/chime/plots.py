@@ -17,9 +17,8 @@ from pilot_proxy.dtv_units import (
     DB_LINEAR_BASE,
     DB_POWER_FACTOR,
     UNIT_NORMALIZED_POWER_RATIO,
-    normalized_coarse_power_ratio_to_db,
-    pilot_excess_db_to_data_shelf_snr_db,
     data_shelf_snr_db_to_pilot_excess_db,
+    normalized_coarse_power_ratio_to_db,
 )
 from pilot_proxy.plot_style import setup_matplotlib
 
@@ -54,9 +53,8 @@ def _save_figure(fig, path) -> None:
     base = Path(path)
     for fmt in _figure_formats():
         fig.savefig(base.with_suffix("." + fmt), dpi=FIGURE_DPI)
-NORMALIZED_POWER_RATIO_TOP_TICKS_DB = np.asarray(
-    [1.0e-5, 1.0e-4, 0.001, 0.01, 0.1, 1.0, 3.0, 10.0, 20.0]
-)
+
+
 DATA_SHELF_SNR_TOP_TICKS_DB = np.asarray([-60.0, -30.0, -25.0, -20.0, -15.0, -10.0, 0.0])
 
 KNOWN_CHIME_FIGURES = frozenset({
@@ -70,14 +68,6 @@ KNOWN_CHIME_FIGURES = frozenset({
 
 def _setup_matplotlib():
     return setup_matplotlib(force_agg=True)
-
-
-def _finite_percentile(values: np.ndarray, percentile: float) -> float:
-    finite = np.asarray(values, dtype=np.float64)
-    finite = finite[np.isfinite(finite)]
-    if finite.size == 0:
-        return float("nan")
-    return float(np.percentile(finite, percentile))
 
 
 def _finite_values(values: np.ndarray, valid: np.ndarray | None = None) -> np.ndarray:
@@ -118,41 +108,6 @@ def _data_shelf_snr_db_to_normalized_coarse_power_ratio_db(values) -> np.ndarray
     )
 
 
-def _normalized_coarse_power_ratio_db_to_data_shelf_snr_db(values) -> np.ndarray:
-    ratio_db = np.asarray(values, dtype=np.float64)
-    normalized_ratio = DB_LINEAR_BASE ** (ratio_db / DB_POWER_FACTOR)
-    out = np.full(ratio_db.shape, np.nan, dtype=np.float64)
-    valid = normalized_ratio > UNIT_NORMALIZED_POWER_RATIO
-    pilot_excess_db = np.full(ratio_db.shape, np.nan, dtype=np.float64)
-    pilot_excess_db[valid] = DB_POWER_FACTOR * np.log10(
-        normalized_ratio[valid] - UNIT_NORMALIZED_POWER_RATIO
-    )
-    out[valid] = pilot_excess_db_to_data_shelf_snr_db(pilot_excess_db[valid])
-    return out
-
-
-def _add_normalized_power_ratio_top_axis_for_data_shelf_snr(
-    ax,
-    *,
-    xmin: float,
-    xmax: float,
-) -> None:
-    positions = _normalized_coarse_power_ratio_db_to_data_shelf_snr_db(
-        NORMALIZED_POWER_RATIO_TOP_TICKS_DB
-    )
-    keep = np.isfinite(positions) & (positions >= xmin) & (positions <= xmax)
-    if not np.any(keep):
-        return
-    top = ax.twiny()
-    top.set_xlim(ax.get_xlim())
-    top.set_xticks(positions[keep])
-    top.set_xticklabels(
-        [_format_db_tick(value) for value in NORMALIZED_POWER_RATIO_TOP_TICKS_DB[keep]]
-    )
-    top.tick_params(axis="x", labelsize="small")
-    top.set_xlabel(r"Normalized coarse power ratio, $10\log_{10}Q_\mathrm{coarse}\;[\mathrm{dB}]$")
-
-
 def _add_data_shelf_snr_top_axis_for_normalized_power_ratio(ax) -> None:
     xmin, xmax = ax.get_xlim()
     positions = _data_shelf_snr_db_to_normalized_coarse_power_ratio_db(
@@ -186,15 +141,6 @@ def _robust_color_limits(
         lo -= 1.0
         hi += 1.0
     return lo, hi
-
-
-def _product_frequency_hz(product: np.lib.npyio.NpzFile) -> np.ndarray:
-    if "chime_frequency_hz" not in product.files:
-        raise KeyError(
-            "product is missing chime_frequency_hz; pilot frequency is not a "
-            "coarse-channel-center substitute"
-        )
-    return np.asarray(product["chime_frequency_hz"], dtype=np.float64)
 
 
 def _manifest_frequency_hz(

@@ -71,6 +71,12 @@ the stricter validators do not reinterpret incomplete legacy products.
 
 ### Changed
 
+- Standardized programmatic frame-size naming on `frame_size_samples` while
+  preserving the `--frame-size-samples` spelling and persisted format tokens.
+- Centralized the PSD encoding step and fine-decision version instead of
+  repeating their literal values in runtime writers.
+- Made the test extra self-contained for plotting tests and expanded the
+  configured Ruff check to the complete repository.
 - Reference-placement diagnostics now say what the `edge_wrapped` bookkeeping
   flag means physically (`frame_origin_description`: under a center-at-DC
   profile the wrap crosses the coarse-channel center/DC, not the channel edge)
@@ -90,6 +96,11 @@ the stricter validators do not reinterpret incomplete legacy products.
 
 ### Removed
 
+- Pre-2.0 BAO-named Python/CLI aliases, detector wrapper aliases, and the
+  `pilot_proxy.datatrawl_plugins` forwarding namespace.
+- Hidden no-op detection flags that were accepted but never affected results.
+- Unreferenced runtime and analysis helpers, stale compatibility constants,
+  and the unused pandas dependency.
 - The receiver-specific CHIME detector-contract token and its public builder
   aliases. Use `pilotproxy_detector_contract_v1`, `build_detector_contract`,
   and `validate_detector_contract`.
@@ -104,6 +115,10 @@ the stricter validators do not reinterpret incomplete legacy products.
 
 ### Fixed
 
+- CUDA tests now unpack the availability result correctly instead of treating
+  its `(available, reason)` tuple as a truth value.
+- Runtime invariants remain active under optimized Python, and the CANFAR
+  launcher now exits unsuccessfully when a session misses its startup timeout.
 - `chime-baseband-packed` now classifies open/schema failures as an
   unreadable unit via datatrawl's `unreadable_file()` (quarantine + continue),
   matching the built-in `chime-baseband` reader, instead of crashing an entire

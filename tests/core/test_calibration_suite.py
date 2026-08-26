@@ -226,12 +226,6 @@ def test_threshold_table_reads_positive_supplied_etas(tmp_path):
     assert rows[14]["tau_measured"] is True
 
 
-def test_threshold_build_aliases_are_mutually_exclusive():
-    with pytest.raises(ValueError, match="legacy bao_csv alias"):
-        calibration_state.build(
-            "unused", threshold_csv="thresholds.csv", bao_csv="legacy.csv")
-
-
 # --------------------------------------------------------------------------
 # geometry, the month grid, and the era container
 # --------------------------------------------------------------------------

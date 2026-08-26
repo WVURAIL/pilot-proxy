@@ -35,18 +35,20 @@ the row that matches the result you need:
 
 | Goal | Guide to follow | Needs GPU? | Needs archive extras? |
 | --- | --- | :---: | :---: |
-| Run the CHIME detector on the CADC archive (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) | Yes | Yes |
+| Run the frozen CHIME archive inventory on the local WSL workstation | [docs/LOCAL_PROCESSING.md](docs/LOCAL_PROCESSING.md) | Yes | Yes |
+| Run a bounded CHIME archive job on remote CANFAR (`chime-scan`) | [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md) | Yes | Yes |
 | Check the package installs and the CLI loads | This README: minimal CPU-only smoke test (below) | No | No |
 | Generate / audit synthetic ATSC | This README: standalone testbench (needs GNU Radio) | No | No |
 | Run the CUDA detector / SNR evaluation | This README: standalone CUDA path | Yes | No |
 | Publication SNR sweeps without a GPU | This README: `pilot-proxy evaluate-snr --input-iq <capture> --detector-backend cpu-reference --noise-source python` (the capture is generated once with GNU Radio) | No | No |
 
-For a CANFAR run, begin with the
-[runbook](docs/CANFAR_RUNBOOK.md). It gives the required order: launch the
-session, clone this repository, run `setup_env.sh` to build the environment and
-CUDA kernel, survey the archive, and run the scan. The standalone sections
-below are not prerequisites. `setup_env.sh` performs its own sanity checks, so
-the README smoke test is also optional on that path.
+For the frozen local archive run, begin with
+[the local processing guide](docs/LOCAL_PROCESSING.md); it owns the local
+revision, gate, staging, launch, resume, and closeout procedure. For a bounded
+remote A100 run, begin with the [CANFAR guide](docs/CANFAR_RUNBOOK.md). The
+standalone sections below are not prerequisites for either archive workflow.
+`setup_env.sh` performs its own sanity checks, so the README smoke test is also
+optional on those paths.
 
 ---
 
@@ -110,10 +112,11 @@ python -m pip install -e ".[test]"
 make test-python
 ```
 
-The `test` extra includes `h5py` because the checked-in tests exercise the CHIME
-HDF5 adapters. These tests generate or mock their inputs, so they do not require
-CHIME data files. CADC-backed checks are skipped when archive credentials are
-not available.
+The `test` extra includes `h5py`, Matplotlib, and PyYAML because the checked-in
+tests exercise the CHIME HDF5 adapters, plotting paths, and YAML configuration
+loaders. These tests generate or mock their inputs, so they do not require CHIME
+data files. CADC-backed checks are skipped when archive credentials are not
+available.
 
 `make test` runs `test-kernel` before `test-python`; therefore, it is **not** a
 CPU-only target. Use it on a CUDA build host after checking both the driver and
@@ -161,9 +164,10 @@ operating documentation as follows:
 - `docs/PER_PILOT_PRODUCT_FIELDS.md` - detailed shared-field reference.
 - `docs/FINE_REDUCTION_PRODUCTS.md` - fine-measurement and diagnostic fields.
 - `docs/CHIME_RUN_WORKFLOW.md` - staged-data workflow (`chime-run`) for
-  already-staged HDF5 directories; use `docs/CANFAR_RUNBOOK.md` for
+  already-staged HDF5 directories; choose the local or CANFAR guide below for
   archive-scale `chime-scan` runs.
 - `docs/DATA_PRODUCTS.md` - emitted file, array, and table definitions.
+- `docs/LOCAL_PROCESSING.md` - authoritative local WSL archive procedure.
 - `docs/CANFAR_RUNBOOK.md` - bounded CANFAR operating procedure.
 - `docs/KOTEKAN_INTERFACE_PREP.md` - runtime-bundle and Kotekan handoff notes.
 - `docs/DESIGN_DECISIONS.md` - recorded detector and integration decisions.
@@ -192,7 +196,7 @@ checkout and stage it under ``~/.cache/pilot_proxy/libfstatistic.so``.
 
 The integrated workflow uses this repository and the pinned archive client in
 `requirements/archive.txt`. The `scripts/setup_env.sh` script recreates a
-virtual environment and installs `.[archive,chime,test]`. It checks the bundled
+virtual environment and installs `.[archive,test]`. It checks the bundled
 source, reader, and analyzer classes directly.
 On a GPU node, it also requires `nvcc`, builds the CUDA kernel, and checks that
 the kernel loads. Because the script **removes and recreates** the target
@@ -214,7 +218,7 @@ For a manual installation in an active virtual environment:
 
 ```bash
 python -m pip install -r requirements/archive.txt
-python -m pip install -e ".[archive,chime,test]"
+python -m pip install -e ".[archive,test]"
 ```
 
 ---

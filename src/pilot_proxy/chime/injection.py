@@ -82,7 +82,8 @@ def resolve_baseband_frequency_hz(
         pilot_frequency_hz = float(physical_channel_to_pilot_hz(physical_channel))
     if pilot_frequency_hz is not None:
         baseband_frequency_hz = float(pilot_frequency_hz) - float(center_hz)
-    assert baseband_frequency_hz is not None
+    if baseband_frequency_hz is None:
+        raise RuntimeError("tone frequency resolution produced no baseband frequency")
     limit = MAX_ABS_NORMALIZED_FREQUENCY * float(sample_rate_hz)
     if abs(baseband_frequency_hz) > limit:
         raise ValueError(

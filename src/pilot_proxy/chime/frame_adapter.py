@@ -13,10 +13,7 @@ from pilot_proxy.detector_geometry import (
     apply_spectral_sense_to_detector_matrix,
     stream_time_block_to_detector_matrix,
 )
-from pilot_proxy.integration.packing import (
-    estimate_complex_scale,
-    pack_channelized_streams_for_detector,
-)
+from pilot_proxy.integration.packing import pack_channelized_streams_for_detector
 from pilot_proxy.integration.schemas import (
     COMBINE_MODE_COMBINED_STREAMS,
     QUANTIZATION_SCALE_MODE_GLOBAL,
@@ -135,20 +132,6 @@ def baseband_power_by_frame(
         else:
             out[index] = float(np.mean(np.abs(view) ** 2, dtype=np.float64))
     return out
-
-
-def estimate_global_complex_scale(
-    values: np.ndarray,
-    *,
-    bits_per_component: int = DEFAULT_BITS_PER_COMPONENT,
-    clip_sigma: float = 3.0,
-) -> float:
-    """Compatibility wrapper around the canonical integration estimator."""
-    return estimate_complex_scale(
-        values,
-        bits_per_component=int(bits_per_component),
-        clip_sigma=float(clip_sigma),
-    )
 
 
 def _pack_native_quantized_block(
@@ -282,7 +265,6 @@ def pack_chime_block_for_detector(
 __all__ = [
     "PackedChimeBlock",
     "baseband_power_by_frame",
-    "estimate_global_complex_scale",
     "pack_chime_block_for_detector",
     "repack_chime_offset_binary_i4_to_twos_complement",
     "unpack_chime_offset_binary_i4_to_complex",

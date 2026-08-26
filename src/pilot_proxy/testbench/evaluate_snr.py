@@ -362,20 +362,6 @@ def apply_channel_impairments(
     return np.ascontiguousarray(clean * np.complex64(gain) * rotation)
 
 
-def estimate_quantization_scale(
-    streams: np.ndarray,
-    *,
-    bits: int,
-    clip_sigma: float,
-) -> float:
-    """Compatibility wrapper around the canonical integration estimator."""
-    return estimate_complex_scale(
-        streams,
-        bits_per_component=int(bits),
-        clip_sigma=float(clip_sigma),
-    )
-
-
 def _resolve_rf_center_hz(args: argparse.Namespace) -> float:
     if args.rf_center_mhz is not None:
         return float(args.rf_center_mhz) * HZ_PER_MHZ
@@ -469,7 +455,7 @@ def assert_clean_pilot_lands_on_target(
     selected_weight_layout: dict[str, Any],
     cpu_float_weights: np.ndarray,
     detector_window_samples: int,
-    samples_per_block: int,
+    frame_size_samples: int,
     spectral_sense: str,
     minimum_normalized_ratio: float = 8.0,
 ) -> dict[str, Any]:
@@ -486,7 +472,7 @@ def assert_clean_pilot_lands_on_target(
     """
     rows = _float_streams_for_reference(
         clean_streams,
-        samples_per_block=int(samples_per_block),
+        frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
         spectral_sense=str(spectral_sense),
     )
@@ -538,13 +524,13 @@ def assert_clean_pilot_lands_on_target(
 def _float_streams_for_reference(
     streams: np.ndarray,
     *,
-    samples_per_block: int,
+    frame_size_samples: int,
     detector_window_samples: int,
     spectral_sense: str,
 ) -> np.ndarray:
     """Convert unquantized streams to detector rows for the CPU float path."""
     matrix = stream_time_block_to_detector_matrix(
-        np.asarray(streams)[:, : int(samples_per_block)],
+        np.asarray(streams)[:, : int(frame_size_samples)],
         detector_window_samples=int(detector_window_samples),
     )
     return apply_spectral_sense_to_detector_matrix(
@@ -556,7 +542,7 @@ def _float_streams_for_reference(
 def _pack_streams_for_kernel(
     streams: np.ndarray,
     *,
-    samples_per_block: int,
+    frame_size_samples: int,
     detector_window_samples: int,
     bits: int,
     scale: float,
@@ -565,7 +551,7 @@ def _pack_streams_for_kernel(
     feed_channel_streams = np.asarray(streams)[:, np.newaxis, :]
     packed_input = pack_channelized_streams_for_detector(
         feed_channel_streams,
-        frame_size_samples=int(samples_per_block),
+        frame_size_samples=int(frame_size_samples),
         detector_window_samples=int(detector_window_samples),
         spectral_sense=spectral_sense,
         quantization_scale_mode=QUANTIZATION_SCALE_MODE_GLOBAL,
@@ -1013,7 +999,7 @@ def _evaluate_one_trial(
 
     cpu_float_rows = _float_streams_for_reference(
         streams,
-        samples_per_block=int(args.samples_per_block),
+        frame_size_samples=int(args.frame_size_samples),
         detector_window_samples=int(args.detector_window_samples),
         spectral_sense=str(args.spectral_sense),
     )
@@ -1060,15 +1046,15 @@ def _evaluate_one_trial(
     scale = (
         float(args.scale)
         if args.scale is not None
-        else estimate_quantization_scale(
+        else estimate_complex_scale(
             streams,
-            bits=int(args.bits),
+            bits_per_component=int(args.bits),
             clip_sigma=float(args.clip_sigma),
         )
     )
     packed = _pack_streams_for_kernel(
         streams,
-        samples_per_block=int(args.samples_per_block),
+        frame_size_samples=int(args.frame_size_samples),
         detector_window_samples=int(args.detector_window_samples),
         bits=int(args.bits),
         scale=scale,
@@ -1733,7 +1719,7 @@ def build_parser(add_help: bool = True) -> argparse.ArgumentParser:
     parser.add_argument("--channel-index", type=int, default=None)
     parser.add_argument(
         "--frame-size-samples",
-        dest="samples_per_block",
+        dest="frame_size_samples",
         type=int,
         default=DEFAULT_FRAME_SIZE_SAMPLES,
         help="Frame size, in channelized samples, to evaluate per trial.",
@@ -1838,7 +1824,7 @@ def run(args: argparse.Namespace) -> int:
         raise SystemExit("--noise-trials must be positive.")
     if args.num_input_streams <= 0:
         raise SystemExit("--num-input-streams must be positive.")
-    if args.samples_per_block % args.detector_window_samples != 0:
+    if args.frame_size_samples % args.detector_window_samples != 0:
         raise SystemExit(
             "--frame-size-samples must be an integer multiple of the locked "
             "128-sample detector window."
@@ -1865,7 +1851,7 @@ def run(args: argparse.Namespace) -> int:
     if args.save_noisy_iq:
         noisy_iq_dir.mkdir(parents=True, exist_ok=True)
 
-    num_output_samples = int(args.samples_per_block)
+    num_output_samples = int(args.frame_size_samples)
     required = required_iq_samples(
         iq_sample_rate_hz=float(args.iq_sample_rate_hz),
         adc_sample_rate_hz=float(args.adc_sample_rate_hz),
@@ -1976,7 +1962,7 @@ def run(args: argparse.Namespace) -> int:
         selected_weight_layout=selected_weight_layout,
         cpu_float_weights=cpu_float_weights,
         detector_window_samples=int(args.detector_window_samples),
-        samples_per_block=int(args.samples_per_block),
+        frame_size_samples=int(args.frame_size_samples),
         spectral_sense=str(args.spectral_sense),
     )
 
@@ -2109,7 +2095,7 @@ def run(args: argparse.Namespace) -> int:
         dtype=np.float64,
     )
     input_layout = DetectorFrameLayout(
-        frame_size_samples=int(args.samples_per_block),
+        frame_size_samples=int(args.frame_size_samples),
         detector_window_samples=int(args.detector_window_samples),
         num_input_streams=int(args.num_input_streams),
         num_selected_channels=1,
@@ -2160,7 +2146,7 @@ def run(args: argparse.Namespace) -> int:
         "selected_weight_layout": selected_weight_layout,
         "selected_weight_coefficients": selected_weight_coefficients,
         "result_schema": result_schema_object(
-            frame_size_samples=int(args.samples_per_block),
+            frame_size_samples=int(args.frame_size_samples),
             num_input_streams=int(args.num_input_streams),
             detector_window_samples=int(args.detector_window_samples),
             dtv_bandwidth_hz=float(args.dtv_bandwidth_hz),

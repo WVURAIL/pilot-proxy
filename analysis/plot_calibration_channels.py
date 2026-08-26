@@ -268,7 +268,6 @@ def main(argv=None):
     ap.add_argument("--products", default=None)
     ap.add_argument("--out", default=None)
     ap.add_argument("--thresholds", default=None)
-    ap.add_argument("--bao", dest="thresholds", help=argparse.SUPPRESS)
     ap.add_argument("--only", default=None,
                     help="comma-separated physical channels")
     args = ap.parse_args(argv)

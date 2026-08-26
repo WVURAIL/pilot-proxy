@@ -49,13 +49,11 @@ from pilot_proxy.integration import (
     receiver_frequency_to_channel,
 )
 from pilot_proxy.integration.stream_layout import validate_integration_compatibility
+from pilot_proxy.integration.packing import estimate_complex_scale
 from pilot_proxy.kernel import FStatKernel
 from pilot_proxy.paths import DEFAULT_LIB_PATH, DEFAULT_WEIGHTS_PATH
 from pilot_proxy.provenance import file_sha256, sidecar_manifest_path
-from .frame_adapter import (
-    estimate_global_complex_scale,
-    pack_chime_block_for_detector,
-)
+from .frame_adapter import pack_chime_block_for_detector
 from .hdf5_input import (
     CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
     PACKED_TWOS_COMPLEMENT_COMPLEX_INT4,
@@ -78,36 +76,14 @@ from .segmented_input import available_frames, iter_frame_chunks
 
 DEFAULT_FRAMES_PER_CHUNK = 1
 DEFAULT_FRAME_SIZE_SAMPLES = 16_384
-DEFAULT_RECEIVER_PROFILE = DEFAULT_CHIME_DTV_RECEIVER_PROFILE
-DEFAULT_STREAM_MAP = DEFAULT_CHIME_STREAM_MAP
 DEFAULT_CALIBRATION_SECONDS = 2.0
 DetectorFn = Callable[..., dict[str, Any]]
-
-
-def detect_packed_for_positive_excess(
-    *,
-    packed: np.ndarray,
-    weights: np.ndarray,
-    kernel: Any,
-    emit_row_projections: bool = False,
-) -> dict[str, Any]:
-    """Run detector powers for CHIME positive-excess masking."""
-    return detect_packed_detector_input(
-        packed=packed,
-        weights=weights,
-        kernel=kernel,
-        emit_row_projections=emit_row_projections,
-    )
 
 
 class WeightBankLike(Protocol):
     path: Any
     manifest: Mapping[str, Any]
 
-
-
-def _normalized_positive_excess_policy() -> dict[str, Any]:
-    return normalized_positive_excess_policy()
 
 
 def _exact_detection_u64(value: object, *, field: str) -> int:
@@ -371,7 +347,7 @@ def _calibration_scale_for_dataset(
         start_sample=0,
         stop_sample=int(calibration_samples),
     )
-    return estimate_global_complex_scale(
+    return estimate_complex_scale(
         block,
         bits_per_component=int(bits_per_component),
         clip_sigma=float(clip_sigma),
@@ -696,8 +672,8 @@ def run_chime_analysis(
     *,
     input_dir: Path,
     output_dir: Path,
-    receiver_profile_path: Path = DEFAULT_RECEIVER_PROFILE,
-    stream_map_path: Path | None = DEFAULT_STREAM_MAP,
+    receiver_profile_path: Path = DEFAULT_CHIME_DTV_RECEIVER_PROFILE,
+    stream_map_path: Path | None = DEFAULT_CHIME_STREAM_MAP,
     weights_path: Path = DEFAULT_WEIGHTS_PATH,
     lib_path: Path = DEFAULT_LIB_PATH,
     dataset_path: str | None = None,
@@ -715,7 +691,7 @@ def run_chime_analysis(
     calibration_seconds: float = DEFAULT_CALIBRATION_SECONDS,
     plot: bool = False,
     kernel: Any | None = None,
-    detector_fn: DetectorFn = detect_packed_for_positive_excess,
+    detector_fn: DetectorFn = detect_packed_detector_input,
     weights_by_channel: Mapping[int, np.ndarray] | None = None,
 ) -> dict[str, Path]:
     """Run the CHIME adapter without loading all samples into memory."""
@@ -1006,7 +982,7 @@ def run_chime_analysis(
         "max_frames": None if max_frames is None else int(max_frames),
         "absolute_time_used": False,
         "weight_coordinate": weight_coordinate,
-        "mask_policy": _normalized_positive_excess_policy(),
+        "mask_policy": normalized_positive_excess_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
         **provenance,
@@ -1059,7 +1035,7 @@ def run_chime_analysis(
         "null_power_ratio_by_channel": [float(v) for v in null_power_ratio_by_channel],
         "kernel_version": _kernel_version_string(kernel_obj),
         "kernel_specs": kernel_specs_dict,
-        "mask_policy": _normalized_positive_excess_policy(),
+        "mask_policy": normalized_positive_excess_policy(),
         "detector_contract": detector_contract,
         "provenance": provenance,
         **provenance,
@@ -1160,9 +1136,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument(
-        "--receiver-profile", type=Path, default=DEFAULT_RECEIVER_PROFILE
+        "--receiver-profile", type=Path, default=DEFAULT_CHIME_DTV_RECEIVER_PROFILE
     )
-    parser.add_argument("--stream-map", type=Path, default=DEFAULT_STREAM_MAP)
+    parser.add_argument("--stream-map", type=Path, default=DEFAULT_CHIME_STREAM_MAP)
     parser.add_argument(
         "--weights-path", dest="weights_path", type=Path, default=DEFAULT_WEIGHTS_PATH
     )

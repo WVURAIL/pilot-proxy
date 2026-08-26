@@ -48,8 +48,9 @@ def _import_cupy_or_skip():
         import cupy as cp
     except Exception:  # pragma: no cover - GPU-less hosts
         pytest.skip("cupy is not available")
-    if not cuda_available():
-        pytest.skip("CUDA device is not available")
+    ok, reason = cuda_available()
+    if not ok:
+        pytest.skip(f"CUDA device is not available: {reason}")
     return cp
 
 

@@ -18,7 +18,6 @@ SOURCE_CHECKOUT_ROOT = (
     else None
 )
 REPO_ROOT = SOURCE_CHECKOUT_ROOT or PACKAGE_ROOT
-_SOURCE_DATA_ROOT = SOURCE_CHECKOUT_ROOT
 
 
 def _package_data_root() -> Path:
@@ -27,10 +26,10 @@ def _package_data_root() -> Path:
 
 
 def _data_root() -> Path:
-    if _SOURCE_DATA_ROOT is not None:
-        source_weight = _SOURCE_DATA_ROOT / "weights" / "chime_dtv_weights_k128.bin"
+    if SOURCE_CHECKOUT_ROOT is not None:
+        source_weight = SOURCE_CHECKOUT_ROOT / "weights" / "chime_dtv_weights_k128.bin"
         if source_weight.is_file():
-            return _SOURCE_DATA_ROOT
+            return SOURCE_CHECKOUT_ROOT
     # Wheels install uncompressed package files, so importlib.resources returns
     # a filesystem-backed Traversable that remains usable as a pathlib.Path.
     return _package_data_root()

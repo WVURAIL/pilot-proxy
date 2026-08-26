@@ -18,7 +18,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.control import (      # noqa: E402
     ControlBandAnalyzer, DETECTOR_WINDOW_SAMPLES, band_power, coarse_marginal,

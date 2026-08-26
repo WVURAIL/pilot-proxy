@@ -3,11 +3,9 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 
-from .result_schema import MASK_VALUE_EXCLUDED, mask_convention
+from .result_schema import MASK_VALUE_EXCLUDED
 
 
 def masked_mean_excluding(
@@ -40,8 +38,3 @@ def masked_mean_excluding(
     if np.isscalar(numerator):
         return float(np.asarray(out).reshape(()))
     return out
-
-
-def mask_metadata() -> dict[str, Any]:
-    """Return the public masking convention metadata."""
-    return mask_convention()

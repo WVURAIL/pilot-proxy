@@ -422,8 +422,10 @@ class DetectorWeightBank:
                 f"{requested:.6f} MHz is not in "
                 f"[{lower_mhz:.6f}, {upper_mhz:.6f}] MHz."
             )
-        assert self._receiver_frequency_order is not None
-        assert self._receiver_channel_width_mhz is not None
+        if self._receiver_frequency_order is None:
+            raise RuntimeError("receiver frequency order was not initialized")
+        if self._receiver_channel_width_mhz is None:
+            raise RuntimeError("receiver channel width was not initialized")
         if self._receiver_frequency_order == FREQUENCY_ORDER_DESCENDING_RF:
             channel_coordinate = (
                 float(self.reference_freqs[0]) - requested

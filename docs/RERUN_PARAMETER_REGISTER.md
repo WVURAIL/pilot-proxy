@@ -72,7 +72,7 @@ current production gate instead of silently inheriting the expected values above
 
 Sources: [`chime_dtv_fengine.json`](../configs/receiver_profiles/chime_dtv_fengine.json),
 [`pilotproxy_cuda_local_reference_power_ratio.json`](../configs/detector_core/pilotproxy_cuda_local_reference_power_ratio.json),
-[`detector.py`](../src/pilot_proxy/datatrawl_plugins/detector.py),
+[`detector.py`](../src/pilot_proxy/archive/detector.py),
 [`METHOD_SPEC.md`](METHOD_SPEC.md), and
 [`fine_reduction.py`](../src/pilot_proxy/fine_reduction.py).
 
@@ -124,7 +124,7 @@ pins, not claims that a scientific choice is optimal.
 | Master twiddle length | 2048 | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
 | Master twiddle SHA-256 | `fec7f22309f4689a1a4a26258dc562487a02e33698a5e0341e2db1928f58d197` | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
 | Fine terms | `[frames, 3, 256]` unsigned 64-bit integers | [`PER_PILOT_PRODUCT_FIELDS.md`](PER_PILOT_PRODUCT_FIELDS.md) |
-| Stored diagnostic fine designated bins | predicted pilot residual with 30-bin half-width; exact array stored per product | [`detector.py`](../src/pilot_proxy/datatrawl_plugins/detector.py) |
+| Stored diagnostic fine designated bins | predicted pilot residual with 30-bin half-width; exact array stored per product | [`detector.py`](../src/pilot_proxy/archive/detector.py) |
 | Fine census exclusions | empty unless explicitly supplied; exact array stored per product | [`fine_reduction.py`](../src/pilot_proxy/fine_reduction.py) |
 | Per-frame spectrum | `[frames, 16384]` signed 16-bit codes when the required `nfft` passes | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
 | Spectrum encoding | 0.01 dB per code about the per-frame reference; invalid code -32768 | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
@@ -247,10 +247,9 @@ used only for an explicitly labeled screening calculation. See RFIsher's
 sensitivity values, and refusal behavior.
 
 The local calibration suite below is a historical report. Its keep/excise
-labels and fallback threshold are never operational exports. The neutral
-`--thresholds` option and `PP_THRESHOLD_TABLE` environment variable are
-current; `--bao`, `PP_ETA_BAO`, `bao_csv`, and the default
-`eta_bao.csv` filename remain compatibility aliases only.
+labels and fallback threshold are never operational exports. Threshold input
+uses the `--thresholds` option or `PP_THRESHOLD_TABLE` environment variable;
+the default table is `<calibration>/tables/thresholds.csv`.
 
 ## Existing report-only choices
 

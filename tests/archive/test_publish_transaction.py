@@ -70,7 +70,9 @@ def test_nth_publish_replace_failure_rolls_back_whole_output_set(
     assert _generation(run_dir / "run_config.json") == "old"
     assert _generation(run_dir / "stats.json") == "old"
     assert not (run_dir / "input_manifest.json").exists()
-    assert not (run_dir / combine_module._PUBLISH_JOURNAL_NAME).exists()
+    assert not (
+        run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+    ).exists()
     marker = json.loads(
         (
             run_dir
@@ -99,7 +101,9 @@ def test_journal_recovers_a_process_terminated_mid_publish(tmp_path) -> None:
             run_dir / first["relative_path"],
         )
         assert _generation(run_dir / "run_config.json") == "new"
-        assert (run_dir / combine_module._PUBLISH_JOURNAL_NAME).exists()
+        assert (
+            run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+        ).exists()
 
         assert combine_module._recover_interrupted_publish(
             run_dir, ownership
@@ -108,7 +112,9 @@ def test_journal_recovers_a_process_terminated_mid_publish(tmp_path) -> None:
     assert _generation(run_dir / "run_config.json") == "old"
     assert _generation(run_dir / "stats.json") == "old"
     assert not (run_dir / "input_manifest.json").exists()
-    assert not (run_dir / combine_module._PUBLISH_JOURNAL_NAME).exists()
+    assert not (
+        run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+    ).exists()
     marker = json.loads(
         (
             run_dir
@@ -151,7 +157,7 @@ def test_recovery_rejects_symlinked_canonical_parent(tmp_path) -> None:
             }
         ],
     }
-    (run_dir / combine_module._PUBLISH_JOURNAL_NAME).write_text(
+    (run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME).write_text(
         json.dumps(journal), encoding="utf-8"
     )
 
@@ -160,7 +166,9 @@ def test_recovery_rejects_symlinked_canonical_parent(tmp_path) -> None:
             combine_module._recover_interrupted_publish(run_dir, ownership)
 
     assert outside.read_text(encoding="utf-8") == "outside-old"
-    assert (run_dir / combine_module._PUBLISH_JOURNAL_NAME).exists()
+    assert (
+        run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
+    ).exists()
 
 
 def test_recovery_rejects_noncanonical_journal_path(tmp_path) -> None:
@@ -180,7 +188,7 @@ def test_recovery_rejects_noncanonical_journal_path(tmp_path) -> None:
             }
         ],
     }
-    (run_dir / combine_module._PUBLISH_JOURNAL_NAME).write_text(
+    (run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME).write_text(
         json.dumps(journal), encoding="utf-8"
     )
 
@@ -230,7 +238,7 @@ def test_concurrent_publisher_cannot_replace_owner_journal(
     thread = threading.Thread(target=publish_a)
     thread.start()
     assert first_replaced.wait(timeout=10)
-    journal_path = run_dir / combine_module._PUBLISH_JOURNAL_NAME
+    journal_path = run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME
     owner_before = json.loads(journal_path.read_text(encoding="utf-8"))[
         "owner_token"
     ]
@@ -254,7 +262,7 @@ def test_concurrent_publisher_cannot_replace_owner_journal(
     assert _generation(run_dir / "run_config.json") == "writer-a"
     assert _generation(run_dir / "stats.json") == "writer-a"
     assert not journal_path.exists()
-    assert not (run_dir / combine_module._PUBLISH_LOCK_NAME).exists()
+    assert not (run_dir / combine_module.CHIME_COMBINE_PUBLISH_LOCK_FILENAME).exists()
 
 
 @pytest.mark.parametrize("failure_site", ["metadata", "directory_fsync"])
@@ -291,7 +299,7 @@ def test_lock_initialization_failure_is_reacquirable(
     with pytest.raises(OSError, match="injected lock"):
         with combine_module._exclusive_publish_ownership(run_dir):
             pass
-    assert not (run_dir / combine_module._PUBLISH_LOCK_NAME).exists()
+    assert not (run_dir / combine_module.CHIME_COMBINE_PUBLISH_LOCK_FILENAME).exists()
     with combine_module._exclusive_publish_ownership(run_dir) as ownership:
         ownership.assert_owned()
 
@@ -315,7 +323,7 @@ def test_kernel_lock_error_is_closed_and_reacquirable(
     with pytest.raises(RuntimeError, match="kernel publish-lock acquisition"):
         with combine_module._exclusive_publish_ownership(run_dir):
             pass
-    assert not (run_dir / combine_module._PUBLISH_LOCK_NAME).exists()
+    assert not (run_dir / combine_module.CHIME_COMBINE_PUBLISH_LOCK_FILENAME).exists()
     with combine_module._exclusive_publish_ownership(run_dir) as ownership:
         ownership.assert_owned()
 
@@ -325,7 +333,7 @@ def test_hard_linked_publish_lock_cannot_truncate_external_file(tmp_path) -> Non
     run_dir.mkdir()
     external = tmp_path / "external.txt"
     external.write_text("outside remains intact", encoding="utf-8")
-    lock_path = run_dir / combine_module._PUBLISH_LOCK_NAME
+    lock_path = run_dir / combine_module.CHIME_COMBINE_PUBLISH_LOCK_FILENAME
     try:
         os.link(external, lock_path)
     except OSError as exc:
@@ -342,7 +350,7 @@ def test_invalid_journal_preserves_possible_recovery_staging(tmp_path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     staging, _outputs = _staged_generation(run_dir)
-    (run_dir / combine_module._PUBLISH_JOURNAL_NAME).write_text(
+    (run_dir / combine_module.CHIME_COMBINE_PUBLISH_JOURNAL_FILENAME).write_text(
         "{not valid json\n", encoding="utf-8"
     )
 

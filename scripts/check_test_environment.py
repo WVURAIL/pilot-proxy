@@ -9,8 +9,8 @@ import importlib
 import sys
 from pathlib import Path
 
-BASE_MODULES = ("h5py", "matplotlib")
-INTEGRATION_MODULES = ("cadcdata", "cadcutils", "dtcli", "yaml")
+BASE_MODULES = ("h5py", "matplotlib", "yaml")
+INTEGRATION_MODULES = ("cadcdata", "cadcutils", "dtcli")
 
 
 def _module_path(module: object) -> str:
@@ -43,12 +43,12 @@ def main(argv: list[str] | None = None) -> int:
         for item in missing:
             print(f"  - {item}", file=sys.stderr)
         print(
-            'install PilotProxy with the required extras: python -m pip install -e ".[chime,plot,test]"',
+            'install test dependencies with: python -m pip install -e ".[test]"',
             file=sys.stderr,
         )
         if args.integration:
             print(
-                'install archive dependencies with: python -m pip install -e ".[archive,chime,plot,test]"',
+                'install archive dependencies with: python -m pip install -e ".[archive,test]"',
                 file=sys.stderr,
             )
         return 1

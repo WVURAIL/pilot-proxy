@@ -73,17 +73,6 @@ def socket_timeout(seconds: float, *, deadline=None):
             socket.setdefaulttimeout(previous)
 
 
-def with_socket_timeout(seconds: float):
-    """Decorate a call with a restored, serialized socket default."""
-    def decorate(function):
-        @wraps(function)
-        def wrapped(*args, **kwargs):
-            with socket_timeout(seconds):
-                return function(*args, **kwargs)
-        return wrapped
-    return decorate
-
-
 @contextmanager
 def request_deadline(deadline):
     """Cap a supported Requests call at an optional monotonic deadline.

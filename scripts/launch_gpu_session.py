@@ -25,6 +25,15 @@ import time
 
 DEFAULT_IMAGE = "images.canfar.net/skaha/astroml-cuda:latest"
 DEFAULT_NAME = "cupy-gpu"
+POLL_INTERVAL_SECONDS = 10
+
+
+def _positive_int(value: str) -> int:
+    """Parse a positive integer."""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
 
 
 def _inject_registry_creds() -> bool:
@@ -66,10 +75,10 @@ def main() -> int:
                     help=f"session name (default: {DEFAULT_NAME})")
     ap.add_argument("--image", default=DEFAULT_IMAGE,
                     help="container image (default: astroml-cuda:latest)")
-    ap.add_argument("--cores", type=int, default=1)
-    ap.add_argument("--ram", type=int, default=8, help="RAM in GB")
-    ap.add_argument("--gpu", type=int, default=1, help="number of GPUs")
-    ap.add_argument("--timeout", type=int, default=999,
+    ap.add_argument("--cores", type=_positive_int, default=1)
+    ap.add_argument("--ram", type=_positive_int, default=8, help="RAM in GB")
+    ap.add_argument("--gpu", type=_positive_int, default=1, help="number of GPUs")
+    ap.add_argument("--timeout", type=_positive_int, default=999,
                     help="seconds to wait for the session to reach Running")
     ap.add_argument("--status", action="store_true",
                     help="just report status + connect URL")
@@ -121,8 +130,11 @@ def main() -> int:
     sid = ids[0] if isinstance(ids, (list, tuple)) else ids
     print(f"created {args.name} ({sid}); waiting up to {args.timeout}s for Running ...")
 
-    deadline = time.time() + args.timeout
-    while time.time() < deadline:
+    deadline = time.monotonic() + args.timeout
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
         info = next((s for s in session.fetch(kind="notebook")
                      if s.get("id") == sid), None)
         status = info.get("status") if info else "?"
@@ -131,12 +143,12 @@ def main() -> int:
             print(info.get("connectURL", "(no URL reported)"))
             return 0
         print(f"  {status} ...", flush=True)
-        time.sleep(10)
+        time.sleep(min(POLL_INTERVAL_SECONDS, remaining))
 
     sys.stderr.write(
         f"session {args.name} not Running after {args.timeout}s; "
         f"re-run with --status to fetch the URL once it settles.\n")
-    return 0
+    return 1
 
 
 if __name__ == "__main__":

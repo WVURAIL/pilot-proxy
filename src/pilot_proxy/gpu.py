@@ -1,11 +1,9 @@
 # coding=utf-8
-"""GPU availability checks, memory queries, and bandwidth constants."""
+"""GPU availability checks."""
 
 from __future__ import annotations
 
 import ctypes
-import warnings
-from typing import Any, Callable, Optional, Tuple, cast
 
 try:
     import cupy as cp
@@ -15,41 +13,8 @@ except Exception as cupy_import_error:
     cp = None  # type: ignore[assignment]
     _CUPY_IMPORT_ERROR = cupy_import_error
 
-# Batch-size guardrails for host-side auto-tuning. These limit memory pressure
-# and launch latency without changing detector math.
-DEFAULT_CHUNK_SIZE = 128
-MIN_CHUNK_SIZE = 1
-MAX_CHUNK_SIZE = 4096
-# Conservative scratch/output byte estimate per detector row for memory sizing.
-DEFAULT_BYTES_PER_SAMPLE = 24
-GPU_MEMORY_SAFETY_FRACTION = 0.8
 NVIDIA_SMI_TIMEOUT_SECONDS = 5
 CUDA_DRIVER_SUCCESS = 0
-
-
-# Approximate device memory bandwidths [GB/s] for quick throughput estimates.
-GPU_BANDWIDTHS = {
-    # Laptop variants FIRST (more specific matches)
-    "RTX 5000 Ada Generation Laptop": 448.0,
-    "RTX 4000 Ada Generation Laptop": 288.0,
-    "RTX 4090 Laptop": 576.0,
-    "RTX 4080 Laptop": 432.0,
-    "RTX 3080 Laptop": 448.0,
-    "RTX 3070 Laptop": 384.0,
-    # Data center / workstation
-    "A100": 1555.0,
-    "A40": 696.0,
-    "A6000": 768.0,
-    "V100": 900.0,
-    "T4": 320.0,
-    "L40": 864.0,
-    # Desktop
-    "RTX 3090": 936.0,
-    "RTX 4090": 1008.0,
-    # Workstation (desktop form factor)
-    "RTX 5000 Ada": 576.0,
-    "RTX 4000 Ada": 360.0,
-}
 
 
 def _cupy_unavailable_reason() -> str:
@@ -58,37 +23,7 @@ def _cupy_unavailable_reason() -> str:
     return f"CuPy import failed: {_CUPY_IMPORT_ERROR}"
 
 
-def get_gpu_info() -> Tuple[str, Optional[float]]:
-    """Return (gpu_name, peak_bandwidth_gbps), or ("Unknown", None) on failure."""
-    if cp is None:
-        return "Unknown", None
-    try:
-        runtime = cp.cuda.runtime
-        get_props = getattr(runtime, "get_device_properties", None)
-        if get_props is None:
-            get_props = getattr(runtime, "getDeviceProperties", None)
-        if get_props is None:
-            raise AttributeError("CuPy runtime lacks device property accessor")
-        props = cast(Callable[[int], dict[str, Any]], get_props)(cp.cuda.Device().id)
-        name = props["name"]
-        if isinstance(name, bytes):
-            name = name.decode()
-
-        peak_bw = None
-        for gpu_key, bw in GPU_BANDWIDTHS.items():
-            if gpu_key.lower() in name.lower():
-                peak_bw = bw
-                break
-
-        return name, peak_bw
-    except Exception as gpu_exc:
-        import logging
-
-        logging.debug(f"Failed to get GPU info: {gpu_exc}")
-        return "Unknown", None
-
-
-def cuda_available() -> Tuple[bool, str]:
+def cuda_available() -> tuple[bool, str]:
     """Return availability plus a reason string when no GPU is found."""
     if cp is None:
         return False, _cupy_unavailable_reason()
@@ -163,37 +98,3 @@ def _cuda_driver_summary() -> str:
         f"cuDriverGetVersion={version_err}, cuInit={init_err}, "
         f"cuDeviceGetCount={count_err}"
     )
-
-
-def require_cuda(context: str = "This script") -> None:
-    """Exit with a clear message if no CUDA-capable GPU is available."""
-    ok, reason = cuda_available()
-    if ok:
-        return
-    msg = f"{context} requires a CUDA-capable GPU"
-    if reason:
-        msg = f"{msg}: {reason}"
-    raise SystemExit(msg)
-
-
-def get_optimal_chunk_size(
-    M: int,
-    K: int,
-    bytes_per_sample: int = DEFAULT_BYTES_PER_SAMPLE,
-) -> int:
-    """Return a batch size (1–4096) based on available GPU memory."""
-    if cp is None:
-        return DEFAULT_CHUNK_SIZE
-    try:
-        free_mem, _ = cp.cuda.Device().mem_info
-    except Exception as size_exc:
-        warnings.warn(
-            f"Could not query GPU memory: {size_exc}", RuntimeWarning, stacklevel=2
-        )
-        return DEFAULT_CHUNK_SIZE
-
-    bytes_per_trial = M * K * bytes_per_sample
-    if bytes_per_trial <= 0:
-        return MIN_CHUNK_SIZE
-    optimal = int((free_mem * GPU_MEMORY_SAFETY_FRACTION) // bytes_per_trial)
-    return max(MIN_CHUNK_SIZE, min(MAX_CHUNK_SIZE, optimal))

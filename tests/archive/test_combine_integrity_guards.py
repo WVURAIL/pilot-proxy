@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.combine import (
     _align_frames,

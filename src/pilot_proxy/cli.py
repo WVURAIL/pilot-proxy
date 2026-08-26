@@ -152,7 +152,7 @@ def _cmd_atsc_detector_input(args: argparse.Namespace) -> None:
         "--output-dir",
         _caller_absolute_path(args.output_dir),
         "--frame-size-samples",
-        str(args.samples_per_block),
+        str(args.frame_size_samples),
         "--num-input-streams",
         str(args.num_input_streams),
         "--experimental-detector-window-samples",
@@ -615,8 +615,8 @@ def _cmd_check_layout(args: argparse.Namespace) -> None:
         else default_reference_receiver_profile(
             frame_size_samples=int(
                 DEFAULT_FRAME_SIZE_SAMPLES
-                if args.samples_per_block is None
-                else args.samples_per_block
+                if args.frame_size_samples is None
+                else args.frame_size_samples
             ),
             num_input_streams=int(
                 DEFAULT_NUM_INPUT_STREAMS
@@ -628,8 +628,8 @@ def _cmd_check_layout(args: argparse.Namespace) -> None:
     stream_map = None if args.stream_map is None else load_stream_map(args.stream_map)
     frame_size_samples = int(
         profile.frame_size_samples
-        if args.samples_per_block is None
-        else args.samples_per_block
+        if args.frame_size_samples is None
+        else args.frame_size_samples
     )
     num_input_streams = int(
         profile.num_input_streams
@@ -1015,7 +1015,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     quantize.add_argument(
         "--frame-size-samples",
-        dest="samples_per_block",
+        dest="frame_size_samples",
         type=int,
         default=DEFAULT_FRAME_SIZE_SAMPLES,
         help="Frame size, in channelized samples, to pack per detector block.",
@@ -1052,12 +1052,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-json",
         default=str(GENERATED_DIR / "detections" / "detect.json"),
     )
-    detect.add_argument(
-        "--threshold-data-shelf-snr-db",
-        type=float,
-        default=None,
-        help=argparse.SUPPRESS,
-    )
     detect.add_argument("--physical-channel", type=int, default=None)
     detect.add_argument("--dtv-pilot-mhz", type=float, default=None)
     detect.add_argument(
@@ -1080,12 +1074,6 @@ def build_parser() -> argparse.ArgumentParser:
         dest="num_input_streams",
         type=int,
         default=DEFAULT_NUM_INPUT_STREAMS,
-    )
-    detect.add_argument(
-        "--max-denominator",
-        type=int,
-        default=None,
-        help=argparse.SUPPRESS,
     )
     detect.add_argument(
         "--pilot-frequency-tolerance-hz",
@@ -1127,7 +1115,7 @@ def build_parser() -> argparse.ArgumentParser:
     check_layout.add_argument("--stream-map", default=None)
     check_layout.add_argument(
         "--frame-size-samples",
-        dest="samples_per_block",
+        dest="frame_size_samples",
         type=int,
         default=None,
     )

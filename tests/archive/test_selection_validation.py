@@ -17,7 +17,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-pytest.importorskip("pilot_proxy.archive.interfaces")
 pytest.importorskip("h5py")
 
 from pilot_proxy.archive.instruments import load_instrument

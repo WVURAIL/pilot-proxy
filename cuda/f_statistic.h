@@ -287,7 +287,7 @@ static inline int FStat_MakeHalfThresholdFromFullChecked(
  * `detector_rows_per_block` is the number of rows in the current contiguous
  * detector-matrix view for one detector block:
  *
- *   detector_rows_per_block = num_streams * samples_per_block /
+ *   detector_rows_per_block = num_streams * frame_size_samples /
  *                             detector_window_samples
  *
  * @param d_in  Device pointer to row-major input data

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 import json
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -813,22 +812,6 @@ def _validate_detector(
             )
 
     return frame_pilot_shape
-
-
-def _rows_from_csv(
-    path: Path,
-    *,
-    check: str,
-    errors: list[dict[str, str]],
-) -> list[dict[str, str]]:
-    try:
-        with path.open(newline="", encoding="utf-8") as f:
-            return list(csv.DictReader(f))
-    except FileNotFoundError:
-        _add_error(errors, check, f"missing {path}")
-    except Exception as exc:  # noqa: BLE001 - validator reports product issues.
-        _add_error(errors, check, f"could not read {path}: {exc}")
-    return []
 
 
 def _validate_spectrogram_cache(

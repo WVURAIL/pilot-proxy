@@ -47,7 +47,6 @@ DEFAULT_CHECKPOINT_EVERY = 50
 DEFAULT_DOWNLOAD_WORKERS = 1
 DEFAULT_MAX_STAGED_FILES = 1
 _OUTPUT_LOCK_SUFFIX = ".datatrawl.lock"
-_QUARANTINE_LOCK_SUFFIX = _OUTPUT_LOCK_SUFFIX
 
 
 class StagedFileCleanupError(RuntimeError):
@@ -233,7 +232,7 @@ class _QuarantineLedgerLock:
         directory, basename = os.path.split(lock_target)
         self.ledger_path = absolute
         self.path = os.path.join(
-            directory, f".{basename}{_QUARANTINE_LOCK_SUFFIX}")
+            directory, f".{basename}{_OUTPUT_LOCK_SUFFIX}")
         self._fh = None
 
     def __enter__(self):
@@ -735,7 +734,8 @@ def _run_with_output_lock_held(
     def _store_pending(item: _ReadyItem | _WorkerFailure) -> None:
         ordinal = item.ordinal
         if ordinal is None:
-            assert isinstance(item, _WorkerFailure)
+            if not isinstance(item, _WorkerFailure):
+                raise RuntimeError("download outcome has no unit ordinal")
             _raise_worker_failure(item)
         if ordinal in pending:
             _discard_item(item)

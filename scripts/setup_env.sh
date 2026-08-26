@@ -161,13 +161,13 @@ python -m pip install -U pip setuptools wheel packaging
 
 # --- scientific stack + editable installs -----------------------------------
 echo "==> installing scientific stack"
-python -m pip install -U numpy scipy h5py pandas matplotlib pytest
+python -m pip install -U numpy scipy h5py matplotlib pytest
 
 echo "==> installing the tested Datatrail revision"
 python -m pip install -r "${PILOT_PROXY_DIR}/requirements/archive.txt"
 
-echo "==> installing pilot-proxy (editable, + archive/chime/test extras)"
-python -m pip install -e "${PILOT_PROXY_DIR}[archive,chime,test]"
+echo "==> installing pilot-proxy (editable, + archive/test extras)"
+python -m pip install -e "${PILOT_PROXY_DIR}[archive,test]"
 
 # Survey shells out to Datatrail, which must resolve inside this venv.
 if [[ "$(command -v datatrail || true)" != "${VIRTUAL_ENV}/bin/datatrail" ]]; then
@@ -269,7 +269,7 @@ python - <<'PY'
 import importlib.util
 import sys
 print("    python", sys.version.split()[0], sys.executable)
-for name in ["numpy", "scipy", "h5py", "pandas", "matplotlib", "pytest", "dtcli", "pilot_proxy"]:
+for name in ["numpy", "scipy", "h5py", "matplotlib", "pytest", "dtcli", "pilot_proxy"]:
     ok = importlib.util.find_spec(name) is not None
     print(f"    {name:12s}: {'OK' if ok else 'MISSING'}")
     if not ok:

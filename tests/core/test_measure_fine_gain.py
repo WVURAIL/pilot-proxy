@@ -13,7 +13,6 @@ import importlib.util
 import pathlib
 
 import numpy as np
-import pytest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(

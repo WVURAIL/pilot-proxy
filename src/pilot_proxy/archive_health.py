@@ -76,7 +76,6 @@ EXCLUSION_LEDGER_SCHEMA_VERSION = "pilotproxy_archive_exclusion_ledger_v1"
 DIAGNOSTIC_MANIFEST_SCHEMA_VERSION = "pilotproxy_archive_diagnostic_manifest_v1"
 CORRECTED_SPECTRA_SCHEMA_VERSION = "pilotproxy_archive_corrected_spectra_v1"
 RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION = "pilotproxy_baonoise_health_view_v1"
-BAONOISE_HEALTH_VIEW_SCHEMA_VERSION = RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION
 
 DRAO_LONGITUDE_DEGREES_EAST = -119.6175
 LOCAL_CIVIL_TIME_ZONE = "America/Vancouver"
@@ -489,10 +488,6 @@ def temporary_residual_health_views(
             write_residual_health_view(path, root_path / path.name) for path in paths
         ]
         yield views
-
-
-write_baonoise_health_view = write_residual_health_view
-temporary_baonoise_health_views = temporary_residual_health_views
 
 
 def _spectral_sense_name(product: Mapping[str, Any]) -> str:
@@ -3673,7 +3668,6 @@ if __name__ == "__main__":
 
 __all__ = [
     "ARCHIVE_HEALTH_SUMMARY_SCHEMA_VERSION",
-    "BAONOISE_HEALTH_VIEW_SCHEMA_VERSION",
     "RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION",
     "ArchiveHealthError",
     "CORRECTED_SPECTRA_SCHEMA_VERSION",
@@ -3702,11 +3696,9 @@ __all__ = [
     "health_correct_integrated_spectra",
     "proportion_summary",
     "recompute_corrected_fine_diagnostics",
-    "temporary_baonoise_health_views",
     "temporary_residual_health_views",
     "unix_utc_to_lmst_hours",
     "verify_supporting_evidence",
-    "write_baonoise_health_view",
     "write_residual_health_view",
     "write_archive_audit",
 ]

@@ -39,6 +39,7 @@ from pilot_proxy.dtv_units import (
     pilot_excess_db_to_data_shelf_snr_db,
 )
 from pilot_proxy.kernel import FStatKernel
+from pilot_proxy.integration.packing import estimate_complex_scale
 from pilot_proxy.paths import DEFAULT_LIB_PATH, DEFAULT_WEIGHTS_PATH
 from pilot_proxy.reference_channelizer import (
     REFERENCE_ADC_SAMPLE_RATE_HZ,
@@ -54,7 +55,6 @@ from pilot_proxy.reference_channelizer import (
 from pilot_proxy.testbench.evaluate_snr import (
     _kernel_measurements,
     _pack_streams_for_kernel,
-    estimate_quantization_scale,
     required_iq_samples,
 )
 from pilot_proxy.testbench.generate_atsc_signal import (
@@ -877,15 +877,15 @@ class GpuCaptureDetector:
         scale = (
             float(self.args.quantization_scale)
             if self.args.quantization_scale is not None
-            else estimate_quantization_scale(
+            else estimate_complex_scale(
                 streams,
-                bits=LOCKED_BITS_PER_COMPONENT,
+                bits_per_component=LOCKED_BITS_PER_COMPONENT,
                 clip_sigma=float(self.args.clip_sigma),
             )
         )
         packed = _pack_streams_for_kernel(
             streams,
-            samples_per_block=int(self.args.frame_size_samples),
+            frame_size_samples=int(self.args.frame_size_samples),
             detector_window_samples=LOCKED_DETECTOR_WINDOW_SAMPLES,
             bits=LOCKED_BITS_PER_COMPONENT,
             scale=scale,

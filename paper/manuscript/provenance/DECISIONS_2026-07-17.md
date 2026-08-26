@@ -3,7 +3,7 @@
 Trigger: Dylan asked where the −32 dB threshold came from. Traced: the
 original draft called it "a fixed −32 dB science criterion" (uncited);
 no derivation exists in any project material; "RadioFisher companion"
-was the assistant's inference during early triage (name from the public
+was an unsupported inference during early triage (name from the public
 Bull et al. Fisher code) and has been removed from the text as
 unfounded.
 

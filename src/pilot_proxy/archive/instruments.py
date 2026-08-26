@@ -339,19 +339,3 @@ def instrument_readiness(name: str, directory: Optional[str] = None) -> Readines
         nyquist_zone_set=True,
         scopes_set=bool(instrument.scopes),
     )
-
-
-def all_readiness(directory: Optional[str] = None) -> List[Readiness]:
-    out = []
-    for name in list_instrument_names(directory):
-        try:
-            out.append(instrument_readiness(name, directory))
-        except Exception as exc:
-            out.append(Readiness(
-                name=name,
-                nyquist_zone_set=False,
-                scopes_set=False,
-                valid=False,
-                problems=(str(exc),),
-            ))
-    return out

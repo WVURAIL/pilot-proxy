@@ -6,7 +6,7 @@ from __future__ import annotations
 from typing import Any
 
 from pilot_proxy.detector_constants import (
-    DEFAULT_DETECTOR_WINDOW_SAMPLES as LOCKED_DETECTOR_WINDOW_SAMPLES,
+    DEFAULT_DETECTOR_WINDOW_SAMPLES,
     LOCKED_NUM_WEIGHT_TERMS,
     LOCKED_PACKED_COMPLEX_BITS,
     LOCKED_REFERENCE_OFFSET_BINS,
@@ -93,7 +93,7 @@ def statistic_contract() -> dict[str, str]:
 
 def fixed_point_contract(
     *,
-    detector_window_samples: int = LOCKED_DETECTOR_WINDOW_SAMPLES,
+    detector_window_samples: int = DEFAULT_DETECTOR_WINDOW_SAMPLES,
     reference_offset_bins: int = LOCKED_REFERENCE_OFFSET_BINS,
 ) -> dict[str, Any]:
     """Return the fixed-point detector contract for one run's geometry."""
@@ -137,7 +137,7 @@ def result_layout(
     *,
     frame_size_samples: int,
     num_input_streams: int,
-    detector_window_samples: int = LOCKED_DETECTOR_WINDOW_SAMPLES,
+    detector_window_samples: int = DEFAULT_DETECTOR_WINDOW_SAMPLES,
     num_selected_channels: int = 1,
 ) -> dict[str, Any]:
     """Return current layout metadata for one combined detector frame."""

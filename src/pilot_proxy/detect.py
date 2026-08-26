@@ -369,12 +369,6 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=Path("generated/detections/detect.json"),
     )
-    parser.add_argument(
-        "--threshold-data-shelf-snr-db",
-        type=float,
-        default=None,
-        help=argparse.SUPPRESS,
-    )
     parser.add_argument("--physical-channel", type=int, default=None,
                         help="ATSC physical channel of the packed matrix. Default: "
                              "read from the metadata.json sidecar quantize wrote "
@@ -386,12 +380,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--pilot-frequency-tolerance-hz",
         type=float,
         default=DEFAULT_PILOT_FREQUENCY_TOLERANCE_HZ,
-    )
-    parser.add_argument(
-        "--max-denominator",
-        type=int,
-        default=None,
-        help=argparse.SUPPRESS,
     )
     parser.add_argument(
         "--pilot-below-data-db",

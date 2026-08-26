@@ -154,7 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--frame-size-samples",
-        dest="samples_per_block",
+        dest="frame_size_samples",
         type=int,
         default=DEFAULT_FRAME_SIZE_SAMPLES,
         help="Frame size, in channelized samples, to pack per detector block.",
@@ -243,11 +243,11 @@ def main(argv: list[str] | None = None) -> int:
         args.dtv_pilot_mhz = physical_channel_to_pilot_hz(
             int(args.physical_channel)
         ) / HZ_PER_MHZ
-    if args.samples_per_block <= 0 or args.num_blocks <= 0:
+    if args.frame_size_samples <= 0 or args.num_blocks <= 0:
         raise SystemExit("--frame-size-samples and --num-blocks must be positive.")
     if args.num_input_streams <= 0:
         raise SystemExit("--num-input-streams must be positive.")
-    if args.samples_per_block % args.detector_window_samples != 0:
+    if args.frame_size_samples % args.detector_window_samples != 0:
         raise SystemExit(
             "--frame-size-samples must be an integer multiple of the locked "
             "128-sample detector window."
@@ -280,7 +280,7 @@ def main(argv: list[str] | None = None) -> int:
             expanded.extend(range(lo, hi + 1))
         base_channels = sorted(set(expanded))
 
-    n_output = int(args.samples_per_block) * int(args.num_blocks)
+    n_output = int(args.frame_size_samples) * int(args.num_blocks)
     n_blocks = n_output + REFERENCE_PFB_TAPS - 1
     raw_blocks = complex_envelope_to_real_adc_blocks(
         iq,
@@ -320,7 +320,7 @@ def main(argv: list[str] | None = None) -> int:
             raise SystemExit(str(exc)) from exc
     packed_input = pack_channelized_streams_for_detector(
         feed_channel_streams,
-        frame_size_samples=int(args.samples_per_block),
+        frame_size_samples=int(args.frame_size_samples),
         detector_window_samples=int(args.detector_window_samples),
         spectral_sense=str(args.spectral_sense),
         quantization_scale_mode=QUANTIZATION_SCALE_MODE_GLOBAL,

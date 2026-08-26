@@ -113,7 +113,7 @@ python3.12 -m venv --system-site-packages ~/pilot-proxy-venv
 source ~/pilot-proxy-venv/bin/activate
 python -m pip install -U pip setuptools wheel
 python -m pip install -r "$HOME/pilot-proxy/requirements/archive.txt"
-python -m pip install -e "$HOME/pilot-proxy[archive,chime,test]"
+python -m pip install -e "$HOME/pilot-proxy[archive,test]"
 ```
 
 Then confirm that the archive commands load:

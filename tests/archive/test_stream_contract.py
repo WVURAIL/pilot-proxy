@@ -2,9 +2,6 @@
 """Metadata contract for PilotProxy's packed reader/analyzer pair."""
 from __future__ import annotations
 
-import pytest
-
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.interfaces import stream_compatibility
 

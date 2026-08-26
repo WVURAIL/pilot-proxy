@@ -18,12 +18,13 @@ test-kernel:
 	$(MAKE) -C cuda test
 
 test-python:
+	$(PYTHON) scripts/check_test_environment.py
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
 
 test: test-kernel test-python
 
 lint:
-	$(PYTHON) -m ruff check src scripts tools analysis --select F
+	$(PYTHON) -m ruff check .
 
 archive-integration-check:
 	$(PYTHON) scripts/check_test_environment.py --integration
@@ -88,8 +89,9 @@ commit-check:
 
 release-clean:
 	rm -rf .pytest_cache .ruff_cache .idea build dist generated inspection \
-	    src/pilot_proxy.egg-info docs/auxil docs/out docs/generated
-	find src tests -type d -name __pycache__ -prune -exec rm -rf {} +
+	    __pycache__ src/pilot_proxy.egg-info docs/auxil docs/out docs/generated
+	find src tests analysis scripts tools -type d -name __pycache__ -prune \
+	    -exec rm -rf {} +
 	$(MAKE) -C cuda clean
 
 freeze-check:

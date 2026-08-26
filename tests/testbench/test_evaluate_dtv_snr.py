@@ -722,7 +722,7 @@ def test_clean_pilot_guard_accepts_a_line_the_statistic_sees() -> None:
         selected_weight_layout=layout,
         cpu_float_weights=weights,
         detector_window_samples=window,
-        samples_per_block=window * windows,
+        frame_size_samples=window * windows,
         spectral_sense="normal",
     )
     assert report["normalized_coarse_power_ratio"] > 8.0
@@ -747,7 +747,7 @@ def test_clean_pilot_guard_rejects_a_mirrored_line() -> None:
             selected_weight_layout=layout,
             cpu_float_weights=weights,
             detector_window_samples=window,
-            samples_per_block=window * windows,
+            frame_size_samples=window * windows,
             spectral_sense="normal",
         )
 
@@ -827,7 +827,7 @@ def test_default_configuration_passes_the_clean_pilot_guard() -> None:
         selected_weight_layout=layout,
         cpu_float_weights=weights,
         detector_window_samples=window,
-        samples_per_block=frame,
+        frame_size_samples=frame,
         spectral_sense=str(args.spectral_sense),
     )
     assert report["normalized_coarse_power_ratio"] > 8.0
@@ -839,6 +839,6 @@ def test_default_configuration_passes_the_clean_pilot_guard() -> None:
             selected_weight_layout=layout,
             cpu_float_weights=weights,
             detector_window_samples=window,
-            samples_per_block=frame,
+            frame_size_samples=frame,
             spectral_sense=str(args.spectral_sense),
         )

@@ -203,14 +203,8 @@ def decide(cal, thresholds, eta, occ):
             % (cal.mu, cal.mu_shift_db, 100 * occ, eta, bracket))
 
 
-def build(products, threshold_csv=None, *, bao_csv=None):
-    """Every channel's report state, ordered by physical channel.
-
-    ``bao_csv`` is retained only as a keyword compatibility alias.
-    """
-    if threshold_csv is not None and bao_csv is not None:
-        raise ValueError("use threshold_csv or the legacy bao_csv alias, not both")
-    threshold_csv = threshold_csv if threshold_csv is not None else bao_csv
+def build(products, threshold_csv=None):
+    """Build channel state in physical-channel order."""
     threshold_all = _read_thresholds(threshold_csv)
     out = []
     for c in sorted(load_all(products), key=lambda c: c.ch):

@@ -11,9 +11,7 @@ any correctness test, so it is asserted here directly.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
-pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.archive.detector import PilotProxyDetectorAnalyzer
 
