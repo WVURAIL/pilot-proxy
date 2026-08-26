@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import math
 import os
 import sys
@@ -20,6 +21,7 @@ from pilot_proxy.testbench.evaluate_snr import (
     DEFAULT_SNR_SWEEP_MIN_DB,
     DEFAULT_SNR_SWEEP_STEP_DB,
     STANDARD_FREQUENCY_OFFSET_SWEEP_HZ,
+    SUPPORTED_SNR_MAX_DB,
     _positive_to_db,
     _frequency_offset_values,
     _requested_snr_shelf_values,
@@ -57,7 +59,7 @@ SNR_RANGE_START_DB = -20.0
 SNR_RANGE_STOP_DB = -10.0
 SNR_RANGE_STEP_DB = 5.0
 SNR_RANGE_EXPECTED = [-30.0, -20.0, -15.0, -10.0]
-DEFAULT_SNR_SWEEP_EXPECTED_COUNT = 21
+DEFAULT_SNR_SWEEP_EXPECTED_COUNT = 23
 FREQUENCY_OFFSET_HZ = 1_000.0
 CHANNEL_GAIN_DB = 6.0
 CHANNEL_PHASE_DEG = 90.0
@@ -146,6 +148,17 @@ def test_target_snr_values_default_to_public_sweep() -> None:
     assert values[-1] == DEFAULT_SNR_SWEEP_MAX_DB
     assert len(values) == DEFAULT_SNR_SWEEP_EXPECTED_COUNT
     assert values[1] - values[0] == DEFAULT_SNR_SWEEP_STEP_DB
+
+
+def test_explicit_snr_supports_high_end_exploration() -> None:
+    args = argparse.Namespace(
+        requested_data_shelf_snr_db=[SUPPORTED_SNR_MAX_DB],
+        snr_start_db=None,
+        snr_stop_db=None,
+        snr_step_db=None,
+    )
+
+    assert _requested_snr_shelf_values(args) == [SUPPORTED_SNR_MAX_DB]
 
 
 def test_frequency_offsets_support_standard_sweep_and_deduplication() -> None:
@@ -305,6 +318,35 @@ def test_evaluator_resolves_all_user_paths_before_execution(
     assert args.weights_path == (tmp_path / "relative-weights.bin").resolve()
 
 
+def test_weight_bank_identity_uses_a_portable_default_path() -> None:
+    identity = evaluate_snr._artifact_identity(evaluate_snr.DEFAULT_WEIGHTS_PATH)
+    manifest_path = Path(f"{evaluate_snr.DEFAULT_WEIGHTS_PATH}.manifest.json")
+    manifest_identity = evaluate_snr._artifact_identity(manifest_path)
+
+    assert identity["path"] == "weights/chime_dtv_weights_k128.bin"
+    assert identity["sha256"] == hashlib.sha256(
+        evaluate_snr.DEFAULT_WEIGHTS_PATH.read_bytes()
+    ).hexdigest()
+    assert manifest_identity["path"] == (
+        "weights/chime_dtv_weights_k128.bin.manifest.json"
+    )
+    assert manifest_identity["sha256"] == hashlib.sha256(
+        manifest_path.read_bytes()
+    ).hexdigest()
+
+
+def test_selected_weight_coefficients_identity_binds_shape_dtype_and_bytes() -> None:
+    weights = np.arange(12, dtype=np.int8).reshape(3, 4)
+
+    identity = evaluate_snr._weight_coefficients_identity(weights)
+
+    assert identity == {
+        "dtype": "int8",
+        "shape": [3, 4],
+        "sha256": hashlib.sha256(weights.tobytes()).hexdigest(),
+    }
+
+
 def test_wilson_interval_closed_form() -> None:
     from pilot_proxy.testbench.evaluate_snr import wilson_interval
 
@@ -362,6 +404,7 @@ def test_summary_rows_report_detection_rates_with_wilson_bounds() -> None:
     assert len(summary) == 1
     row = summary[0]
     assert row["trials"] == 4
+    assert row["positive_excess_fraction"] == pytest.approx(0.75)
     assert row["normalized_positive_excess_detection_rate"] == pytest.approx(0.75)
     lo, hi = wilson_interval(3, 4)
     assert row["normalized_positive_excess_detection_rate_wilson95_lo"] == pytest.approx(lo)
@@ -370,6 +413,106 @@ def test_summary_rows_report_detection_rates_with_wilson_bounds() -> None:
     lo, hi = wilson_interval(2, 4)
     assert row["threshold_detection_rate_wilson95_lo"] == pytest.approx(lo)
     assert row["threshold_detection_rate_wilson95_hi"] == pytest.approx(hi)
+
+
+def test_threshold_free_summary_uses_censoring_vocabulary() -> None:
+    group = [
+        {"normalized_positive_excess_decision": value}
+        for value in (1, 0, 1, 1)
+    ]
+    fields = evaluate_snr._detection_rate_fields(group)
+
+    assert fields["positive_excess_fraction"] == pytest.approx(0.75)
+    assert "normalized_positive_excess_detection_rate" not in fields
+    assert "threshold_detection_rate" not in fields
+
+
+def test_summary_rows_pool_backend_powers_before_conversion() -> None:
+    from pilot_proxy.dtv_units import pilot_excess_db_to_data_shelf_snr_db
+    from pilot_proxy.testbench.evaluate_snr import _summarize_rows
+
+    def _trial(
+        *,
+        gpu: tuple[int, int, int],
+        cpu_float: tuple[float, float, float],
+        cpu_packed: tuple[int, int, int],
+    ) -> dict:
+        return {
+            "requested_data_shelf_snr_db": -30.0,
+            "frequency_offset_hz": 0.0,
+            "channel_gain_db": 0.0,
+            "channel_phase_deg": 0.0,
+            "measured_truth_data_shelf_snr_db": -30.0,
+            "measured_truth_composite_atsc_snr_db": -20.0,
+            "estimated_data_shelf_snr_db": -30.0,
+            "snr_error_db": 0.0,
+            "coarse_power_ratio": 1.0,
+            "normalized_coarse_power_ratio_db": 0.0,
+            "pilot_excess_db": 0.0,
+            "cpu_float_estimated_data_shelf_snr_db": -30.0,
+            "cpu_float_snr_error_db": 0.0,
+            "cpu_float_coarse_power_ratio": 1.0,
+            "cpu_gpu_abs_diff": 0.0,
+            "cpu_float_gpu_snr_diff_db": 0.0,
+            "p_target_u64": gpu[0],
+            "p_ref_lower_u64": gpu[1],
+            "p_ref_upper_u64": gpu[2],
+            "cpu_float_p_target": cpu_float[0],
+            "cpu_float_p_ref_lower": cpu_float[1],
+            "cpu_float_p_ref_upper": cpu_float[2],
+            "cpu_packed_p_target": cpu_packed[0],
+            "cpu_packed_p_ref_lower": cpu_packed[1],
+            "cpu_packed_p_ref_upper": cpu_packed[2],
+            "target_weight_norm_sq": 2,
+            "reference_weight_norm_sum_sq": 8,
+            "cpu_float_target_weight_norm_sq": 2.5,
+            "cpu_float_reference_weight_norm_sum_sq": 7.5,
+        }
+
+    rows = [
+        _trial(gpu=(10, 5, 5), cpu_float=(5.0, 5.0, 5.0), cpu_packed=(20, 10, 10)),
+        _trial(gpu=(50, 45, 45), cpu_float=(25.0, 25.0, 25.0), cpu_packed=(30, 30, 30)),
+    ]
+    calibration = {
+        "pilot_below_data_db": 11.918446870168612,
+        "bin_enbw_hz": 3051.7578125,
+        "pilot_capture_efficiency": 0.9,
+        "dtv_bandwidth_hz": 6.0e6,
+    }
+    summary = _summarize_rows(
+        rows,
+        requested_values=[-30.0],
+        frequency_offset_values=[0.0],
+        composite_to_shelf_db=10.0,
+        num_input_streams=4,
+        **calibration,
+    )[0]
+
+    assert summary["pilot_below_data_db"] == calibration["pilot_below_data_db"]
+    assert summary["gpu_pooled_p_target"] == 60
+    assert summary["gpu_pooled_p_ref_sum"] == 100
+    assert summary["gpu_pooled_normalized_coarse_power_ratio"] == pytest.approx(2.4)
+    assert summary["gpu_pooled_normalized_pilot_excess"] == pytest.approx(1.4)
+    assert summary["cpu_float_pooled_p_target"] == pytest.approx(30.0)
+    assert summary["cpu_float_pooled_p_ref_sum"] == pytest.approx(60.0)
+    assert summary["cpu_float_pooled_normalized_coarse_power_ratio"] == pytest.approx(1.5)
+    assert summary["cpu_float_pooled_normalized_pilot_excess"] == pytest.approx(0.5)
+    assert summary["cpu_packed_pooled_p_target"] == 50
+    assert summary["cpu_packed_pooled_p_ref_sum"] == 80
+    assert summary["cpu_packed_pooled_normalized_coarse_power_ratio"] == pytest.approx(2.5)
+    assert summary["cpu_packed_pooled_normalized_pilot_excess"] == pytest.approx(1.5)
+
+    gpu_excess_db = 10.0 * math.log10(1.4)
+    assert summary["gpu_pooled_pilot_excess_db"] == pytest.approx(gpu_excess_db)
+    assert summary["gpu_pooled_estimated_data_shelf_snr_db"] == pytest.approx(
+        pilot_excess_db_to_data_shelf_snr_db(
+            gpu_excess_db,
+            **calibration,
+        )
+    )
+    assert summary["gpu_pooled_snr_error_db"] == pytest.approx(
+        summary["gpu_pooled_estimated_data_shelf_snr_db"] + 30.0
+    )
 
 
 def test_summary_rows_omit_detection_rates_for_legacy_trials() -> None:
@@ -431,11 +574,43 @@ def test_cpu_reference_measurements_match_exact_integers() -> None:
     )
     assert out["diagnostic_raw_float32"] == pytest.approx(fstat, rel=1e-6)
     nt, nl, nu = weight_term_norms_sq(weights)
+    normalized_ratio = (
+        out["p_target_u64"]
+        * (nl + nu)
+        / (out["p_ref_sum_u64"] * nt)
+    )
+    assert out["normalized_coarse_power_ratio"] == pytest.approx(normalized_ratio)
+    assert out["normalized_pilot_excess"] == pytest.approx(
+        normalized_ratio - 1.0
+    )
     assert out["normalized_positive_excess_decision"] == normalized_positive_excess(
         out["p_target_u64"], out["p_ref_sum_u64"],
         target_norm_sq=nt, reference_norm_sum_sq=nl + nu,
     )
     assert "mask" not in out  # no threshold requested
+
+
+def test_measurements_expose_signed_normalized_excess() -> None:
+    from pilot_proxy.testbench.evaluate_snr import _measurements_from_powers
+
+    out = _measurements_from_powers(
+        diagnostic_float=0.5,
+        p_target=1,
+        p_ref_lower=2,
+        p_ref_upper=2,
+        weights=np.ones((3, 4), dtype=np.int8),
+        pilot_below_data_db=11.3,
+        bin_enbw_hz=3051.7578125,
+        pilot_capture_efficiency=1.0,
+        dtv_bandwidth_hz=6.0e6,
+        threshold=None,
+        mask=0,
+        overflow=0,
+    )
+
+    assert out["normalized_coarse_power_ratio"] == pytest.approx(0.5)
+    assert out["normalized_pilot_excess"] == pytest.approx(-0.5)
+    assert math.isnan(out["pilot_excess_db"])
 
 
 def test_cpu_reference_threshold_mask_is_exact_at_the_boundary() -> None:
@@ -485,6 +660,13 @@ def test_detector_backend_flag_parses() -> None:
     )
     assert args.detector_backend == "cpu-reference"
     assert build_parser().parse_args(["--input-iq", "x.cfile"]).detector_backend == "cuda"
+
+
+def test_waveform_audit_calibration_flag_parses() -> None:
+    args = evaluate_snr.build_parser().parse_args(
+        ["--input-iq", "x.cfile", "--pilot-below-data-db-from-audit"]
+    )
+    assert args.pilot_below_data_db_from_audit is True
 
 
 def test_defaults_are_the_matched_clean_pilot_configuration() -> None:
