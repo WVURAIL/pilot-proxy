@@ -15,8 +15,8 @@ Regenerate on a new products snapshot and render the pages:
     python3 analysis/make_policy_data.py --products DIR --out out
     python3 analysis/render_artifacts.py --data-dir out
 
-Both make_* scripts need the released `baonoise` package
-(bao-noise-tolerance). The policy methodology constants (since=2025-01,
+Both make_* scripts need the released `rfisher` package (RFIsher). The policy
+methodology constants (since=2025-01,
 the coherence bracket, the inclusive-keep and collection-ceased
 overrides, the eta grid) are locked in make_policy_data.py; changing
 them is a policy revision, not a rebuild.

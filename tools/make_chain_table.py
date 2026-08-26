@@ -19,7 +19,7 @@ Running with ``--self-test`` first reproduces the published first-block
 constants and aborts if any of them moves: the table's provenance is this
 reproduction, not a remembered analysis.
 
-Requires the released ``baonoise`` package (bao-noise-tolerance).
+Requires the released ``rfisher`` package (RFIsher).
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ import numpy as np
 
 from pilot_proxy.archive_health import (
     FRAME_HEALTH_GATE_SCHEMA_VERSION,
-    temporary_baonoise_health_views,
+    temporary_residual_health_views,
 )
 
 # Transmitter-era boundaries from the monthly occupancy analysis.
@@ -103,7 +103,7 @@ def main() -> int:
     parser.add_argument("--skip-self-test", action="store_true")
     args = parser.parse_args()
 
-    from baonoise import residual as res
+    from rfisher import residual as res
 
     paths = [
         Path(path)
@@ -112,10 +112,10 @@ def main() -> int:
     if not paths:
         raise SystemExit(f"no per-pilot products under {args.products}")
     rows = []
-    # baonoise owns the residual calculation but accepts only paths. Derived
+    # RFIsher owns the residual calculation but accepts only paths. Derived
     # minimal views apply the archive gate before any floor, variance, or
     # correlation-time statistic reaches that package.
-    with temporary_baonoise_health_views(paths) as health_views:
+    with temporary_residual_health_views(paths) as health_views:
         for path in health_views:
             with np.load(path, allow_pickle=False) as z:
                 ch = int(z["physical_channel"][0])

@@ -507,7 +507,6 @@ def main(argv=None):
         schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
         policy="fail_closed",
         applied_to_all_residual_inputs=True,
-        applied_to_all_baonoise_inputs=True,
         stored_frames=total_frames,
         included_frames=total_health_included,
         excluded_frames=total_frames - total_health_included,

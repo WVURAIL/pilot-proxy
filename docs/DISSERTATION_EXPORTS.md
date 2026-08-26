@@ -81,8 +81,8 @@ PYTHONPATH=src python tools/make_dissertation_tables.py \
   the digits the dissertation quotes reproduce from the product.
 - `bao_time_vs_masking.csv` — observing-time-versus-masked-fraction curves
   for the survey-amplitude, worst-bin-amplitude, and worst-bin-dilation
-  targets, computed with the released `baonoise` package (bao-noise-tolerance
-  must be installed; pass `--skip-forecast` to omit).
+  targets, computed with the released `rfisher` package (RFIsher must be
+  installed; pass `--skip-forecast` to omit).
 
 Tables are written to `exports/dissertation/inputs/` (ignored by git) and are
 then supplied to the exporter through `--census-psd`,
@@ -90,8 +90,8 @@ then supplied to the exporter through `--census-psd`,
 
 `tools/make_chain_table.py` generates the per-channel residual-chain table
 (the dissertation's Table 9.6 and its lower-band extension) from the same
-products via the released `baonoise` residual machinery. It passes only
-versioned v1 health-filtered frame views to `baonoise`, so its floor,
+products via the released `rfisher` residual machinery. It passes only
+versioned v1 health-filtered frame views to RFIsher, so its floor,
 variance, correlation-time, and masked-fraction terms cannot silently restore
 excluded archive rows. Its built-in
 self-test reproduces the published first-measured-block constants from raw
@@ -181,7 +181,7 @@ UTC-quarter estimates with persistence/uniqueness evidence and refusal
 reasons; an outside-neighborhood line is only a sentinel and cannot move the
 pilot anchor.
 The report, policy, residual-chain, and histogram generators create transient
-minimal v1-filtered views for all path-only `baonoise` calls; the census-PSD
+minimal v1-filtered views for all path-only RFIsher calls; the census-PSD
 table uses the same exact spectrum correction.
 Do not call the fine-F heatmaps raw-voltage spectrograms, and do not call the
 relative spectra absolute PSDs.

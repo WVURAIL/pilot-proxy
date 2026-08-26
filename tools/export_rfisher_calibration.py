@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # coding=utf-8
-"""Export the pilot-proxy -> baonoise calibration bundle from per-pilot products.
+"""Export the PilotProxy -> RFIsher calibration bundle from per-pilot products.
 
-Implements the "PilotProxy -> baonoise export specification (CANFAR pass)":
+Implements the "PilotProxy -> RFIsher export specification (CANFAR pass)":
 long-form CSV histograms of the per-frame decision statistic, an empirical
 null measured for the same statistic, per-window maxima, channel metadata,
 and provenance. Everything derives offline from the stored per-pilot
@@ -476,7 +476,7 @@ def main() -> int:
         f.write("\n")
 
     prov = {
-        "spec": "PilotProxy -> baonoise export specification (CANFAR pass)",
+        "spec": "PilotProxy -> RFIsher export specification (CANFAR pass)",
         "statistic_convention": (
             "F_frame = max over the per-channel designated window of "
             "fine_power_ratio[b]; window = measured-line anchor +/- "

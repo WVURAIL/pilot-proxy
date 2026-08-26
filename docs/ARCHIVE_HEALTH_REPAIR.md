@@ -321,21 +321,21 @@ so those stronger product names would be scientifically false.
 
 ## Dissertation policy and residual consumers
 
-The released `baonoise` APIs used by the dissertation accept product paths
+The released `rfisher` APIs used by the dissertation accept product paths
 and load their own frame arrays. Filtering only the surrounding report code
 would therefore be insufficient: the residual floor, correlation time,
 threshold sweep, and mask-fraction routines would silently read the excluded
 rows again.
 
-`temporary_baonoise_health_views` closes that boundary. It applies the same v1
+`temporary_residual_health_views` closes that boundary. It applies the same v1
 gate and writes short-lived, deliberately incomplete NPZ views containing only
-the coarse-policy and residual columns used by `baonoise`, plus the source
+the coarse-policy and residual columns used by RFIsher, plus the source
 product hash and health counts. It omits the superseded fine-decision fields
 and is not a replacement canonical survey product.
 
 The dissertation-facing `make_report_data.py`, `make_policy_data.py`,
 `plot_channel_histograms.py`, and `tools/make_chain_table.py` now route every
-`baonoise` call through those views. Direct per-frame policy denominators in
+RFIsher call through those views. Direct per-frame policy denominators in
 `make_policy_data.py` also apply `evaluate_frame_health`. The census spectra in
 `tools/make_dissertation_tables.py` use the exact v1 spectral correction, and
 its worked-example search refuses excluded rows. This is the minimum boundary

@@ -4,8 +4,8 @@
 This tool assembles the CSV inputs that ``pilot_proxy.dissertation_exports``
 accepts through its ``--census-psd``, ``--worked-example-spectra``, and
 ``--bao-time-vs-masking`` options. It reads per-pilot survey products
-directly and, for the forecast table, uses the released ``baonoise``
-package (bao-noise-tolerance) --- which is why this lives in ``tools/``
+directly and, for the forecast table, uses the released ``rfisher``
+package (RFIsher) --- which is why this lives in ``tools/``
 rather than inside :mod:`pilot_proxy`: the package itself stays free of the
 cross-repository dependency, and the export module records whatever inputs
 this tool produced.
@@ -250,7 +250,7 @@ def bao_time_vs_masking_rows() -> list[dict]:
     convention as the dissertation's cost-side figure.  Times are on-sky
     years at 8,760 h/yr.
     """
-    from baonoise import api, scenarios
+    from rfisher import api, scenarios
 
     fc = api.load()
     onsky_hours = 8760.0
@@ -300,7 +300,7 @@ def main() -> int:
                         default=Path("exports/dissertation/inputs"),
                         help="directory for the generated CSV tables")
     parser.add_argument("--skip-forecast", action="store_true",
-                        help="skip the baonoise-dependent forecast table")
+                        help="skip the RFIsher-dependent forecast table")
     parser.add_argument("--worked-example", action="store_true",
                         help="also generate worked_example_spectra.csv "
                              "(verifies the published digits first)")

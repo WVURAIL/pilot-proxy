@@ -441,7 +441,6 @@ def main(argv=None):
         report["sweep_unavailable"] = sweep_unavailable
         report["threshold_sweep_scope"] = "historical_report_only"
         report["health_gate"]["applied_to_all_residual_inputs"] = True
-        report["health_gate"]["applied_to_all_baonoise_inputs"] = True
     report["hist_edges"] = [round(float(x), 2) for x in HIST_EDGES.tolist()]
 
     out_path = args.out / "report_data.json"

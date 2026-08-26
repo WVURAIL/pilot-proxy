@@ -543,7 +543,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
 
 <section>
   <div class="sec-head"><span class="sec-n">04</span>
-  <h2>&eta; from the noise tolerance</h2></div>
+  <h2>&eta; from the contamination-residual tolerance</h2></div>
   <div class="measure">
   <p>&mu; says where the null is. It does not say how far above the null the
   threshold belongs &mdash; that is a science question, and it is answered

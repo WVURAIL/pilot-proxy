@@ -1,5 +1,5 @@
 # coding=utf-8
-"""Gate for the baonoise calibration exporter.
+"""Gate for the RFIsher calibration exporter.
 
 Synthetic product with a known geometry: a persistent line at bin 50
 during an on-quarter, a transmitter-off quarter at the null bulk, and
@@ -25,7 +25,7 @@ from pilot_proxy.fine_reduction import (
 )
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
-TOOL = REPO / "tools" / "export_baonoise_calibration.py"
+TOOL = REPO / "tools" / "export_rfisher_calibration.py"
 
 N_FRAMES = 240
 LINE_BIN = 50
@@ -104,6 +104,7 @@ def test_exporter_end_to_end(tmp_path):
 
     # provenance: measured anchor at the line bin
     prov = json.loads((out / "provenance.json").read_text())
+    assert prov["spec"] == "PilotProxy -> RFIsher export specification (CANFAR pass)"
     w = prov["window_definitions"]["35"]
     assert w["anchored"] is True and w["anchor_bin"] == LINE_BIN
 

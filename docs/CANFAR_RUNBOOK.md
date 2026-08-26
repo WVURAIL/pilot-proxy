@@ -643,9 +643,9 @@ baseband access is needed:
 
 ```bash
 RUN_DIR=/absolute/path/to/run
-python tools/export_baonoise_calibration.py \
+python tools/export_rfisher_calibration.py \
   --per-pilot-dir "$RUN_DIR/_per_pilot" \
-  --out "$RUN_DIR/baonoise_export"
+  --out "$RUN_DIR/rfisher_export"
 ```
 
 The tool derives the per-frame decision statistic (max of the fine

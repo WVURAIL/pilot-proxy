@@ -218,8 +218,8 @@ hence `provenance/`; avoid categorical no-bug wording in the paper.
       see REFEREE_TRIAGE_R7_2026-07-17.md.
 - [x] **−32 dB origin RESOLVED 2026-07-17 (author decision):** no
       derivation exists in any project material (original draft: uncited
-      "science criterion"; "RadioFisher companion" was the assistant's
-      unfounded inference, now removed from the text). Demoted to a
+      "science criterion"; "RadioFisher companion" was an unsupported early
+      inference, now removed from the text). Demoted to a
       recorded testbench convention; fixed-τ rule retained as a
       calibration-free BACKUP OPERATING MODE; the deployed
       positive-excess rule is the operational cleaning rule and primary
