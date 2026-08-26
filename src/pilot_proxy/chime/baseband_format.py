@@ -8,6 +8,8 @@ matching synthetic files. Pure NumPy + h5py; no analysis logic lives here.
 On-disk layout:
     dataset  h["baseband"]    uint8 [n_time, n_feeds], offset-binary 4+4-bit
     attr     h.attrs["freq"]  channel-centre frequency in MHz
+    dataset  h["index_map/input"]  optional receiver input map
+    attrs    git_version_tag / collection_server  optional receiver provenance
 """
 from __future__ import annotations
 
@@ -72,13 +74,15 @@ def iter_frames(path: str, nfft: int = NFFT):
 
 
 def make_synth_file(path, n_time, n_feeds, f_center_mhz, f_tone_bb,
-                    tone_amp=3.0, noise_std=2.5, seed=0) -> None:
+                    tone_amp=3.0, noise_std=2.5, seed=0,
+                    receiver_provenance=True) -> None:
     """Write a synthetic baseband .h5 (uint8 4+4-bit) for tests.
 
     Injects a complex sinusoid at baseband frequency `f_tone_bb` (Hz) with a random
     per-feed phase (so it only combines incoherently), over complex Gaussian noise,
-    and stamps `f_center_mhz` into the `freq` attribute. A power-spectrum analysis
-    run over the result must peak at `f_tone_bb`.
+    stamps `f_center_mhz` into the `freq` attribute, and normally includes a
+    synthetic receiver identity. A power-spectrum analysis run over the result
+    must peak at `f_tone_bb`.
     """
     rng = np.random.default_rng(seed)
     n = np.arange(n_time)
@@ -93,3 +97,15 @@ def make_synth_file(path, n_time, n_feeds, f_center_mhz, f_tone_bb,
     with h5py.File(path, "w") as h:
         h.create_dataset("baseband", data=packed)
         h.attrs["freq"] = f_center_mhz
+        if receiver_provenance:
+            h.attrs["git_version_tag"] = "synthetic"
+            h.attrs["collection_server"] = "synthetic"
+            input_map = np.empty(
+                n_feeds,
+                dtype=[("chan_id", "<u2"), ("correlator_input", "S32")],
+            )
+            input_map["chan_id"] = np.arange(n_feeds, dtype=np.uint16)
+            input_map["correlator_input"] = [
+                f"synthetic-{index}".encode("ascii") for index in range(n_feeds)
+            ]
+            h.create_dataset("index_map/input", data=input_map)

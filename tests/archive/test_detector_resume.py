@@ -59,7 +59,9 @@ FREQ_ID = 844
 _EXACT = ("p_target_u64", "p_ref_lower_u64", "p_ref_upper_u64",
           "p_ref_sum_u64", "fine_power_u64", "reject_mask", "valid", "frame_index",
           "unit_keys", "unit_order", "frame_unit_index", "frame_in_unit",
-          "unit_time0_fpga", "unit_event_id", "archive_version")
+          "unit_time0_fpga", "unit_event_id", "archive_version",
+          "unit_git_version_tag", "unit_input_map_sha256",
+          "unit_collection_server", "unit_scope")
 _CLOSE = ("coarse_power_ratio", "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
           "baseband_power_linear", "integrated_spectrum_before_mask",
           "integrated_spectrum_after_mask", "unit_time0_ctime", "unit_delta_time")
@@ -168,6 +170,7 @@ def test_analyzer_resume_matches_uninterrupted(tmp_path):
     def _meta(i):
         m = dict(reader.probe(str(paths[i])))
         m["unit_key"] = f"synth:{i}"
+        m["scope"] = "local"
         return m
 
     def _consume(analyzer, idxs):
@@ -221,6 +224,7 @@ def test_analyzer_resume_rejects_changed_fine_retention(tmp_path):
     def _meta(index):
         meta = dict(reader.probe(str(paths[index])))
         meta["unit_key"] = f"synth:{index}"
+        meta["scope"] = "local"
         return meta
 
     first = PilotProxyDetectorAnalyzer()
@@ -271,6 +275,7 @@ def test_consume_file_rolls_back_all_frames_when_later_chunk_fails(tmp_path):
     )
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:transaction"
+    meta["scope"] = "local"
     analyzer = PilotProxyDetectorAnalyzer()
     analyzer.begin(ctx, meta)
 
@@ -289,7 +294,9 @@ def test_consume_file_rolls_back_all_frames_when_later_chunk_fails(tmp_path):
     assert np.count_nonzero(np.asarray(after)) == 0
 
 
-@pytest.mark.parametrize("missing_field", ["unit_order", "nfft"])
+@pytest.mark.parametrize(
+    "missing_field", ["unit_order", "unit_input_map_sha256", "nfft"]
+)
 def test_analyzer_resume_requires_current_checkpoint_fields(
     tmp_path, missing_field
 ):
@@ -308,6 +315,7 @@ def test_analyzer_resume_requires_current_checkpoint_fields(
     )
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
     first = PilotProxyDetectorAnalyzer()
     first.begin(ctx, meta)
     first.consume_file(reader.iter_arrays(str(path), ctx), meta)
@@ -350,6 +358,7 @@ def test_analyzer_resume_reports_malformed_timing_metadata(
     )
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
     first = PilotProxyDetectorAnalyzer()
     first.begin(ctx, meta)
     first.consume_file(reader.iter_arrays(str(path), ctx), meta)
@@ -378,6 +387,7 @@ def test_analyzer_resume_rejects_changed_weights(tmp_path):
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options=base_options)
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
     first = PilotProxyDetectorAnalyzer()
     first.begin(ctx, meta)
     first.consume_file(reader.iter_arrays(str(path), ctx), meta)
@@ -409,6 +419,7 @@ def test_analyzer_resume_rejects_changed_detector_contract(tmp_path):
     })
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
     first = PilotProxyDetectorAnalyzer()
     first.begin(ctx, meta)
     first.consume_file(reader.iter_arrays(str(path), ctx), meta)
@@ -447,6 +458,7 @@ def test_analyzer_resume_rejects_changed_sample_rate(tmp_path):
     )
     first_meta = dict(reader.probe(str(first_path)))
     first_meta["unit_key"] = "synth:0"
+    first_meta["scope"] = "local"
     first = PilotProxyDetectorAnalyzer()
     first.begin(original_ctx, first_meta)
     first.consume_file(reader.iter_arrays(str(first_path), original_ctx), first_meta)
@@ -462,6 +474,7 @@ def test_analyzer_resume_rejects_changed_sample_rate(tmp_path):
     )
     next_meta = dict(reader.probe(str(next_path)))
     next_meta["unit_key"] = "synth:1"
+    next_meta["scope"] = "local"
     resumed = PilotProxyDetectorAnalyzer()
     assert resumed.resume(str(checkpoint), changed_ctx)
     with pytest.raises(SystemExit, match="sample rate"):
@@ -486,6 +499,7 @@ def test_analyzer_resume_rejects_changed_python_source(tmp_path, monkeypatch):
                      options=options)
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
 
     monkeypatch.setattr(pilot_proxy, "__version__", "0.3.0.dev0")
     monkeypatch.setattr(detector_mod, "package_source_sha256", lambda *a, **k: "02066f1d" * 8)
@@ -632,6 +646,7 @@ def test_resume_normalizes_zero_fine_placeholders(tmp_path):
     reader = ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
 
     checkpoint = tmp_path / "disabled.npz"
     original = PilotProxyDetectorAnalyzer()
@@ -670,6 +685,7 @@ def test_zero_frame_checkpoint_resume_keeps_fine_width(tmp_path):
     reader = ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
 
     # checkpoint before any frame fixes the fine width
     a1 = PilotProxyDetectorAnalyzer()
@@ -730,6 +746,7 @@ def test_resume_refuses_fine_definition_change_end_to_end(tmp_path, monkeypatch)
     def _meta(i):
         m = dict(reader.probe(str(files[(f"evt{i}", FREQ_ID)])))
         m["unit_key"] = f"synth:{i}"
+        m["scope"] = "local"
         return m
 
     # checkpoint file 0 under the current fine-reduction definition

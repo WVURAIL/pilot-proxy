@@ -77,6 +77,10 @@ def _product() -> dict[str, np.ndarray]:
         "unit_event_id": np.asarray([1], dtype=np.int64),
         "unit_delta_time": np.asarray([nfft / 390_625.0]),
         "archive_version": np.asarray(["1"], dtype=str),
+        "unit_git_version_tag": np.asarray(["receiver-build"], dtype=str),
+        "unit_input_map_sha256": np.asarray(["a" * 64], dtype=str),
+        "unit_collection_server": np.asarray(["host-a"], dtype=str),
+        "unit_scope": np.asarray(["triggered"], dtype=str),
         "frame_unit_index": np.asarray([0], dtype=np.int32),
         "frame_in_unit": np.asarray([0], dtype=np.int32),
     }
@@ -126,3 +130,36 @@ def test_audit_rejects_wrapped_sample_counts(tmp_path: Path) -> None:
         "railed_sample_count + fill_sample_count <= railed_sample_total"
         in audit.failures
     )
+
+
+def test_audit_rejects_malformed_input_map_hash(tmp_path: Path) -> None:
+    product = _product()
+    product["unit_input_map_sha256"] = np.asarray(["A" * 64], dtype=str)
+    path = tmp_path / "844.npz"
+    np.savez(path, **product)
+
+    audit, _stats = audit_per_pilot.audit_file(path, None, None)
+
+    assert "input-map hashes are lowercase SHA-256" in audit.failures
+
+
+def test_audit_rejects_empty_unit_scope(tmp_path: Path) -> None:
+    product = _product()
+    product["unit_scope"] = np.asarray([""], dtype=str)
+    path = tmp_path / "844.npz"
+    np.savez(path, **product)
+
+    audit, _stats = audit_per_pilot.audit_file(path, None, None)
+
+    assert "unit scopes are nonempty" in audit.failures
+
+
+def test_audit_rejects_archive_unit_without_receiver_state(tmp_path: Path) -> None:
+    product = _product()
+    product["unit_git_version_tag"] = np.asarray([""], dtype=str)
+    path = tmp_path / "844.npz"
+    np.savez(path, **product)
+
+    audit, _stats = audit_per_pilot.audit_file(path, None, None)
+
+    assert "archive units carry receiver-state identity" in audit.failures

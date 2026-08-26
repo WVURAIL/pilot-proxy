@@ -111,6 +111,24 @@ def test_detector_rejects_nfft_mismatch():
         red.consume_file(iter(()), {"f_center_hz": CH14_HZ, "nfft": 8192})
 
 
+@pytest.mark.parametrize("missing", ["git_version_tag", "input_map_sha256"])
+def test_detector_rejects_archive_unit_without_receiver_state(missing):
+    red = PilotProxyDetectorAnalyzer()
+    red.begin(_detector_ctx(), {"f_center_hz": CH14_HZ, "nfft": 16384})
+    meta = {
+        "f_center_hz": CH14_HZ,
+        "nfft": 16384,
+        "unit_key": "archive:unit",
+        "scope": "archive.scope",
+        "git_version_tag": "receiver-build",
+        "input_map_sha256": "a" * 64,
+    }
+    meta.pop(missing)
+
+    with pytest.raises(ValueError, match=missing):
+        red.consume_file(iter(()), meta)
+
+
 # -- combiner refuses mismatched geometry (F10) ------------------------------
 
 def _write_min_detector_product(
@@ -208,6 +226,10 @@ def _write_min_detector_product(
         unit_event_id=np.full(int(n_frames), -1, dtype=np.int64),
         unit_delta_time=np.full(int(n_frames), 1.0 / float(sample_rate_hz)),
         archive_version=np.asarray([""] * int(n_frames), dtype=str),
+        unit_git_version_tag=np.asarray([""] * int(n_frames), dtype=str),
+        unit_input_map_sha256=np.asarray([""] * int(n_frames), dtype=str),
+        unit_collection_server=np.asarray([""] * int(n_frames), dtype=str),
+        unit_scope=np.asarray(["local"] * int(n_frames), dtype=str),
         max_chunks_per_file=np.asarray(-1, dtype=np.int64),
         weight_bank_sha256=np.asarray("bank"),
         weight_manifest_sha256=np.asarray("manifest"),
@@ -573,7 +595,12 @@ def test_detector_out_of_band_emits_invalid_without_kernel(tmp_path):
     with pytest.warns(RuntimeWarning, match="does not contain"):
         red.begin(ctx, {"f_center_hz": 643.75e6, "nfft": 16384})
     chunk = np.zeros((16384, 4), dtype=np.uint8)
-    meta = {"f_center_hz": 643.75e6, "nfft": 16384, "unit_key": "baseband_e_400.h5"}
+    meta = {
+        "f_center_hz": 643.75e6,
+        "nfft": 16384,
+        "unit_key": "baseband_e_400.h5",
+        "scope": "local",
+    }
     n = red.consume_file([chunk, chunk], meta)  # must not raise (kernel skipped)
     assert n == 2
     out = tmp_path / "400.npz"

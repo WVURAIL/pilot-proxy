@@ -276,10 +276,14 @@ _RESUME_REQUIRED_FIELDS = frozenset(
         "sample_rate_hz",
         "sense",
         "source_event_key_schema_version",
+        "unit_collection_server",
         "unit_delta_time",
         "unit_event_id",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
         "unit_keys",
         "unit_order",
+        "unit_scope",
         "unit_time0_ctime",
         "unit_time0_fpga",
         "weight_bank_sha256",
@@ -340,6 +344,10 @@ def _validated_resume_axes(
         "unit_event_id",
         "unit_delta_time",
         "archive_version",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
+        "unit_collection_server",
+        "unit_scope",
     )
     for name in per_unit_fields:
         size = int(np.asarray(data[name]).reshape(-1).size)
@@ -583,8 +591,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._unit_event_id: list[int] = []
         self._unit_delta_time: list[float] = []
         self._unit_archive_version: list[str] = []
-        # Acquisition scope (triggered vs scheduled). Empty until the
-        # streaming engine forwards the inventory row; never invented.
+        self._unit_git_version_tag: list[str] = []
+        self._unit_input_map_sha256: list[str] = []
+        self._unit_collection_server: list[str] = []
+        # Acquisition scope from the source; local inputs declare "local".
         self._unit_scope: list[str] = []
     # -- selection / fan-out (per CHIME coarse channel / freq_id) -----------
     def resolve_selection(self, ctx: RunContext, spec: Any) -> Any:
@@ -826,6 +836,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._unit_event_id = [int(x) for x in _col("unit_event_id")]
         self._unit_delta_time = [float(x) for x in _col("unit_delta_time")]
         self._unit_archive_version = [str(x) for x in _col("archive_version")]
+        self._unit_git_version_tag = [str(x) for x in _col("unit_git_version_tag")]
+        self._unit_input_map_sha256 = [str(x) for x in _col("unit_input_map_sha256")]
+        self._unit_collection_server = [str(x) for x in _col("unit_collection_server")]
         self._unit_scope = [str(x) for x in _col("unit_scope")]
 
         # let begin() verify the new input's identity matches what we restored
@@ -1439,6 +1452,28 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 "detector analyzer: file input-stream count "
                 f"{int(streams)} != product count {self._num_input_streams}."
             )
+        if meta.get("unit_key") is not None:
+            scope = meta.get("scope")
+            if not isinstance(scope, str) or not scope.strip():
+                raise ValueError(
+                    "detector analyzer: each unit must have a non-empty source scope"
+                )
+            if scope != "local":
+                git_version_tag = meta.get("git_version_tag")
+                input_map_sha256 = meta.get("input_map_sha256")
+                if not isinstance(git_version_tag, str) or not git_version_tag:
+                    raise ValueError(
+                        "detector analyzer: archive units require git_version_tag"
+                    )
+                if (
+                    not isinstance(input_map_sha256, str)
+                    or len(input_map_sha256) != 64
+                    or any(c not in "0123456789abcdef" for c in input_map_sha256)
+                ):
+                    raise ValueError(
+                        "detector analyzer: archive units require a valid "
+                        "input_map_sha256"
+                    )
 
     def consume_file(self, arrays: Iterable, meta: Mapping[str, Any]) -> int:
         """Consume one unit atomically, rolling back every accumulator on error."""
@@ -1469,6 +1504,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             "_unit_event_id",
             "_unit_delta_time",
             "_unit_archive_version",
+            "_unit_git_version_tag",
+            "_unit_input_map_sha256",
+            "_unit_collection_server",
             "_unit_scope",
         )
         lengths = {name: len(getattr(self, name)) for name in list_fields}
@@ -1796,6 +1834,9 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             self._unit_event_id.append(int(ev) if ev is not None else -1)
             self._unit_delta_time.append(float(meta.get("delta_time", float("nan"))))
             self._unit_archive_version.append(str(meta.get("archive_version", "")))
+            self._unit_git_version_tag.append(str(meta.get("git_version_tag", "")))
+            self._unit_input_map_sha256.append(str(meta.get("input_map_sha256", "")))
+            self._unit_collection_server.append(str(meta.get("collection_server", "")))
             self._unit_scope.append(str(meta.get("scope", "")))
         return n
 
@@ -1986,8 +2027,16 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             archive_version=np.asarray(
                 [str(s) for s in self._unit_archive_version], dtype=str
             ),
-            # Triggered vs scheduled acquisition, per unit. Empty strings
-            # mean the engine did not supply it, not that it was scheduled.
+            unit_git_version_tag=np.asarray(
+                [str(s) for s in self._unit_git_version_tag], dtype=str
+            ),
+            unit_input_map_sha256=np.asarray(
+                [str(s) for s in self._unit_input_map_sha256], dtype=str
+            ),
+            unit_collection_server=np.asarray(
+                [str(s) for s in self._unit_collection_server], dtype=str
+            ),
+            # Triggered, scheduled, or local acquisition scope, per unit.
             unit_scope=np.asarray(
                 [str(s) for s in self._unit_scope], dtype=str
             ),

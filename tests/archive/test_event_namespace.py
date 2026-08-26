@@ -54,6 +54,26 @@ def test_path_matched_event_with_different_start_time_is_rejected() -> None:
         _align_frames([first, second])
 
 
+@pytest.mark.parametrize(
+    "field",
+    [
+        "unit_scope",
+        "archive_version",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
+    ],
+)
+def test_path_matched_event_with_different_receiver_state_is_rejected(field) -> None:
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0)
+    first[field] = np.asarray(["first"], dtype=str)
+    second[field] = np.asarray(["second"], dtype=str)
+
+    with pytest.raises(ValueError, match=rf"disagrees on {field}"):
+        _align_frames([first, second])
+
+
 def test_nearly_one_sample_start_time_shift_is_rejected() -> None:
     event = "/campaign-a/baseband_100.h5"
     sample_period = 1.0 / 390_625.0

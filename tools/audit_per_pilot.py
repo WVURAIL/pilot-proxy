@@ -257,8 +257,33 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
     # ---- units ------------------------------------------------------------
     uo = r("unit_order"); U = uo.size
     for k in ("unit_time0_ctime", "unit_time0_fpga", "unit_event_id",
-              "unit_delta_time", "archive_version"):
+              "unit_delta_time", "archive_version", "unit_git_version_tag",
+              "unit_input_map_sha256", "unit_collection_server", "unit_scope"):
         a.check(r(k).size == U, f"len({k})=={U}")
+    input_map_hashes = r("unit_input_map_sha256").astype(str)
+    unit_scopes = r("unit_scope").astype(str)
+    git_version_tags = r("unit_git_version_tag").astype(str)
+    a.check(
+        all(value.strip() for value in unit_scopes),
+        "unit scopes are nonempty",
+    )
+    a.check(
+        all(
+            not value
+            or (len(value) == 64 and all(c in "0123456789abcdef" for c in value))
+            for value in input_map_hashes
+        ),
+        "input-map hashes are lowercase SHA-256",
+    )
+    a.check(
+        all(
+            scope == "local" or (tag and input_hash)
+            for scope, tag, input_hash in zip(
+                unit_scopes, git_version_tags, input_map_hashes
+            )
+        ),
+        "archive units carry receiver-state identity",
+    )
     a.check(len(set(uo.tolist())) == U, "unit keys unique")
     fui = r("frame_unit_index")
     a.check(fui.min() >= 0 and fui.max() < U, "frame_unit_index in range")

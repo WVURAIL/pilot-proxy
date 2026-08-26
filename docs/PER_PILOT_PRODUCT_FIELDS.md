@@ -115,15 +115,40 @@ An older v5 no-measurement checkpoint can contain an all-zero
 canonical `(N, 0, 0)` array with zero bins. Current products never create the
 placeholder, and any nonzero value is invalid.
 
-### Per-unit fields (length equal to `unit_order`)
+### Per-unit receiver state (length equal to `unit_order`)
 
 | Array | Shape | Dtype | Meaning |
 |---|---:|---|---|
-| `unit_scope` | `(U,)` | `str` | Source archive disposition of each unit, aligned 1:1 with `unit_order` |
+| `unit_scope` | `(U,)` | `str` | Source archive disposition; local inputs declare `local` |
+| `archive_version` | `(U,)` | `str` | Raw HDF5 `archive_version`, or empty when absent |
+| `unit_git_version_tag` | `(U,)` | `str` | Raw HDF5 `git_version_tag`, or empty when absent |
+| `unit_input_map_sha256` | `(U,)` | `str` | Typed-content SHA-256 of HDF5 `index_map/input`, or empty when absent |
+| `unit_collection_server` | `(U,)` | `str` | Raw HDF5 `collection_server`, or empty when absent |
 
 `unit_scope` is **per unit, not per frame** --- do not index it with a frame
-number. It is populated from the source's inventory row, so a `--source local`
-run leaves it empty; only an archive source supplies a meaningful value.
+number. It is populated from the source's inventory row. Every current product
+unit has a nonempty value; a `--source local` run uses the declared value
+`local`.
+
+The input-map digest hashes the dataset's dtype, shape, and C-order values. The
+dtype signature records field names, offsets, item size, subarray shape, and
+primitive dtype strings while ignoring library-specific dtype metadata. The
+canonical compact JSON header is prefixed by its unsigned eight-byte big-endian
+length, followed by the C-order value bytes, and the complete stream is hashed
+with SHA-256. This distinguishes receiver input configurations without copying
+the full map into every product.
+
+General local products may record empty receiver attributes when the source
+file does not contain them. Archive smoke, rehearsal, checkpoint, and closeout
+gates require nonempty `unit_scope`, `unit_git_version_tag`, and
+`unit_input_map_sha256` for every unit. Receiver configuration is the tuple of
+`archive_version`, `unit_git_version_tag`, and `unit_input_map_sha256`; scope is
+acquisition bookkeeping and collection server is provenance. The tuple makes
+the receiver-configuration boundary available for intersection with the
+separately derived station era. For a common event, combine also requires
+`unit_scope`, `archive_version`,
+`unit_git_version_tag`, and `unit_input_map_sha256` to agree across channels
+when those values are present.
 
 `weight_coefficients_sha256` `()` `str` is listed under Provenance below.
 
@@ -263,7 +288,6 @@ one absolute timestamp per frame.
 | `unit_time0_fpga` | `(U,)` | `uint64` | FPGA count at file start, or 0 when absent |
 | `unit_event_id` | `(U,)` | `int64` | CHIME event identifier, or `-1` when absent |
 | `unit_delta_time` | `(U,)` | `float64` | Sample period in seconds, or NaN when absent |
-| `archive_version` | `(U,)` | `str` | CHIME archive version, or an empty string when absent |
 | `frame_unit_index` | `(N,)` | `int32` | Unit index `u` for each frame |
 | `frame_in_unit` | `(N,)` | `int32` | Zero-based frame position within unit `u` |
 

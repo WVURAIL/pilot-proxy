@@ -16,6 +16,12 @@ all-zero fine-term placeholder. Resume accepts only the exact zero form and
 normalizes it to `(N, 0, 0)` with zero bins. Nonzero placeholders are invalid,
 and current writers never emit placeholders.
 
+The launch contract was tightened before the first archive cohort to require
+per-unit source scope and receiver-state fields. Early v5 smoke products that
+lack `unit_scope`, `unit_git_version_tag`, `unit_input_map_sha256`, or
+`unit_collection_server` are invalid and must be regenerated. The token remains
+v5 because no production cohort started under the earlier field set.
+
 Detailed arrays are listed in
 [`PER_PILOT_PRODUCT_FIELDS.md`](PER_PILOT_PRODUCT_FIELDS.md) and
 [`FINE_REDUCTION_PRODUCTS.md`](FINE_REDUCTION_PRODUCTS.md).
@@ -58,8 +64,8 @@ error. Current runtime code contains no aliases, adapters, repair paths, or
 fallback readers for pre-release products.
 
 The source-event identity version is required and is versioned independently of
-the enclosing product schema, which is at revision 4. It gates the change from
-historical basename-only
-keys to keys that retain the complete archive or campaign namespace. Products
-without this field cannot be combined or resumed because identical basenames in
-different campaigns are not the same acquisition.
+the enclosing product schema, which is at revision 5. It gates the change from
+historical basename-only keys to keys that retain the complete archive or
+campaign namespace. Products without this field cannot be combined or resumed
+because identical basenames in different campaigns are not the same
+acquisition.

@@ -184,6 +184,7 @@ def _run(
     reader = ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(synth)))
     meta["unit_key"] = "synth:dtv14"
+    meta["scope"] = "local"
     red = PilotProxyDetectorAnalyzer()
     red.begin(ctx, meta)
     red.consume_file(reader.iter_arrays(str(synth), ctx), meta)

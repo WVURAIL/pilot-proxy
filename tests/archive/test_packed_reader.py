@@ -6,7 +6,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-pytest.importorskip("h5py")
+h5py = pytest.importorskip("h5py")
 pytest.importorskip("pilot_proxy.archive.interfaces")
 
 from pilot_proxy.chime import baseband_format as fmt
@@ -14,7 +14,10 @@ from pilot_proxy.chime.baseband_reader import ChimeBasebandReader
 from pilot_proxy.archive.instruments import load_instrument
 from pilot_proxy.archive.interfaces import RunContext
 
-from pilot_proxy.archive.packed_reader import ChimeBasebandPackedReader
+from pilot_proxy.archive.packed_reader import (
+    ChimeBasebandPackedReader,
+    _dataset_content_sha256,
+)
 
 NFFT = 16384
 N_FRAMES = 3
@@ -32,13 +35,21 @@ def test_packed_reader_matches_unpacked(tmp_path):
 
     # The packed reader's probe is a superset of the bundled reader's: identical
     # channel/format keys, plus a per-unit absolute-time axis read from the file
-    # root attrs (NaN/0/None/"" on a synth file that carries only `freq`).
+    # root attrs and receiver-state identifiers.
     unpacked_probe = unpacked_reader.probe(str(synth))
     packed_probe = packed_reader.probe(str(synth))
     for k, v in unpacked_probe.items():
         assert packed_probe[k] == v, k
-    for k in ("time0_ctime", "delta_time", "time0_fpga_count",
-              "event_id", "archive_version"):
+    for k in (
+        "time0_ctime",
+        "delta_time",
+        "time0_fpga_count",
+        "event_id",
+        "archive_version",
+        "git_version_tag",
+        "collection_server",
+        "input_map_sha256",
+    ):
         assert k in packed_probe, k
 
     packed_chunks = list(packed_reader.iter_arrays(str(synth), ctx))
@@ -50,6 +61,55 @@ def test_packed_reader_matches_unpacked(tmp_path):
         assert raw.shape == (NFFT, N_FEEDS)
         # unpacking the raw bytes must reproduce the bundled reader's complex chunk
         assert np.array_equal(fmt.unpack_4bit(raw), cplx)
+
+
+def test_probe_retains_receiver_provenance(tmp_path):
+    synth = tmp_path / "receiver.h5"
+    fmt.make_synth_file(
+        str(synth),
+        n_time=NFFT,
+        n_feeds=N_FEEDS,
+        f_center_mhz=470.3125,
+        f_tone_bb=1500.0,
+        seed=12,
+        receiver_provenance=False,
+    )
+    input_map = np.asarray(
+        [(2, b"input-2"), (5, b"input-5")],
+        dtype=[("chan_id", "<u2"), ("correlator_input", "S16")],
+    )
+    with h5py.File(synth, "a") as h:
+        h.attrs["git_version_tag"] = "receiver-build"
+        h.attrs["collection_server"] = "host-a"
+        h.create_dataset("index_map/input", data=input_map)
+        expected = _dataset_content_sha256(h["index_map/input"])
+
+    probe = ChimeBasebandPackedReader().probe(str(synth))
+
+    assert probe["git_version_tag"] == "receiver-build"
+    assert probe["collection_server"] == "host-a"
+    assert probe["input_map_sha256"] == expected
+    assert expected == "244b14115600631f9525d0c20495f4a8174ebe49d58339bf59e1cb9c890faf9a"
+
+
+def test_input_map_hash_changes_with_content(tmp_path):
+    paths = [tmp_path / "first.h5", tmp_path / "second.h5"]
+    hashes = []
+    for index, path in enumerate(paths):
+        fmt.make_synth_file(
+            str(path),
+            n_time=NFFT,
+            n_feeds=N_FEEDS,
+            f_center_mhz=470.3125,
+            f_tone_bb=1500.0,
+            seed=20 + index,
+            receiver_provenance=False,
+        )
+        with h5py.File(path, "a") as h:
+            h.create_dataset("index_map/input", data=np.asarray([index], dtype="<u2"))
+        hashes.append(ChimeBasebandPackedReader().probe(str(path))["input_map_sha256"])
+
+    assert hashes[0] != hashes[1]
 
 
 def _ctx_with_nfft(nfft):

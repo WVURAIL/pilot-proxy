@@ -9,15 +9,50 @@ the same layout but yields raw ``uint8 [nfft, n_feeds]`` blocks.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Iterator, Mapping
 
 import h5py
+import numpy as np
 
 from pilot_proxy.archive.interfaces import Reader, RunContext, PluginInfo, READY
 from pilot_proxy.chime import baseband_format as fmt
 from pilot_proxy.chime.unreadable import unreadable_file
 
 from .stream_kinds import STREAM_PACKED_COMPLEX_INT4_BASEBAND
+
+
+def _dtype_signature(dtype: np.dtype) -> object:
+    if dtype.names:
+        return {
+            "fields": [
+                [name, _dtype_signature(dtype.fields[name][0]), dtype.fields[name][1]]
+                for name in dtype.names
+            ],
+            "itemsize": dtype.itemsize,
+        }
+    if dtype.subdtype:
+        base, shape = dtype.subdtype
+        return {"base": _dtype_signature(base), "shape": list(shape)}
+    return dtype.str
+
+
+def _dataset_content_sha256(dataset: h5py.Dataset) -> str:
+    """Hash an HDF5 dataset's typed values in a stable order."""
+    values = np.asarray(dataset[...])
+    if values.dtype.hasobject:
+        raise ValueError("index_map/input must not contain object values")
+    header = json.dumps(
+        {"dtype": _dtype_signature(values.dtype), "shape": list(values.shape)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    digest = hashlib.sha256()
+    digest.update(len(header).to_bytes(8, "big"))
+    digest.update(header)
+    digest.update(np.ascontiguousarray(values).tobytes(order="C"))
+    return digest.hexdigest()
 
 
 def _iter_packed_chunks(path: str, nfft: int) -> Iterator:
@@ -75,8 +110,8 @@ class ChimeBasebandPackedReader(Reader):
         # Absolute-time axis + provenance from the file's root attrs, surfaced so
         # the detector can stamp a per-unit time and derive a per-frame time as
         # time0_ctime + frame_in_unit*nfft*delta_time. A real CHIME baseband file
-        # carries the full set; a synthetic test file has only `freq`, so missing
-        # attrs degrade to NaN / 0 / None / "" rather than failing the probe.
+        # carries the full set; missing attrs degrade to NaN / 0 / None / ""
+        # rather than failing the probe.
         with h5py.File(path, "r") as h:
             a = h.attrs
             baseband = h["baseband"]
@@ -121,6 +156,13 @@ class ChimeBasebandPackedReader(Reader):
             meta["time0_fpga_count"] = int(a["time0_fpga_count"]) if "time0_fpga_count" in a else 0
             meta["event_id"] = int(a["event_id"]) if "event_id" in a else None
             meta["archive_version"] = _s("archive_version")
+            meta["git_version_tag"] = _s("git_version_tag")
+            meta["collection_server"] = _s("collection_server")
+            meta["input_map_sha256"] = (
+                _dataset_content_sha256(h["index_map/input"])
+                if "index_map/input" in h
+                else ""
+            )
         return meta
 
     def iter_arrays(self, path: str, ctx: RunContext) -> Iterator:

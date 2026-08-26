@@ -84,6 +84,10 @@ def current_product() -> dict[str, np.ndarray]:
         "unit_event_id": np.asarray([-1], dtype=np.int64),
         "unit_delta_time": np.asarray([1.0 / 390_625.0], dtype=np.float64),
         "archive_version": np.asarray([""], dtype=str),
+        "unit_git_version_tag": np.asarray(["receiver-build"], dtype=str),
+        "unit_input_map_sha256": np.asarray(["a" * 64], dtype=str),
+        "unit_collection_server": np.asarray(["host-a"], dtype=str),
+        "unit_scope": np.asarray(["triggered"], dtype=str),
         "frame_unit_index": np.asarray([0], dtype=np.int32),
         "frame_in_unit": np.asarray([0], dtype=np.int32),
         "max_chunks_per_file": np.asarray(-1, dtype=np.int64),
@@ -113,6 +117,7 @@ def test_current_product_is_accepted():
         "decision_contract_json",
         "source_event_keys",
         "unit_order",
+        "unit_input_map_sha256",
         "p_ref_lower_u64",
         "p_ref_upper_u64",
         "reject_mask",
@@ -152,6 +157,10 @@ def test_legacy_basename_event_identity_is_refused():
         ("frame_in_unit", np.asarray([False], dtype=np.bool_)),
         ("unit_event_id", np.asarray([123.1], dtype=np.float64)),
         ("unit_time0_fpga", np.asarray([123.1], dtype=np.float64)),
+        ("unit_git_version_tag", np.asarray([""], dtype=str)),
+        ("unit_input_map_sha256", np.asarray([""], dtype=str)),
+        ("unit_input_map_sha256", np.asarray(["A" * 64], dtype=str)),
+        ("unit_scope", np.asarray([""], dtype=str)),
         ("p_target_u64", np.asarray([[1.0]], dtype=np.float64)),
         ("p_target_u64", np.asarray([[-1]], dtype=np.int64)),
         ("p_target_u64", np.asarray([[1], [2]], dtype=np.uint64)),
@@ -281,6 +290,16 @@ def test_nonempty_product_cannot_contain_an_unused_unit() -> None:
     product["unit_order"] = np.asarray(["event", "unused"], dtype=str)
     product["source_event_keys"] = np.asarray(["event", "unused"], dtype=str)
     product["archive_version"] = np.asarray(["", ""], dtype=str)
+    product["unit_git_version_tag"] = np.asarray(
+        ["receiver-build", "receiver-build"], dtype=str
+    )
+    product["unit_input_map_sha256"] = np.asarray(
+        ["a" * 64, "a" * 64], dtype=str
+    )
+    product["unit_collection_server"] = np.asarray(
+        ["host-a", "host-a"], dtype=str
+    )
+    product["unit_scope"] = np.asarray(["triggered", "triggered"], dtype=str)
     product["unit_time0_ctime"] = np.asarray([np.nan, np.nan], dtype=np.float64)
     product["unit_time0_fpga"] = np.asarray([0, 0], dtype=np.uint64)
     product["unit_event_id"] = np.asarray([-1, -1], dtype=np.int64)

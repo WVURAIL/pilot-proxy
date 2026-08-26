@@ -383,8 +383,10 @@ def test_local_source_44_not_844():
     inst = inst_mod.load_instrument("chime")
     ctx = RunContext(instrument=inst, selection=[44],
                      options={"source_root": work, "source_glob": "*.h5"})
-    names = sorted(u.name for u in LocalDirectorySource().enumerate(ctx))
+    units = list(LocalDirectorySource().enumerate(ctx))
+    names = sorted(u.name for u in units)
     assert names == ["baseband_s0_44.h5"]              # 844 must NOT match 44
+    assert all(u.meta["scope"] == "local" for u in units)
 
 
 def test_local_source_duplicate_basenames_distinct_keys():

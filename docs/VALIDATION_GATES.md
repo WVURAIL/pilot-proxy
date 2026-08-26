@@ -99,7 +99,8 @@ Pass criteria:
 Repeat both gates after the source revision is frozen:
 
 1. Process one full detector chunk from the 2048-stream `freq_id` 844 file.
-   Require product validation to pass and peak VRAM to remain below 13,900 MiB.
+   Require product validation, nonempty receiver-state identity, and peak VRAM
+   below 13,900 MiB.
 2. Process eight archive units with four download workers, eight staged-file
    slots, and a two-unit rehearsal checkpoint. Interrupt after a durable
    checkpoint, rerun the identical command, and require eight unique unit keys,
@@ -114,6 +115,9 @@ For every per-pilot v5 product inspected during these gates, require:
 - all valid frames remain in the per-frame arrays on both sides of zero excess;
 - exact target, lower-reference, upper-reference, and summed-reference powers;
 - exact fine powers with shape `[N, 3, 256]` and unsigned 64-bit dtype;
+- one nonempty `unit_scope`, raw `unit_git_version_tag`, and
+  `unit_input_map_sha256` per unit;
+- every input-map identity is a 64-character lowercase SHA-256 digest;
 - `fine_status == enabled` and an inactive fine candidate decision;
 - the positive-excess bit affects only the recorded bootstrap flag and the
   after-mask diagnostic spectrum; and

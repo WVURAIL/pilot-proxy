@@ -110,6 +110,7 @@ class LocalDirectorySource(DataSource):
                 "relative_path": relative_path,
                 "size_bytes": size_bytes,
                 "sha256": sha256,
+                "scope": "local",
             }
             if freq_id is not None:
                 # `explore` reads this metadata to summarize the available bands.

@@ -403,6 +403,10 @@ def validate_current_product_identity(
         "unit_event_id",
         "unit_delta_time",
         "archive_version",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
+        "unit_collection_server",
+        "unit_scope",
         "frame_unit_index",
         "frame_in_unit",
         "detector_contract_json",
@@ -558,6 +562,37 @@ def validate_current_product_identity(
         product, "source_event_keys", length=unit_count
     )
     _exact_string_vector(product, "archive_version", length=unit_count)
+    git_version_tags = _exact_string_vector(
+        product, "unit_git_version_tag", length=unit_count
+    )
+    input_map_sha256 = _exact_string_vector(
+        product, "unit_input_map_sha256", length=unit_count
+    )
+    _exact_string_vector(product, "unit_collection_server", length=unit_count)
+    unit_scope = _exact_string_vector(product, "unit_scope", length=unit_count)
+    if any(not value.strip() for value in unit_scope):
+        raise CurrentProductContractError(
+            "current per-pilot unit_scope values must not be empty"
+        )
+    lowercase_hex = set("0123456789abcdef")
+    if any(
+        value and (len(value) != 64 or not set(value) <= lowercase_hex)
+        for value in input_map_sha256
+    ):
+        raise CurrentProductContractError(
+            "current per-pilot unit_input_map_sha256 values must be empty or "
+            "64-character lowercase SHA-256 digests"
+        )
+    if any(
+        scope != "local" and (not tag or not input_hash)
+        for scope, tag, input_hash in zip(
+            unit_scope, git_version_tags, input_map_sha256
+        )
+    ):
+        raise CurrentProductContractError(
+            "current per-pilot archive units require nonempty "
+            "unit_git_version_tag and unit_input_map_sha256 values"
+        )
     if len(set(unit_order)) != unit_count or len(set(unit_keys)) != unit_count:
         raise CurrentProductContractError(
             "current per-pilot unit_order and unit_keys must each be unique"

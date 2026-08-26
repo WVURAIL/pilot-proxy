@@ -83,6 +83,7 @@ def _first_meta():
         "num_input_streams": N_FEEDS,
         "unit_key": f"baseband_evt_{CH14_FREQ_ID}.h5",
         "unit_name": f"baseband_evt_{CH14_FREQ_ID}.h5",
+        "scope": "local",
     }
 
 

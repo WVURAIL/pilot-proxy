@@ -107,6 +107,10 @@ pins, not claims that a scientific choice is optimal.
 |---|---|---|
 | Product schema | `pilotproxy_per_pilot_product_v5` | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
 | Source-event key schema | `pilotproxy_namespaced_source_event_key_v1` | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
+| Per-unit source scope | nonempty archive scope; local inputs declare `local` | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
+| Per-unit receiver build | raw HDF5 `git_version_tag`; archive gates require nonempty values | [`packed_reader.py`](../src/pilot_proxy/archive/packed_reader.py) |
+| Per-unit input configuration | SHA-256 of typed `index_map/input` content; archive gates require valid nonempty digests | [`packed_reader.py`](../src/pilot_proxy/archive/packed_reader.py) |
+| Per-unit collection host | raw HDF5 `collection_server`, empty only when absent | [`packed_reader.py`](../src/pilot_proxy/archive/packed_reader.py) |
 | Recorded coarse bootstrap flag | coarse norm-corrected positive excess; diagnostic only | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
 | Scan-time fine decision | inactive; calibration status `pending_campaign` | [`product_contract.py`](../src/pilot_proxy/product_contract.py) |
 | Shipped detector channel range | physical channels 14 through 36 | [`chime_dtv_weights_k128.bin.manifest.json`](../weights/chime_dtv_weights_k128.bin.manifest.json) |
@@ -162,13 +166,13 @@ digest in the run ledger, then check the resolved first product against it.
 | Partial-run acknowledgement | off | Locked; any new quarantine or failure stops acceptance |
 | Fine products | on | Locked; retains exact fine powers and does not enable fine detection |
 | Checkpoint interval | 250 units | Reduces cumulative product rewrites; a stop can repeat 249 analyzed files plus uncheckpointed prefetched downloads |
-| Real-data GPU gate | One 2048-stream file, one full chunk, peak VRAM below 13,900 MiB, product validation passes | Complete for the frozen revision recorded in the external ledger |
-| Production-profile rehearsal | Archive source, four workers, eight slots, full chunks, forced checkpoint and identical-command resume in a separate capped output | Complete for the frozen revision recorded in the external ledger |
+| Real-data GPU gate | One 2048-stream file, one full chunk, peak VRAM below 13,900 MiB, product and receiver-state validation pass | Repeat after the receiver-state source change and record new evidence |
+| Production-profile rehearsal | Archive source, four workers, eight slots, full chunks, forced checkpoint, receiver-state validation, and identical-command resume in a separate capped output | Repeat after the receiver-state source change and record new evidence |
 | Resume invariant | Same source revision, inventory, output, staging, selection, execution settings, and preserved library | Locked |
 | Output directory | fresh path outside the source checkout | Fill at launch |
 | Receiver profile path and SHA-256 | Checked-in CHIME profile and locked digest above | Verify at launch |
 | Weight bank and manifest SHA-256 | Checked-in bank, manifest, and locked digests above | Verify at launch |
-| Detector library path, version, and SHA-256 | `cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`; core 2.3.0; `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b` | Preserved digest and final-source CUDA, kernel, and real-file gates verified |
+| Detector library path, version, and SHA-256 | `cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`; core 2.3.0; `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b` | Preserved digest; repeat final-source gates after the source change |
 | Terminal product | all 23 per-pilot v5 products; channel subsets are derived only | Locked |
 
 The 23 pilot identifiers are the ATSC 14--36 pilot locations mapped onto the
@@ -278,9 +282,9 @@ prepared threshold family.
 | Item | Current state | Required action |
 |---|---|---|
 | Archive certificate | Present locally, owner-only, expires 2026-09-03 | Renew before launch; at least 72 hours before each expiry, stop after a checkpoint, renew, and resume with the identical command |
-| Local archive environment and client | Final-source environment refreshed; full suite passed | Preserve the environment and never record secrets in the ledger |
-| Real-data GPU capacity | Final-source gate passed below the 13,900 MiB limit with zero validation errors | Complete; exact measurement, evidence path, and embedded digests are in the external ledger |
-| Production-profile resume | Final-source gate passed with eight unique units, 22 unique frames, and empty staging | Complete; interruption and resume evidence are in the external ledger |
+| Local archive environment and client | Environment prepared for the prior source revision | Refresh it and rerun the full suite on the final source; never record secrets in the ledger |
+| Real-data GPU capacity | Prior source passed below the 13,900 MiB limit | Repeat on the final source and require receiver-state fields for every unit |
+| Production-profile resume | Prior source passed with eight unique units, 22 unique frames, and empty staging | Repeat on the final source and require receiver-state fields through resume |
 
 Do not promote the recorded testbench rank to deployed runtime data. An exported
 pending bundle leaves anchor, zero-based `cfar_rank`, and multiplier unset while
@@ -365,6 +369,9 @@ beside the run output before launch and record:
 - input capture and signal-audit paths and SHA-256 digests, when applicable;
 - every quarantine-ledger entry and its disposition;
 - first-product tripwire result, including the stored designated and census arrays;
+- nonempty per-unit archive scopes, receiver build tags, and valid input-map
+  SHA-256 values at smoke, rehearsal, first checkpoint, and closeout;
+- final receiver-configuration counts from `final_inventory_audit.json`;
 - final per-pilot audit results and canonical validation when terminal combine
   succeeds.
 

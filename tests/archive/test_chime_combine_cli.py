@@ -105,6 +105,7 @@ def _build_work_dir(tmp_path):
         })
         meta = dict(reader.probe(str(path)))
         meta["unit_key"] = str(path)
+        meta["scope"] = "local"
         analyzer = PilotProxyDetectorAnalyzer()
         analyzer.begin(ctx, meta)
         analyzer.consume_file(reader.iter_arrays(str(path), ctx), meta)

@@ -180,14 +180,22 @@ with np.load(sys.argv[1], allow_pickle=False) as product:
     version = str(product["detector_version"])
     decision = json.loads(str(product["decision_contract_json"]))
     fine = product["fine_power_u64"]
+    unit_count = product["unit_order"].size
+    scopes = np.asarray(product["unit_scope"]).astype(str)
+    tags = np.asarray(product["unit_git_version_tag"]).astype(str)
+    input_hashes = np.asarray(product["unit_input_map_sha256"]).astype(str)
     assert str(product["schema_version"]) == "pilotproxy_per_pilot_product_v5"
     assert f"source={sys.argv[2]}" in version
     assert f"kernel_sha256={sys.argv[3]}" in version
     assert str(product["fine_status"]) == "enabled"
     assert fine.dtype == np.uint64 and fine.ndim == 3
     assert fine.shape[1:] == (3, 256)
+    assert scopes.size == tags.size == input_hashes.size == unit_count
+    assert all(scopes) and all(tags) and all(input_hashes)
+    assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
+               for value in input_hashes)
     assert decision["fine_candidate_decision"]["active"] is False
-print("smoke product identity and exact terms pass")
+print("smoke product identity, receiver state, and exact terms pass")
 PY
 ```
 
@@ -274,19 +282,26 @@ with np.load(sys.argv[1], allow_pickle=False) as product:
     units = np.asarray(product["unit_keys"]).astype(str)
     frames = np.asarray(product["frame_index"])
     fine = product["fine_power_u64"]
+    scopes = np.asarray(product["unit_scope"]).astype(str)
+    tags = np.asarray(product["unit_git_version_tag"]).astype(str)
+    input_hashes = np.asarray(product["unit_input_map_sha256"]).astype(str)
     assert units.size == 8 and np.unique(units).size == 8
     assert np.unique(frames).size == frames.size
     assert f"source={sys.argv[3]}" in version
     assert f"kernel_sha256={sys.argv[4]}" in version
     assert str(product["fine_status"]) == "enabled"
     assert fine.dtype == np.uint64 and fine.shape[1:] == (3, 256)
+    assert scopes.size == tags.size == input_hashes.size == units.size
+    assert all(scopes) and all(tags) and all(input_hashes)
+    assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
+               for value in input_hashes)
 with open(sys.argv[2], encoding="utf-8") as handle:
     scope = json.load(handle)
 execution = scope["execution"]
 assert execution["download_workers"] == 4
 assert execution["max_staged_files"] == 8
 assert execution["checkpoint_every"] == 2
-print("resume identity, order, and exact terms pass")
+print("resume identity, receiver state, order, and exact terms pass")
 PY
 
 test -z "$(find "$REHEARSAL_STAGING" -type f -name '*.h5' -print -quit)"
@@ -418,6 +433,10 @@ with np.load(sys.argv[1], allow_pickle=False) as product:
     reference = product["p_ref_sum_u64"]
     fine = product["fine_power_u64"]
     frames = product["frame_index"].shape[0]
+    unit_count = product["unit_order"].size
+    scopes = np.asarray(product["unit_scope"]).astype(str)
+    tags = np.asarray(product["unit_git_version_tag"]).astype(str)
+    input_hashes = np.asarray(product["unit_input_map_sha256"]).astype(str)
     assert str(product["schema_version"]) == "pilotproxy_per_pilot_product_v5"
     assert f"source={sys.argv[3]}" in version
     assert f"kernel_sha256={sys.argv[4]}" in version
@@ -426,6 +445,10 @@ with np.load(sys.argv[1], allow_pickle=False) as product:
     assert all(int(a) + int(b) == int(c)
                for a, b, c in zip(lower[:, 0], upper[:, 0], reference[:, 0]))
     assert fine.dtype == np.uint64 and fine.shape == (frames, 3, 256)
+    assert scopes.size == tags.size == input_hashes.size == unit_count
+    assert all(scopes) and all(tags) and all(input_hashes)
+    assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
+               for value in input_hashes)
     assert str(product["fine_status"]) == "enabled"
     assert decision["fine_candidate_decision"]["active"] is False
     print("frames", frames)
@@ -663,6 +686,8 @@ assert [int(path.stem) for path in products] == freq_ids
 product_units = 0
 product_frames = 0
 per_freq_units = {}
+receiver_configurations = {}
+source_scopes = {}
 for path, freq_id in zip(products, freq_ids):
     with np.load(path, allow_pickle=False) as product:
         validate_current_product_identity(product)
@@ -680,6 +705,20 @@ for path, freq_id in zip(products, freq_ids):
         assert f"kernel_sha256={kernel_sha256}" in version
         unit_order = np.asarray(product["unit_order"]).astype(str).tolist()
         unit_keys = np.asarray(product["unit_keys"]).astype(str).tolist()
+        scopes = np.asarray(product["unit_scope"]).astype(str).tolist()
+        archive_versions = np.asarray(product["archive_version"]).astype(str).tolist()
+        tags = np.asarray(product["unit_git_version_tag"]).astype(str).tolist()
+        input_hashes = np.asarray(product["unit_input_map_sha256"]).astype(str).tolist()
+        assert len(scopes) == len(tags) == len(input_hashes) == len(unit_order)
+        assert all(scopes) and all(tags) and all(input_hashes)
+        assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
+                   for value in input_hashes)
+        for scope_name in scopes:
+            source_scopes[scope_name] = source_scopes.get(scope_name, 0) + 1
+        for receiver_state in zip(archive_versions, tags, input_hashes):
+            receiver_configurations[receiver_state] = (
+                receiver_configurations.get(receiver_state, 0) + 1
+            )
         assert unit_order == expected[freq_id]
         assert unit_keys == sorted(expected[freq_id])
         per_freq_units[str(freq_id)] = len(unit_order)
@@ -698,6 +737,19 @@ atomic_write_json(
         "product_units": product_units,
         "product_frames": product_frames,
         "per_freq_units": per_freq_units,
+        "source_scopes": [
+            {"scope": scope_name, "units": count}
+            for scope_name, count in sorted(source_scopes.items())
+        ],
+        "receiver_configurations": [
+            {
+                "archive_version": key[0],
+                "git_version_tag": key[1],
+                "input_map_sha256": key[2],
+                "units": count,
+            }
+            for key, count in sorted(receiver_configurations.items())
+        ],
         "terminal_combine": terminal,
     },
 )

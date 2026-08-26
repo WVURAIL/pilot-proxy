@@ -53,6 +53,8 @@ DELTA = 1.0 / fmt.FS          # 2.56e-06 s
 FPGA = 156722907657
 EVENT_ID = 1153713684
 ARCHIVE = "NT_3.1.0"
+GIT_VERSION_TAG = "receiver-build"
+COLLECTION_SERVER = "host-a"
 
 
 def _stub_kernel(detector_window_samples: int):
@@ -107,7 +109,8 @@ def _weights(seed=1):
 
 
 def _add_timing(path, *, ctime=CTIME, delta=DELTA, fpga=FPGA, event_id=EVENT_ID,
-                archive=ARCHIVE):
+                archive=ARCHIVE, git_version_tag=GIT_VERSION_TAG,
+                collection_server=COLLECTION_SERVER):
     with h5py.File(path, "a") as h:
         h.attrs["time0_ctime"] = ctime
         h.attrs["time0_ctime_offset"] = -1.44e-08
@@ -115,12 +118,15 @@ def _add_timing(path, *, ctime=CTIME, delta=DELTA, fpga=FPGA, event_id=EVENT_ID,
         h.attrs["time0_fpga_count"] = fpga
         h.attrs["event_id"] = event_id
         h.attrs["archive_version"] = archive
+        h.attrs["git_version_tag"] = git_version_tag
+        h.attrs["collection_server"] = collection_server
 
 
 def _run(path, ctx, reader=None):
     reader = reader or ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
+    meta["scope"] = "local"
     a = PilotProxyDetectorAnalyzer()
     a.begin(ctx, meta)
     a.consume_file(reader.iter_arrays(str(path), ctx), meta)
@@ -215,6 +221,7 @@ def test_out_of_band_channel_has_zero_spectra(tmp_path):
     reader = ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(synth)))
     meta["unit_key"] = "synth:oob"
+    meta["scope"] = "local"
     a = PilotProxyDetectorAnalyzer()
     with pytest.warns(RuntimeWarning, match="does not contain"):
         a.begin(ctx, meta)
@@ -247,6 +254,10 @@ def test_time_axis_from_root_attrs_and_frame_derivation(tmp_path):
     assert int(got["unit_time0_fpga"][0]) == FPGA
     assert int(got["unit_event_id"][0]) == EVENT_ID
     assert str(got["archive_version"][0]) == ARCHIVE
+    assert str(got["unit_git_version_tag"][0]) == GIT_VERSION_TAG
+    assert str(got["unit_collection_server"][0]) == COLLECTION_SERVER
+    assert len(str(got["unit_input_map_sha256"][0])) == 64
+    assert str(got["unit_scope"][0]) == "local"
 
     # per-frame tags: one unit, contiguous chunk positions
     n = int(got["frame_index"].shape[0])
@@ -265,10 +276,11 @@ def test_time_axis_from_root_attrs_and_frame_derivation(tmp_path):
 
 
 def test_missing_timing_attrs_degrade_to_nan(tmp_path):
-    # a synth file carries only `freq`; the time axis must be NaN/0/-1/"" not a crash
+    # Missing root state must use explicit sentinels instead of crashing.
     synth = tmp_path / "untimed.h5"
     fmt.make_synth_file(str(synth), n_time=NFFT * 2, n_feeds=N_FEEDS,
-                        f_center_mhz=F_CENTER_MHZ, f_tone_bb=1500.0, seed=6)
+                        f_center_mhz=F_CENTER_MHZ, f_tone_bb=1500.0, seed=6,
+                        receiver_provenance=False)
     ctx = _ctx(_detector_fn_factory(reject=lambda i: False), _weights())
     a, _ = _run(synth, ctx)
     out = tmp_path / "844.npz"
@@ -279,6 +291,9 @@ def test_missing_timing_attrs_degrade_to_nan(tmp_path):
     assert int(got["unit_time0_fpga"][0]) == 0
     assert int(got["unit_event_id"][0]) == -1
     assert str(got["archive_version"][0]) == ""
+    assert str(got["unit_git_version_tag"][0]) == ""
+    assert str(got["unit_collection_server"][0]) == ""
+    assert str(got["unit_input_map_sha256"][0]) == ""
 
 
 def test_two_units_have_distinct_time0_and_reset_frame_in_unit(tmp_path):
@@ -294,10 +309,10 @@ def test_two_units_have_distinct_time0_and_reset_frame_in_unit(tmp_path):
     ctx = _ctx(_detector_fn_factory(reject=lambda i: False), _weights())
     reader = ChimeBasebandPackedReader()
     a = PilotProxyDetectorAnalyzer()
-    m0 = dict(reader.probe(str(s0))); m0["unit_key"] = "u0"
+    m0 = dict(reader.probe(str(s0))); m0["unit_key"] = "u0"; m0["scope"] = "local"
     a.begin(ctx, m0)
     a.consume_file(reader.iter_arrays(str(s0), ctx), m0)
-    m1 = dict(reader.probe(str(s1))); m1["unit_key"] = "u1"
+    m1 = dict(reader.probe(str(s1))); m1["unit_key"] = "u1"; m1["scope"] = "local"
     a.consume_file(reader.iter_arrays(str(s1), ctx), m1)
     out = tmp_path / "844.npz"
     a.save(str(out))

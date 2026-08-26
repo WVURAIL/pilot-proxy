@@ -144,6 +144,7 @@ def test_combine_matches_multipilot_runner(tmp_path):
         })
         meta = dict(reader.probe(str(files[ch])))
         meta["unit_key"] = str(files[ch])  # real path -> shared event after freq_id strip
+        meta["scope"] = "local"
         red = PilotProxyDetectorAnalyzer()
         red.begin(ctx, meta)
         red.consume_file(reader.iter_arrays(str(files[ch]), ctx), meta)

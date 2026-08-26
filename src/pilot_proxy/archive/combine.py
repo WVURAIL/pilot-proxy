@@ -325,6 +325,10 @@ def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
         "unit_time0_ctime",
         "unit_time0_fpga",
         "unit_delta_time",
+        "unit_scope",
+        "archive_version",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
     )
     arrays: dict[str, np.ndarray] = {}
     for field in fields:
@@ -335,7 +339,17 @@ def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
             raise ValueError(
                 f"combine: {_label(z)} field {field!r} must be 1D"
             )
-        if field == "unit_event_id":
+        if field in {
+            "archive_version",
+            "unit_scope",
+            "unit_git_version_tag",
+            "unit_input_map_sha256",
+        }:
+            if values.dtype.kind not in {"U", "S"}:
+                raise ValueError(
+                    f"combine: {_label(z)} field {field!r} must be a string vector"
+                )
+        elif field == "unit_event_id":
             values = exact_integer_array(
                 values,
                 field=field,
@@ -380,6 +394,13 @@ def _unit_metadata_by_event(z: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
 
 
 def _known_event_metadata(field: str, value: Any) -> bool:
+    if field in {
+        "archive_version",
+        "unit_scope",
+        "unit_git_version_tag",
+        "unit_input_map_sha256",
+    }:
+        return bool(str(value))
     if field == "unit_event_id":
         return int(value) >= 0
     if field == "unit_time0_fpga":
@@ -400,6 +421,10 @@ def _validate_common_event_metadata(
             "unit_time0_fpga",
             "unit_delta_time",
             "unit_time0_ctime",
+            "unit_scope",
+            "archive_version",
+            "unit_git_version_tag",
+            "unit_input_map_sha256",
         ):
             known = [row[field] for row in per_pilot if field in row and _known_event_metadata(field, row[field])]
             if not known:
@@ -410,7 +435,14 @@ def _validate_common_event_metadata(
                     "metadata for only some pilots; refusing an unverifiable "
                     "cross-channel alignment"
                 )
-            if field in {"unit_event_id", "unit_time0_fpga"}:
+            if field in {
+                "archive_version",
+                "unit_scope",
+                "unit_git_version_tag",
+                "unit_input_map_sha256",
+            }:
+                consistent = len({str(value) for value in known}) == 1
+            elif field in {"unit_event_id", "unit_time0_fpga"}:
                 consistent = len({int(value) for value in known}) == 1
             elif field == "unit_delta_time":
                 consistent = bool(

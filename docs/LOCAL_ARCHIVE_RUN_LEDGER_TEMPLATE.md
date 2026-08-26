@@ -48,6 +48,9 @@ progresses. Do not record credentials or other secrets.
 - One-file embedded source SHA-256:
 - One-file embedded kernel SHA-256:
 - One-file input shape and dtype:
+- One-file unit scope:
+- One-file receiver build tag:
+- One-file input-map SHA-256:
 - One-file peak VRAM:
 - One-file product validation:
 - Four-worker/eight-slot resume evidence path:
@@ -55,6 +58,9 @@ progresses. Do not record credentials or other secrets.
 - Resume embedded source SHA-256:
 - Resume embedded kernel SHA-256:
 - Resume unique units and frames:
+- Resume unit scopes:
+- Resume receiver build tags:
+- Resume input-map SHA-256 values:
 - Resume product validation:
 - Resume staging empty: yes / no
 
@@ -147,6 +153,10 @@ progresses. Do not record credentials or other secrets.
 - Download workers / staged slots / checkpoint: 4 / 8 / 250
 - Per-pilot contract result:
 - Per-pilot audit result:
+- Unit scopes nonempty: yes / no
+- Receiver build tags nonempty: yes / no
+- Input-map SHA-256 values nonempty and valid: yes / no
+- Distinct receiver configurations:
 - Stored designated bins:
 - Stored census exclusions:
 
@@ -165,5 +175,6 @@ unchanged resume command.
 - Final per-pilot audits:
 - Canonical validation: pass / not applicable because combine was skipped
 - Final inventory accounting:
+- Receiver configuration summary:
 - Final product manifest and SHA-256:
 - UTC accepted:
