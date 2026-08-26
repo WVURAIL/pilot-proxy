@@ -1,16 +1,23 @@
-# CANFAR Runbook
+# CANFAR bounded-run guide
 
-This runbook describes bounded pre-production CHIME DTV pilot runs with
-`pilot-proxy`. We begin with one file and one chunk because the
-detector needs a GPU, a matching weight bank, and archive metadata that agrees
-with the requested CHIME coarse channel. After that run validates, we expand the
-same workflow to the selected archive.
+This is the alternate remote A100 workflow for bounded CHIME DTV pilot runs.
+It is not the authority for the approved local archive run. The local parameter
+register, gates, production command, and run record are in
+[`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md),
+[`VALIDATION_GATES.md`](VALIDATION_GATES.md),
+[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), and the local run ledger.
 
-For archive-scale work, use:
+The approved run is historical estimation and sufficient-statistic
+reprocessing. The coarse positive-excess flag is retained as a bootstrap
+diagnostic; the fine rank/eta decision is inactive and no calibrated detection
+policy is applied.
 
-```bash
-pilot-proxy chime-scan ...
-```
+For bounded remote archive-scale work, the entry point is
+`pilot-proxy chime-scan`.
+
+For the measured local workstation profile, use
+[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md). The SM80 instructions below apply
+only to an A100 session and cannot override the approved local settings.
 
 The older `pilot-proxy chime-run` command reads an already-staged HDF5
 directory in one process. We retain it for local calibration and regression
@@ -29,23 +36,14 @@ reference_offset_bins = 2
 mask mode = positive_excess
 ```
 
+That mask mode records the coarse bootstrap flag and defines an after-mask
+diagnostic spectrum. It is not the later calibrated detection policy. Setting
+`fine_products=on` retains exact fine powers; it does not enable fine detection.
+
 The detector core supports compile-time `K = 64` and `K = 128` builds. The
 CHIME receiver profile and shipped CHIME weight bank select `K = 128`; it is
 not a runtime tuning parameter. Another value would require a separately
 supported kernel geometry, weight bank, profile, and validation campaign.
-
-No GPU session is required for the CPU-only synthetic publication sweeps in
-item 2 of `docs/PUBLICATION_VALIDATION.md`. Run those sweeps with:
-
-```bash
-pilot-proxy evaluate-snr \
-  --input-iq <capture> \
-  --detector-backend cpu-reference \
-  --noise-source python
-```
-
-(The input capture is generated once with GNU Radio; item 2, step 1 of
-`docs/PUBLICATION_VALIDATION.md` shows how.)
 
 ## Launch a GPU session
 
@@ -61,13 +59,17 @@ to pull the session image. Obtain that secret from
 `setup_env.sh` prompt for and store it.
 
 ```bash
-export CANFAR_REGISTRY_USER=<your-cadc-username>
-export CANFAR_REGISTRY_SECRET=<your-cli-secret>
+read -r -p "Registry user: " CANFAR_REGISTRY_USER
+read -r -s -p "Registry secret: " CANFAR_REGISTRY_SECRET
+printf '\n'
+export CANFAR_REGISTRY_USER CANFAR_REGISTRY_SECRET
 
-python scripts/launch_gpu_session.py            # launch or reuse; print the connect URL
-python scripts/launch_gpu_session.py --status   # status + URL only
-python scripts/launch_gpu_session.py --destroy  # tear it down when done
+python scripts/launch_gpu_session.py
 ```
+
+Use `python scripts/launch_gpu_session.py --status` to inspect it. Use
+`python scripts/launch_gpu_session.py --destroy` only when the remote session
+should be torn down.
 
 The default session name is `cupy-gpu`. Open the printed URL and complete the
 environment setup in that session's terminal.
@@ -128,15 +130,15 @@ staged `libfstatistic.so`.
 
 ---
 
-## Pre-launch validation gates (mandatory)
+## Remote A100 validation example
 
-`docs/VALIDATION_GATES.md` is authoritative; this is the on-node sequence.
-Run in order after environment setup, stop at the first failure. Do not
-launch any scan until every gate passes.
+This is the on-node sequence for the alternate remote workflow. Run it after
+environment setup and stop at the first failure. It does not replace the SM89
+gates required for the approved local run.
 
 ```bash
-# S2.1 - library built from the current sources and reporting kernel core 2.3.0
-make -C cuda clean && make -C cuda
+# S2.1 - A100 library built from the current sources and reporting core 2.3.0
+make -C cuda clean && make -C cuda SM=80
 python - <<'PY'
 from pilot_proxy.kernel import FStatKernel
 v = FStatKernel().version.as_string()
@@ -145,7 +147,7 @@ print("kernel core", v)
 PY
 
 # S2.2 - CUDA regression + exact row-sum parity (integers, no tolerance)
-make -C cuda test_cuda
+make -C cuda test_cuda SM=80
 
 # S2.3 - GPU pytest gates: numpy-reference equality, bit-exact coarse marginal
 #        identity, and the pre-registered ULP gate on the cupy fine FFT.
@@ -156,17 +158,18 @@ python -m pytest tests/kernel -q
 python -m pytest tests -q
 ```
 
-Frame parity is already CLOSED by the 23-channel census over the
-legacy-epoch integrated spectra (see gate S2.4 in
-`docs/VALIDATION_GATES.md`); no odd-channel profile override is needed.
+Frame parity is already closed by the 23-channel census over the legacy-epoch
+integrated spectra; no odd-channel profile override is needed.
 Optional belt-and-braces with any archived odd-`freq_id` baseband file:
 
 ```bash
-python tools/framing_audit.py /path/to/baseband_<event>_<odd_freq_id>.h5
+H5_FILE=/absolute/path/to/odd_channel_baseband.h5
+python tools/framing_audit.py "$H5_FILE"
 ```
 
-The bounded smoke test below is gate S2.5. Its current per-pilot-schema pass criteria and the
-interrupt/resume check are listed at the end of that section.
+The bounded smoke test below is the remote real-file gate. Its current
+per-pilot-schema pass criteria and interrupt/resume check are listed at the end
+of that section.
 
 ---
 
@@ -235,7 +238,8 @@ Do not substitute `396-412`; those are not the `freq_id` values for this DTV
 Renew the CADC proxy certificate:
 
 ```bash
-cadc-get-cert -u <your-cadc-username>
+read -r -p "CADC username: " CADC_USERNAME
+cadc-get-cert -u "$CADC_USERNAME"
 ```
 
 Begin with a bounded inventory:
@@ -329,7 +333,7 @@ figures/*.png
 An event-keyed combine also writes `chime_frame_identity.npz`. Current products
 must contain event-keyed frame identity; combine refuses inputs without it.
 
-Gate S2.5 pass criteria on the smoke product (current schema):
+Remote smoke pass criteria on the current per-pilot schema:
 
 ```bash
 python - <<'PY'
@@ -376,21 +380,23 @@ remove both the file cap and that acknowledgement for the production run.
 
 ---
 
-## H0 zero-point check
+## Optional remote bootstrap zero-point diagnostic
 
-Before spending GPU time on the full archive, test the detector on a channel
-that should approximate the no-pilot hypothesis, H0. Choose a DTV pilot
+This is not a gate for the approved local run. For a separately approved remote
+study, test the detector on a channel that should approximate the no-pilot
+hypothesis, H0. Choose a DTV pilot
 frequency that lies inside the selected CHIME coarse channel but whose physical
 channel has no station listed in the 500-mile census. This is a census-based
 control selection rather than a propagation prediction. Do not choose an arbitrary
 coarse channel with no nominal ATSC pilot in band: the analyzer marks that case
-invalid and does not form an local-reference power ratio.
+invalid and does not form a local-reference power ratio.
 
 Two constraints bound that selection for this archive. First, match the
 census epoch to the data epoch: the shipped census reflects its 2026
 retrieval date, while archive events span earlier years, and a channel that
 is quiet in the census can have been occupied at observation time (the
-channel 27 / `freq_id` 644 interior analysis records 38 per cent detections
+channel 27 / `freq_id` 644 interior analysis records 38 per cent
+positive-excess bootstrap flags
 in 2020 Q3 against quiet 2025-26 endpoints). Second, the shipped census
 lists at least one station on every physical channel 14-36, so a strictly
 station-free control does not exist in this pilot set; use the most
@@ -410,8 +416,9 @@ with a known pilot. Then:
    not currently duplicate that array.
 2. Over frames with `valid = 1`, compare the mean `coarse_power_ratio` with `null_power_ratio`. Also
    inspect the valid-frame mask fraction. Under the tested white-noise model,
-   the corrected threshold gives a fraction near one half; on real data this is
-   a diagnostic expectation rather than a pass condition by itself.
+   the norm-corrected zero-excess boundary gives a fraction near one half; on
+   real data this is a diagnostic expectation rather than a pass condition by
+   itself.
 3. If the control result is strongly displaced, check the weight bank,
    `mask_rule`, channel selection, and structured interference before expanding
    the scan.
@@ -420,14 +427,14 @@ with a known pilot. Then:
 regression with the shipped weights. The on-sky check tests the additional
 instrument and archive path that the synthetic regression cannot cover.
 
-## Definitive-run pre-flight
+## Remote long-run checklist
 
-For a run intended to process the archive once and never again, hold the
-launch to this checklist. Every item is a real failure mode rather than
-a hypothetical one.
+Use this checklist only for a separately approved remote run. It records the
+failure modes that still apply on an A100, but its SM80 binary, session cadence,
+and checkpoint examples are not local production settings.
 
-1. **All gates, in full.** S2.1--S2.5 with no shortcuts. The S2.5
-   interrupt/resume rehearsal is mandatory, since a multi-day run will
+1. **All remote gates, in full.** Run the remote build, GPU, smoke, and
+   interrupt/resume checks with no shortcuts, since a multi-day run will
    cross session restarts, and resume is the mechanism that makes a
    session death cost minutes instead of days.
 2. **Binary insurance at launch.** Detector products pin
@@ -437,18 +444,28 @@ a hypothetical one.
    never the rebuild:
 
    ```bash
-   cp cuda/libfstatistic.so cuda/libfstatistic.so.$(git rev-parse --short HEAD)
-   sha256sum cuda/libfstatistic.so*    # record both in the run ledger
+   kernel_sha=$(sha256sum cuda/libfstatistic.so | awk '{print $1}')
+   KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm80-${kernel_sha:0:16}.so"
+   cp --no-clobber --preserve=mode,timestamps cuda/libfstatistic.so "$KERNEL_LIB"
+   cmp -s cuda/libfstatistic.so "$KERNEL_LIB" || exit 1
+   export KERNEL_LIB
+   sha256sum cuda/libfstatistic.so "$KERNEL_LIB"
    ```
 
-   Any resume after any rebuild passes the detector option
-   `lib_path=<preserved copy>`.
+   Every initial launch and resume passes `--lib-path "$KERNEL_LIB"`.
 3. **Inventory completeness before the run.** Confirm the survey
    inventory covers every selected `freq_id` (all 23 for the DTV band)
    and explain any channel whose unit selection looks anomalous;
    sparse channels and late-starting spans are only acceptable when the
    archive genuinely holds no more data, and that should be established
-   before the run rather than discovered after it.
+   before the run rather than discovered after it. The source survey has zero
+   terminally incomplete events. Three events were still pending after two
+   attempts; an authenticated metadata check on 2026-08-25 found all 23
+   selected files absent for each event, with no errors or sub-floor objects.
+   The supplemental resolution is part of the frozen bundle. Its sparse
+   channels are `freq_id` 598
+   (1,543 units, ending 2023-09-13) and 690 (1,767 units, ending 2026-04-16);
+   record these as archive coverage, not processing loss.
 4. **Session-lifetime plan.** Know why the previous scan session ended
    (expiry vs crash) and budget the relaunch cadence around the session
    lifetime. Checkpointing (`--checkpoint-every 50`) plus unit-level
@@ -462,8 +479,8 @@ a hypothetical one.
 6. **Per-channel acceptance while running.** Validate and audit each
    product as it completes (`tools/audit_per_pilot.py` re-derives every
    internally checkable quantity from first principles and is safe on live
-   checkpoints); check the run heartbeat
-   (`find <run> -mmin -60`) at least daily.
+   checkpoints); set `RUN_DIR` to the run path and check the heartbeat with
+   `find "$RUN_DIR" -type f -mmin -60 -print -quit` at least daily.
 7. **Cohort record.** Each run's products pin one binary and one source
    commit; record hash, commit, image/CUDA version, and channel list in
    the run ledger at launch, and never mix cohorts inside one output
@@ -484,77 +501,36 @@ a hypothetical one.
    re-examining it. The scan prints each one as `QUARANTINE <name>: ...`
    and the scope gate reports `quarantined=<n>`. Confirm every entry is a
    genuinely short acquisition (the file opens cleanly and holds its full
-   declared extent) rather than a staging problem. Observed 2026-08-23 in
-   the CANFAR pilots: two acquisitions of 1953 and 3906 samples against a
-   typical 200000, each appearing on two channels.
+   declared extent) rather than a staging problem. The completed inventory
+   has 170,377 units. Prior products identify 4,692 units with no complete
+   frame, and the old quarantine contains three corrupt units. One corrupt
+   unit is also below the inventory's one-frame size estimate. A frozen
+   inventory that excludes all 4,695 unusable units therefore has 165,682
+   units across 8,983 events. Preserve the full inventory and an exclusion
+   ledger beside it. The approved local run uses the frozen inventory. Using
+   the full inventory instead would require a new approval for
+   `--allow-partial` and an exact final-quarantine audit.
 10. **Expect the terminal combine over all channels to be empty.** The
    stack keeps only `(event, frame)` identities common to *every* selected
    pilot, and a triggered event lights a few surrounding channels rather
    than all 23. Measured over 115 events across the 23 DTV channels, no
-   event was present in all of them. That is not a failure --- the
-   per-pilot products are the deliverable, and the scan exits zero --- but
-   decide before launch whether a full-band stack is wanted at all, or
-   whether the run should target channel subsets from the start.
+   event was present in all of them. That is not a failure. The approved
+   terminal deliverable is all 23 per-pilot v5 products. Build any channel
+   subset afterward as a derived product; do not restrict the archive scan.
 
 ---
 
-## Full pilot detector run
+## Approved full archive run
 
-After the smoke test and H0 check are acceptable, run the selected inventory.
-For the archive source, omitting `--select` selects every `freq_id` present in
-the inventory. The command prints the resolved set before staging data, and
-`--inventory-name` implies `--source cadc-datatrail`.
+The approved archive run is local. Its only production command is in
+[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md). The A100 examples in this file
+are alternate bounded workflows and do not override the local parameter
+register, SM89 gates, four-worker/eight-slot controls, 250-unit checkpoint, or
+output paths.
 
-The production run uses a fresh name: products reduced with a different
-weight bank or kernel must never be resumed or combined - the
-`detector_version` invariant refuses this by design. `fine_products=on` hard-fails if the node's kernel library
-is stale, which is the correct failure mode for a production launch.
-
-```bash
-pilot-proxy chime-scan \
-  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
-  --inventory-name chime-pilots \
-  --set fine_products=on \
-  --checkpoint-every 50
-```
-
-The terminal combine aligns frames by `(event, frame-in-file)` identity. It
-keeps only identities common to every completed channel, records the per-channel
-drops under `combine_alignment` in `stats.json`, and writes the retained
-identities to `chime_frame_identity.npz`.
-
-Some archives are ragged: different channels may contain different event sets.
-If no event is common to all selected channels, the per-pilot products remain
-complete and the terminal stack is skipped. Inspect channel presence and choose
-a subset:
-
-```bash
-pilot-proxy chime-combine --report --work-dir "$HOME/pilot_proxy_runs/chime-pilots-current/_per_pilot"
-pilot-proxy chime-combine \
-  --work-dir "$HOME/pilot_proxy_runs/chime-pilots-current/_per_pilot" \
-  --drop 598,690 \
-  --output-dir "$HOME/pilot_proxy_runs/chime-pilots-current-subset"
-```
-
-The report gives the event count per channel, the presence histogram, and a
-greedy drop curve. Use those quantities to state which channels are retained;
-the drop curve is a decision aid rather than an automatic scientific
-selection.
-
-Validate and plot whichever directory contains the final combined products:
-
-```bash
-pilot-proxy validate-products \
-  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
-  --output-json "$HOME/pilot_proxy_runs/chime-pilots-current/product_validation.json"
-
-pilot-proxy chime-plot \
-  --run-dir "$HOME/pilot_proxy_runs/chime-pilots-current" \
-  --clean-figures
-```
-
-If a subset combine was required, replace `chime-pilots-current` with
-`chime-pilots-current-subset` in both commands.
+The authoritative results are all 23 per-pilot v5 products. A combined
+common-frame stack is a derived projection and may be empty when archive
+coverage is ragged.
 
 ---
 
@@ -577,12 +553,9 @@ pilot-proxy chime-scan \
   --allow-partial
 ```
 
-If the filenames do not end in `_<freq_id>.h5`, pass the parser override with
-one capturing group:
-
-```bash
---source-freq-id-regex '<regex-with-one-capturing-group>'
-```
+If the filenames do not end in `_<freq_id>.h5`, add
+`--source-freq-id-regex '<regex-with-one-capturing-group>'` to the complete
+`chime-scan` command.
 
 The flag is stored as `source_freq_id_regex` for the bundled local source; an
 explicit `--set 'source_freq_id_regex=...'` takes
@@ -635,7 +608,7 @@ weight-quantization level, not bit-exactly).
 | `pilot-proxy-detector needs cupy/CUDA` | Production detector started in a CPU-only environment | Use a GPU node |
 | `no files matched` | `--select` does not match the inventory or local filename `freq_id` | Run `pilot-proxy chime-inventory` or inspect the filenames |
 | first file's center implies a different `freq_id` | Inventory or filename label disagrees with HDF5 metadata | For local data, pass the current parser with `--set source_freq_id_regex=...`; for archive data, rebuild the inventory |
-| combine finds no common events | The selected channels contain different event sets | Run `chime-combine --report`, choose a stated subset, and recombine with `--drop` |
+| combine finds no common events | The selected channels contain different event sets | Run `pilot-proxy chime-combine --work-dir "$RUN_DIR/_per_pilot" --report`, choose a stated subset, and recombine with `--drop` |
 | all frames are invalid | The selected coarse channel does not contain the nominal pilot, or the reference denominator is zero | Check `freq_id`, HDF5 frequency metadata, and the detector weights |
 
 ---
@@ -651,27 +624,28 @@ bad run.
 **Changing code or rebuilding the kernel mid-run.** Detector checkpoints bind
 the PilotProxy source tree and pin the kernel by hash (`kernel_sha256=` in
 `detector_version`). Either change makes existing partial products refuse to
-resume. Before rebuilding on a machine with an in-progress detector scan, preserve the current
-library (for example
-`cp cuda/libfstatistic.so cuda/libfstatistic.so.<git-short-hash>`) and
-resume with the detector option `lib_path=<preserved copy>`. After a source
-change, start a fresh output directory.
+resume. Preserve the current library under a digest-derived filename using the
+launch procedure above and resume with `--lib-path <preserved copy>`. After a
+source change, start a fresh output directory. Move to a new source tree or
+kernel only at a run boundary.
 
 Keep a failed run until its failure has been classified. Do not commit generated
 products while diagnosing the run.
 
 ---
 
-## Calibration export (baonoise interface)
+## Optional retrospective forecasting export
 
-After a scan's products validate, export the forecasting-side calibration
-bundle (the "PilotProxy -> baonoise export specification" files) directly
-from the per-pilot products --- no baseband access needed:
+This optional export neither activates rho/eta nor establishes held-out
+detection performance. After a scan's per-pilot products pass their contract
+and audit, export the forecasting-side bundle directly from those products; no
+baseband access is needed:
 
 ```bash
+RUN_DIR=/absolute/path/to/run
 python tools/export_baonoise_calibration.py \
-  --per-pilot-dir <run>/_per_pilot \
-  --out <run>/baonoise_export
+  --per-pilot-dir "$RUN_DIR/_per_pilot" \
+  --out "$RUN_DIR/baonoise_export"
 ```
 
 The tool derives the per-frame decision statistic (max of the fine
@@ -685,8 +659,8 @@ runs the spec's
 ingest-side validations before exiting. A nonzero exit means the bundle
 must not be shipped. Note the leakage caveat recorded in provenance: on
 occupied channels during on-epochs, off-pilot windows carry transmitter
-leakage; the `off_epoch_anchor_window` rows are the calibration-grade
-null.
+leakage; the `off_epoch_anchor_window` rows are the best available export null
+anchor, not a calibrated detection threshold.
 
 ---
 
@@ -694,7 +668,8 @@ null.
 
 For each accepted run, archive:
 
-- the validated products and `product_validation.json`;
+- the per-pilot products and their audit record;
+- `product_validation.json` when terminal combine succeeds;
 - the receiver profile and any stream map used;
 - the weight bank manifest;
 - the source commit hash or source archive;

@@ -375,11 +375,10 @@ class Analyzer:
 
     Ordering: set `requires_in_order = True` if the product depends on the order
     files are consumed -- e.g. a running/trailing statistic, a CFAR baseline, or
-    anything that is not a commutative accumulation. The engine then refuses the
-    settings (`--download-workers`/`--max-staged-files` > 1) that relax the
-    source-order contract, so such an analyzer cannot silently produce an
-    order-dependent result. Leave it False (the default) for a commutative
-    accumulation like a summed PSD, which is correct at any worker count.
+    anything that is not a commutative accumulation. The engine buffers early
+    fetch completions and presents these analyzers with exact source order at any
+    supported worker and staging count. Leave it False (the default) for a
+    commutative accumulation like a summed PSD.
     """
     info: PluginInfo
     requires_in_order: bool = False
@@ -435,11 +434,10 @@ class Analyzer:
         the staged bytes cannot yield a usable item should raise
         ``UnreadableUnitError`` so the engine can apply its quarantine policy.
 
-        Ordering: with the default engine settings the files arrive in source
-        (enumerate) order. If a user raises --download-workers or
-        --max-staged-files above 1, that ordering is no longer part of the public
-        contract. An analyzer that depends on input order (rather than a
-        commutative accumulation like a summed PSD) must use the defaults.
+        Ordering: analyzers with ``requires_in_order = True`` receive files in
+        exact source order even when downloads finish out of order. Other
+        analyzers may receive files in completion order when concurrent fetch is
+        enabled.
         """
         raise NotImplementedError
 

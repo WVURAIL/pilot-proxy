@@ -58,7 +58,7 @@ def current_product() -> dict[str, np.ndarray]:
         "railed_sample_total": np.asarray([[2]], dtype=np.uint64),
         "integrated_spectrum_before_mask": np.asarray([1.0]),
         "integrated_spectrum_after_mask": np.asarray([1.0]),
-        "fine_power_u64": np.zeros((1, 3, 0), dtype=np.uint64),
+        "fine_power_u64": np.zeros((1, 0, 0), dtype=np.uint64),
         "psd_frame_db_i16": np.zeros((1, 0), dtype=np.int16),
         "psd_db_reference": np.asarray([[1.0]]),
         "fine_cfar_location": np.asarray([[np.nan]], dtype=np.float64),
@@ -74,7 +74,7 @@ def current_product() -> dict[str, np.ndarray]:
         "fine_guard_fine_bins": np.asarray(1, dtype=np.int64),
         "fine_designated_bins": np.asarray([0], dtype=np.int64),
         "fine_census_excluded_bins": np.asarray([], dtype=np.int64),
-        "fine_status": np.asarray("disabled"),
+        "fine_status": np.asarray("disabled_by_option"),
         "fine_null_bulk_exceedance_fraction": np.asarray([[np.nan]]),
         "source_event_keys": np.asarray(["event"], dtype=str),
         "unit_keys": np.asarray(["event"], dtype=str),
@@ -113,6 +113,8 @@ def test_current_product_is_accepted():
         "decision_contract_json",
         "source_event_keys",
         "unit_order",
+        "p_ref_lower_u64",
+        "p_ref_upper_u64",
         "reject_mask",
     ],
 )
@@ -153,6 +155,9 @@ def test_legacy_basename_event_identity_is_refused():
         ("p_target_u64", np.asarray([[1.0]], dtype=np.float64)),
         ("p_target_u64", np.asarray([[-1]], dtype=np.int64)),
         ("p_target_u64", np.asarray([[1], [2]], dtype=np.uint64)),
+        ("p_ref_lower_u64", np.asarray([[1.0]], dtype=np.float64)),
+        ("p_ref_upper_u64", np.asarray([[1], [2]], dtype=np.uint64)),
+        ("p_ref_sum_u64", np.asarray([[2.0]], dtype=np.float64)),
         ("sample_rate_hz", np.asarray(0.0, dtype=np.float64)),
         ("mask_rule", np.asarray("forged-policy")),
         ("reject_mask", np.asarray([[1]], dtype=np.uint8)),
@@ -179,6 +184,8 @@ def test_empty_checkpoint_cannot_claim_a_consumed_unit() -> None:
         product[field] = np.asarray([], dtype=dtype)
     for field, dtype in (
         ("p_target_u64", np.uint64),
+        ("p_ref_lower_u64", np.uint64),
+        ("p_ref_upper_u64", np.uint64),
         ("p_ref_sum_u64", np.uint64),
         ("reject_mask", np.uint8),
         ("valid", np.uint8),
@@ -206,6 +213,66 @@ def test_empty_checkpoint_cannot_claim_a_consumed_unit() -> None:
 
     with pytest.raises(CurrentProductContractError, match="must not claim"):
         validate_current_product_identity(product, allow_empty_checkpoint=True)
+
+
+def test_reference_split_must_match_sum() -> None:
+    product = current_product()
+    product["p_ref_upper_u64"] = np.asarray([[2]], dtype=np.uint64)
+    with pytest.raises(CurrentProductContractError, match="do not match"):
+        validate_current_product_identity(product)
+
+
+def test_reference_split_sum_must_fit_uint64() -> None:
+    product = current_product()
+    product["p_ref_lower_u64"] = np.asarray(
+        [[np.iinfo(np.uint64).max]], dtype=np.uint64
+    )
+    product["p_ref_upper_u64"] = np.asarray([[1]], dtype=np.uint64)
+    product["p_ref_sum_u64"] = np.asarray([[0]], dtype=np.uint64)
+    with pytest.raises(CurrentProductContractError, match="exceeds uint64"):
+        validate_current_product_identity(product)
+
+
+def test_sample_count_sum_cannot_wrap() -> None:
+    product = current_product()
+    product["railed_sample_count"] = np.asarray(
+        [[np.iinfo(np.uint64).max]], dtype=np.uint64
+    )
+    product["fill_sample_count"] = np.asarray([[1]], dtype=np.uint64)
+    with pytest.raises(CurrentProductContractError, match="exceeds"):
+        validate_current_product_identity(product)
+
+
+@pytest.mark.parametrize(
+    ("status", "terms", "bins", "message"),
+    [
+        ("enabled", np.zeros((1, 0, 0), dtype=np.uint64), 0, "must have bins"),
+        (
+            "disabled_by_option",
+            np.ones((1, 3, 1), dtype=np.uint64),
+            1,
+            "all-zero v5 placeholder",
+        ),
+        ("pending", np.zeros((1, 0, 0), dtype=np.uint64), 0, "empty checkpoint"),
+        ("unknown", np.zeros((1, 0, 0), dtype=np.uint64), 0, "must be one of"),
+    ],
+)
+def test_fine_status_must_match_retained_shape(
+    status: str, terms: np.ndarray, bins: int, message: str
+) -> None:
+    product = current_product()
+    product["fine_status"] = np.asarray(status)
+    product["fine_power_u64"] = terms
+    product["fine_num_bins"] = np.asarray(bins, dtype=np.int64)
+    with pytest.raises(CurrentProductContractError, match=message):
+        validate_current_product_identity(product)
+
+
+def test_all_zero_v5_fine_placeholder_is_accepted() -> None:
+    product = current_product()
+    product["fine_power_u64"] = np.zeros((1, 3, 4), dtype=np.uint64)
+    product["fine_num_bins"] = np.asarray(4, dtype=np.int64)
+    validate_current_product_identity(product)
 
 
 def test_nonempty_product_cannot_contain_an_unused_unit() -> None:

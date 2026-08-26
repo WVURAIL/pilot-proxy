@@ -527,16 +527,20 @@ Two constraints determine how we run it:
   listed in
   [docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md#selection-convention); `844` is
   the single-channel smoke-test value for the ATSC 14 pilot.
-- **Use `chime-scan` for the supported path.** The analyzer appends frames in
-  delivery order. `chime-scan` forces one download worker and one staged file so
-  that file delivery follows source order.
+- **Use `chime-scan` for the supported path.** Downloads may run concurrently,
+  while the analyzer still receives files in inventory order. The defaults are
+  one worker and one staged file; use `--download-workers` and
+  `--max-staged-files` to raise the bounded prefetch depth.
 
 The following documents give the complete selection rules, local and
 CADC/CANFAR sequences, order constraint, and post-processing commands:
 
+- **[docs/RERUN_PARAMETER_REGISTER.md](docs/RERUN_PARAMETER_REGISTER.md)** --- frozen scientific and product settings.
+- **[docs/VALIDATION_GATES.md](docs/VALIDATION_GATES.md)** --- mandatory local launch gates.
+- **[docs/LOCAL_PROCESSING.md](docs/LOCAL_PROCESSING.md)** --- measured local workstation profile and sole production command.
+- **[docs/LOCAL_ARCHIVE_RUN_LEDGER_TEMPLATE.md](docs/LOCAL_ARCHIVE_RUN_LEDGER_TEMPLATE.md)** --- launch and run record template.
 - **[INTEGRATION.md](INTEGRATION.md)** --- standalone archive integration contract.
-- **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- step-by-step CANFAR
-  operating procedure.
+- **[docs/CANFAR_RUNBOOK.md](docs/CANFAR_RUNBOOK.md)** --- alternate bounded remote workflow.
 
 ---
 

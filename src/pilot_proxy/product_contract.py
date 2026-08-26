@@ -94,6 +94,17 @@ FINE_TERMS_ROLE = "measurement_only_no_scan_time_decision"
 FINE_CANDIDATE_DECISION_METHOD = "fine_order_statistic_cfar"
 FINE_CANDIDATE_CALIBRATION_STATUS = "pending_campaign"
 
+FINE_STATUS_ENABLED = "enabled"
+FINE_STATUS_PENDING = "pending"
+FINE_STATUS_WITHOUT_TERMS = frozenset(
+    {
+        "disabled_by_option",
+        "detector_fn_lacks_matched_filter_row_projections",
+        "kernel_library_lacks_matched_filter_row_projections",
+        "not_applicable_pilot_out_of_band",
+    }
+)
+
 
 def current_decision_contract() -> dict[str, Any]:
     """Return a fresh JSON-safe description of product decision semantics."""
@@ -648,7 +659,12 @@ def validate_current_product_identity(
         )
 
     exact_powers: dict[str, np.ndarray] = {}
-    for field in ("p_target_u64", "p_ref_sum_u64"):
+    for field in (
+        "p_target_u64",
+        "p_ref_lower_u64",
+        "p_ref_upper_u64",
+        "p_ref_sum_u64",
+    ):
         values = exact_integer_array(
             product[field],
             field=field,
@@ -661,6 +677,24 @@ def validate_current_product_identity(
                 f"({frame_count}, 1)"
             )
         exact_powers[field] = values
+    for frame, (lower, upper, total) in enumerate(
+        zip(
+            exact_powers["p_ref_lower_u64"].reshape(-1),
+            exact_powers["p_ref_upper_u64"].reshape(-1),
+            exact_powers["p_ref_sum_u64"].reshape(-1),
+        )
+    ):
+        combined = int(lower) + int(upper)
+        if combined >= (1 << 64):
+            raise CurrentProductContractError(
+                "current per-pilot reference power sum exceeds uint64 at "
+                f"frame {frame}"
+            )
+        if combined != int(total):
+            raise CurrentProductContractError(
+                "current per-pilot lower and upper reference powers do not "
+                f"match p_ref_sum_u64 at frame {frame}"
+            )
     exact_flags: dict[str, np.ndarray] = {}
     for field in ("reject_mask", "valid"):
         values = exact_integer_array(
@@ -694,10 +728,15 @@ def validate_current_product_identity(
                 f"({frame_count}, 1)"
             )
         railed[field] = values
-    if np.any(
-        railed["railed_sample_count"] + railed["fill_sample_count"]
-        > railed["railed_sample_total"]
-    ):
+    sample_counts_fit = all(
+        int(railed_count) + int(fill_count) <= int(total)
+        for railed_count, fill_count, total in zip(
+            railed["railed_sample_count"].reshape(-1),
+            railed["fill_sample_count"].reshape(-1),
+            railed["railed_sample_total"].reshape(-1),
+        )
+    )
+    if not sample_counts_fit:
         raise CurrentProductContractError(
             "current per-pilot railed_sample_count + fill_sample_count exceeds "
             "railed_sample_total; the saturation counters and their denominator "
@@ -759,12 +798,54 @@ def validate_current_product_identity(
         raise CurrentProductContractError(
             "current per-pilot fine_power_u64 width must match fine_num_bins"
         )
-    # With fine products disabled the array is empty and its term axis carries
-    # no information; a product that claims bins must carry every term.
-    if fine_num_bins and fine_terms.shape[1] != REFERENCE_WEIGHT_TERMS:
+    fine_status = _exact_string_scalar(product, "fine_status")
+    if fine_status == FINE_STATUS_ENABLED:
+        if fine_num_bins <= 0:
+            raise CurrentProductContractError(
+                "current per-pilot enabled fine measurement must have bins"
+            )
+        expected_fine_shape = (
+            frame_count,
+            REFERENCE_WEIGHT_TERMS,
+            fine_num_bins,
+        )
+        if fine_terms.shape != expected_fine_shape:
+            raise CurrentProductContractError(
+                "current per-pilot enabled fine_power_u64 must have shape "
+                f"{expected_fine_shape}"
+            )
+    elif fine_status == FINE_STATUS_PENDING:
+        if frame_count != 0:
+            raise CurrentProductContractError(
+                "current per-pilot fine status may be pending only in an empty "
+                "checkpoint"
+            )
+        if fine_num_bins != 0 or fine_terms.shape != (0, 0, 0):
+            raise CurrentProductContractError(
+                "current per-pilot pending fine measurement must not carry terms"
+            )
+    elif fine_status in FINE_STATUS_WITHOUT_TERMS:
+        canonical_empty = (
+            fine_num_bins == 0
+            and fine_terms.shape == (frame_count, 0, 0)
+        )
+        legacy_empty = (
+            fine_num_bins > 0
+            and fine_terms.shape
+            == (frame_count, REFERENCE_WEIGHT_TERMS, fine_num_bins)
+            and not np.any(fine_terms)
+        )
+        if not canonical_empty and not legacy_empty:
+            raise CurrentProductContractError(
+                "current per-pilot fine status without measurements must use "
+                f"shape ({frame_count}, 0, 0) or an all-zero v5 placeholder"
+            )
+    else:
+        allowed = sorted(
+            {FINE_STATUS_ENABLED, FINE_STATUS_PENDING, *FINE_STATUS_WITHOUT_TERMS}
+        )
         raise CurrentProductContractError(
-            "current per-pilot fine_power_u64 must carry "
-            f"{REFERENCE_WEIGHT_TERMS} weight terms per bin"
+            f"current per-pilot fine_status must be one of {allowed}"
         )
 
     exact_integer_scalar(
@@ -782,8 +863,6 @@ def validate_current_product_identity(
         )
     for field in ("fine_designated_bins", "fine_census_excluded_bins"):
         exact_integer_array(product[field], field=field, dtype=np.int64, ndim=1)
-    _exact_string_scalar(product, "fine_status")
-
     exact_norms: dict[str, int] = {}
     for field in ("target_norm_sq", "reference_norm_sum_sq"):
         values = exact_integer_array(

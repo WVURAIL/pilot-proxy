@@ -138,6 +138,8 @@ def test_archive_imports_injection_and_local_scan_are_standalone(tmp_path) -> No
                         "block_index": index,
                         "mask": 0,
                         "p_target_u64": 10,
+                        "p_ref_lower_u64": 10,
+                        "p_ref_upper_u64": 10,
                         "p_ref_sum_u64": 20,
                     }
                     for index in range(int(blocks.shape[0]))

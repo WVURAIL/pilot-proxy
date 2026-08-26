@@ -56,7 +56,8 @@ F_CENTER_MHZ = 470.3125
 FREQ_ID = 844
 
 # arrays that must match exactly / to fp tolerance between a clean and resumed run
-_EXACT = ("p_target_u64", "p_ref_sum_u64", "reject_mask", "valid", "frame_index",
+_EXACT = ("p_target_u64", "p_ref_lower_u64", "p_ref_upper_u64",
+          "p_ref_sum_u64", "fine_power_u64", "reject_mask", "valid", "frame_index",
           "unit_keys", "unit_order", "frame_unit_index", "frame_in_unit",
           "unit_time0_fpga", "unit_event_id", "archive_version")
 _CLOSE = ("coarse_power_ratio", "normalized_coarse_power_ratio_db", "pilot_excess_db", "estimated_data_shelf_snr_db",
@@ -77,13 +78,17 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
         _fstat, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
-        den = int(round(float(sums[1] + sums[2])))
+        lower = int(round(float(sums[1])))
+        upper = int(round(float(sums[2])))
+        den = lower + upper
         results.append({
             "block_index": b,
             "mask": normalized_positive_excess(
                 num, den, target_norm_sq=_nt, reference_norm_sum_sq=_nrs
             ),
             "p_target_u64": num,
+            "p_ref_lower_u64": lower,
+            "p_ref_upper_u64": upper,
             "p_ref_sum_u64": den,
         })
     return {
@@ -105,6 +110,14 @@ def _stub_kernel(detector_window_samples: int, reference_offset_bins: int = 2):
         },
     )
     return SimpleNamespace(specs=specs, version=SimpleNamespace(as_string=lambda: "test"))
+
+
+def _fine_stub_kernel(
+    detector_window_samples: int, reference_offset_bins: int = 2
+):
+    kernel = _stub_kernel(detector_window_samples, reference_offset_bins)
+    kernel.supports_row_projections = lambda: True
+    return kernel
 
 
 def _make_files(input_dir: Path, n_events: int) -> dict:
@@ -145,7 +158,10 @@ def test_analyzer_resume_matches_uninterrupted(tmp_path):
     paths = [files[(f"evt{i}", FREQ_ID)] for i in range(3)]
 
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _cpu_ref_detector_fn, "kernel": _stub_kernel(K), "weights": weights,
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+        "kernel": _fine_stub_kernel(K),
+        "weights": weights,
+        "fine_products": "on",
     })
     reader = ChimeBasebandPackedReader()
 
@@ -183,6 +199,44 @@ def test_analyzer_resume_matches_uninterrupted(tmp_path):
     got = np.load(ckpt)
     assert got["frame_index"].shape[0] == clean["frame_index"].shape[0] == 3 * N_FRAMES
     _assert_products_equal(clean, got)
+
+
+def test_analyzer_resume_rejects_changed_fine_retention(tmp_path):
+    rng = np.random.default_rng(17)
+    weights = rng.integers(-120, 121, size=(3, K)).astype(np.int8)
+    files = _make_files(tmp_path / "data", n_events=2)
+    paths = [files[(f"evt{i}", FREQ_ID)] for i in range(2)]
+    ctx = RunContext(
+        instrument=load_instrument("chime"),
+        selection=[FREQ_ID],
+        options={
+            "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+            "kernel": _fine_stub_kernel(K),
+            "weights": weights,
+            "fine_products": "on",
+        },
+    )
+    reader = ChimeBasebandPackedReader()
+
+    def _meta(index):
+        meta = dict(reader.probe(str(paths[index])))
+        meta["unit_key"] = f"synth:{index}"
+        return meta
+
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(ctx, _meta(0))
+    first.consume_file(reader.iter_arrays(str(paths[0]), ctx), _meta(0))
+    checkpoint = tmp_path / "fine-retention.npz"
+    first.save(str(checkpoint))
+
+    changed_ctx = replace(
+        ctx,
+        options={**ctx.options, "fine_products": "off"},
+    )
+    resumed = PilotProxyDetectorAnalyzer()
+    assert resumed.resume(str(checkpoint), changed_ctx)
+    with pytest.raises(SystemExit, match="fine-product retention mode differs"):
+        resumed.begin(changed_ctx, _meta(1))
 
 
 def test_analyzer_resume_absent_product_is_fresh(tmp_path):
@@ -348,7 +402,10 @@ def test_analyzer_resume_rejects_changed_detector_contract(tmp_path):
     reader = ChimeBasebandPackedReader()
     weights = np.ones((3, K), dtype=np.int8)
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _cpu_ref_detector_fn, "kernel": _stub_kernel(K), "weights": weights,
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+        "kernel": _fine_stub_kernel(K),
+        "weights": weights,
+        "fine_products": "on",
     })
     meta = dict(reader.probe(str(path)))
     meta["unit_key"] = "synth:0"
@@ -359,9 +416,10 @@ def test_analyzer_resume_rejects_changed_detector_contract(tmp_path):
     first.save(str(checkpoint))
 
     changed_ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _cpu_ref_detector_fn,
-        "kernel": _stub_kernel(K, reference_offset_bins=3),
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+        "kernel": _fine_stub_kernel(K, reference_offset_bins=3),
         "weights": weights,
+        "fine_products": "on",
     })
     resumed = PilotProxyDetectorAnalyzer()
     assert resumed.resume(str(checkpoint), changed_ctx)
@@ -555,7 +613,48 @@ def test_scan_refuses_incompatible_cap(tmp_path, monkeypatch):
     assert incompatible_pilot["capped"] == 2
 
 
-# -- v3 fine-width invariants across resume -----------------------------------
+# -- fine-width invariants across resume --------------------------------------
+
+def test_resume_normalizes_zero_fine_placeholders(tmp_path):
+    weights = np.ones((3, K), dtype=np.int8)
+    files = _make_files(tmp_path / "data", n_events=1)
+    path = files[("evt0", FREQ_ID)]
+    ctx = RunContext(
+        instrument=load_instrument("chime"),
+        selection=[FREQ_ID],
+        options={
+            "detector_fn": _cpu_ref_detector_fn,
+            "kernel": _stub_kernel(K),
+            "weights": weights,
+            "fine_products": "off",
+        },
+    )
+    reader = ChimeBasebandPackedReader()
+    meta = dict(reader.probe(str(path)))
+    meta["unit_key"] = "synth:0"
+
+    checkpoint = tmp_path / "disabled.npz"
+    original = PilotProxyDetectorAnalyzer()
+    original.begin(ctx, meta)
+    original.consume_file(reader.iter_arrays(str(path), ctx), meta)
+    original.save(str(checkpoint))
+
+    with np.load(checkpoint, allow_pickle=False) as saved:
+        fields = {name: saved[name] for name in saved.files}
+    frame_count = int(np.asarray(fields["frame_index"]).size)
+    fields["fine_num_bins"] = np.asarray(4, dtype=np.int64)
+    fields["fine_power_u64"] = np.zeros(
+        (frame_count, 3, 4), dtype=np.uint64
+    )
+    np.savez_compressed(checkpoint, **fields)
+
+    resumed = PilotProxyDetectorAnalyzer()
+    assert resumed.resume(str(checkpoint), ctx)
+    resumed.begin(ctx, meta)
+    resumed.save(str(checkpoint))
+    with np.load(checkpoint, allow_pickle=False) as normalized:
+        assert int(normalized["fine_num_bins"]) == 0
+        assert normalized["fine_power_u64"].shape == (frame_count, 0, 0)
 
 def test_zero_frame_checkpoint_resume_keeps_fine_width(tmp_path):
     rng = np.random.default_rng(11)
@@ -563,7 +662,10 @@ def test_zero_frame_checkpoint_resume_keeps_fine_width(tmp_path):
     files = _make_files(tmp_path / "data", n_events=1)
     path = files[("evt0", FREQ_ID)]
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _cpu_ref_detector_fn, "kernel": _stub_kernel(K), "weights": weights,
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+        "kernel": _fine_stub_kernel(K),
+        "weights": weights,
+        "fine_products": "on",
     })
     reader = ChimeBasebandPackedReader()
     meta = dict(reader.probe(str(path)))
@@ -618,7 +720,10 @@ def test_resume_refuses_fine_definition_change_end_to_end(tmp_path, monkeypatch)
     weights = rng.integers(-120, 121, size=(3, K)).astype(np.int8)
     files = _make_files(tmp_path / "data", n_events=2)
     ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID], options={
-        "detector_fn": _cpu_ref_detector_fn, "kernel": _stub_kernel(K), "weights": weights,
+        "detector_fn": _tone_matched_filter_row_projections_detector_fn,
+        "kernel": _fine_stub_kernel(K),
+        "weights": weights,
+        "fine_products": "on",
     })
     reader = ChimeBasebandPackedReader()
 

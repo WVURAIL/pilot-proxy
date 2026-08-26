@@ -57,7 +57,14 @@ def _stub_detector_fn(*, packed, weights, kernel):
         "detector_rows_per_block": int(pk.shape[1]),
         "rational_overflow_count": 0,
         "results": [
-            {"block_index": b, "mask": 0, "p_target_u64": 10, "p_ref_sum_u64": 20}
+            {
+                "block_index": b,
+                "mask": 0,
+                "p_target_u64": 10,
+                "p_ref_lower_u64": 10,
+                "p_ref_upper_u64": 10,
+                "p_ref_sum_u64": 20,
+            }
             for b in range(n)
         ],
     }

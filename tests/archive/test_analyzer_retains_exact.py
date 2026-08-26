@@ -35,6 +35,7 @@ from pilot_proxy.fxfft import fine_power_fx
 from pilot_proxy.integration.receiver_profile import default_reference_receiver_profile
 from pilot_proxy.archive.detector import PilotProxyDetectorAnalyzer
 from pilot_proxy.archive.packed_reader import ChimeBasebandPackedReader
+from pilot_proxy.product_contract import validate_current_product_identity
 
 NFFT = 16384
 K = 128
@@ -46,7 +47,13 @@ FREQ_ID = 844
 WINDOWS = NFFT // K
 
 
-def _make_detector_fn(*, supply_fine_powers: bool):
+def _make_detector_fn(
+    *,
+    supply_fine_powers: bool,
+    omit_projections: bool = False,
+    missing_power_field: str | None = None,
+    reference_sum_delta: int = 0,
+):
     """CPU reference that emits row projections, optionally with fine terms."""
 
     def detector_fn(*, packed, weights, kernel, emit_row_projections=False):
@@ -77,7 +84,7 @@ def _make_detector_fn(*, supply_fine_powers: bool):
             num = int(marginal[0])
             lo = int(marginal[1])
             up = int(marginal[2])
-            results.append({
+            result = {
                 "block_index": b,
                 "mask": normalized_positive_excess(
                     num, lo + up, target_norm_sq=nt, reference_norm_sum_sq=nrs
@@ -85,8 +92,11 @@ def _make_detector_fn(*, supply_fine_powers: bool):
                 "p_target_u64": num,
                 "p_ref_lower_u64": lo,
                 "p_ref_upper_u64": up,
-                "p_ref_sum_u64": lo + up,
-            })
+                "p_ref_sum_u64": lo + up + reference_sum_delta,
+            }
+            if missing_power_field is not None:
+                result.pop(missing_power_field)
+            results.append(result)
 
         out = {
             "batch": batch,
@@ -94,7 +104,7 @@ def _make_detector_fn(*, supply_fine_powers: bool):
             "rational_overflow_count": 0,
             "results": results,
         }
-        if emit_row_projections:
+        if emit_row_projections and not omit_projections:
             out["matched_filter_row_projections"] = rs
             if supply_fine_powers:
                 out["fine_powers_u64"] = np.stack([
@@ -125,9 +135,19 @@ def _stub_kernel():
     )
 
 
-def _run(tmp_path, *, supply_fine_powers: bool):
+def _run(
+    tmp_path,
+    *,
+    supply_fine_powers: bool,
+    omit_projections: bool = False,
+    missing_power_field: str | None = None,
+    reference_sum_delta: int = 0,
+    detector_fn=None,
+    weights: np.ndarray | None = None,
+):
     rng = np.random.default_rng(11)
-    weights = rng.integers(-120, 121, size=(3, K)).astype(np.int8)
+    if weights is None:
+        weights = rng.integers(-120, 121, size=(3, K)).astype(np.int8)
 
     input_dir = tmp_path / "data"
     input_dir.mkdir(parents=True)
@@ -150,8 +170,11 @@ def _run(tmp_path, *, supply_fine_powers: bool):
         instrument=load_instrument("chime"),
         selection=[FREQ_ID],
         options={
-            "detector_fn": _make_detector_fn(
-                supply_fine_powers=supply_fine_powers
+            "detector_fn": detector_fn or _make_detector_fn(
+                supply_fine_powers=supply_fine_powers,
+                omit_projections=omit_projections,
+                missing_power_field=missing_power_field,
+                reference_sum_delta=reference_sum_delta,
             ),
             "kernel": _stub_kernel(),
             "weights": weights,
@@ -172,6 +195,7 @@ def _run(tmp_path, *, supply_fine_powers: bool):
 @pytest.mark.parametrize("supply_fine_powers", [True, False])
 def test_product_carries_exact_fine_powers(tmp_path, supply_fine_powers):
     got = _run(tmp_path, supply_fine_powers=supply_fine_powers)
+    validate_current_product_identity(got)
 
     assert "fine_power_u64" in got.files, "exact fine terms were not retained"
     S = np.asarray(got["fine_power_u64"])
@@ -196,3 +220,119 @@ def test_reference_split_is_retained(tmp_path):
     total = np.asarray(got["p_ref_sum_u64"], dtype=np.uint64)
     assert lo.shape == up.shape == total.shape == (N_FRAMES, 1)
     assert np.array_equal(lo + up, total)
+
+
+@pytest.mark.parametrize("field", ["p_ref_lower_u64", "p_ref_upper_u64"])
+def test_missing_reference_split_is_fatal(tmp_path, field):
+    with pytest.raises(ValueError, match="missing exact power"):
+        _run(
+            tmp_path,
+            supply_fine_powers=True,
+            missing_power_field=field,
+        )
+
+
+def test_reference_sum_mismatch_is_fatal(tmp_path):
+    with pytest.raises(ValueError, match="does not equal"):
+        _run(
+            tmp_path,
+            supply_fine_powers=True,
+            reference_sum_delta=1,
+        )
+
+
+def test_reference_sum_overflow_is_fatal(tmp_path):
+    def detector_fn(*, packed, weights, kernel, emit_row_projections=False):
+        rows = int(np.asarray(packed).shape[-2])
+        return {
+            "batch": 1,
+            "detector_rows_per_block": rows,
+            "rational_overflow_count": 0,
+            "results": [
+                {
+                    "block_index": 0,
+                    "mask": 0,
+                    "p_target_u64": 1,
+                    "p_ref_lower_u64": np.iinfo(np.uint64).max,
+                    "p_ref_upper_u64": 1,
+                    "p_ref_sum_u64": 0,
+                }
+            ],
+            "matched_filter_row_projections": np.zeros(
+                (1, REFERENCE_WEIGHT_TERMS, rows, 2), dtype=np.int32
+            ),
+            "fine_powers_u64": np.zeros(
+                (1, REFERENCE_WEIGHT_TERMS, FINE_BINS), dtype=np.uint64
+            ),
+        }
+
+    with pytest.raises(ValueError, match="exceeds uint64"):
+        _run(
+            tmp_path,
+            supply_fine_powers=True,
+            detector_fn=detector_fn,
+        )
+
+
+def test_enabled_fine_measurement_requires_projections(tmp_path):
+    with pytest.raises(RuntimeError, match="returned no matched-filter"):
+        _run(
+            tmp_path,
+            supply_fine_powers=False,
+            omit_projections=True,
+        )
+
+
+def test_both_excess_signs_keep_exact_terms(tmp_path):
+    state = {"frame": 0}
+
+    def detector_fn(*, packed, weights, kernel, emit_row_projections=False):
+        rows = int(np.asarray(packed).shape[-2])
+        frame = state["frame"]
+        state["frame"] += 1
+        target, lower, upper = (
+            (5, 6, 6) if frame == 0 else (10, 4, 4)
+        )
+        fine = np.full(
+            (1, REFERENCE_WEIGHT_TERMS, FINE_BINS),
+            frame + 1,
+            dtype=np.uint64,
+        )
+        return {
+            "batch": 1,
+            "detector_rows_per_block": rows,
+            "rational_overflow_count": 0,
+            "results": [
+                {
+                    "block_index": 0,
+                    "mask": frame,
+                    "p_target_u64": target,
+                    "p_ref_lower_u64": lower,
+                    "p_ref_upper_u64": upper,
+                    "p_ref_sum_u64": lower + upper,
+                }
+            ],
+            "matched_filter_row_projections": np.zeros(
+                (1, REFERENCE_WEIGHT_TERMS, rows, 2), dtype=np.int32
+            ),
+            "fine_powers_u64": fine,
+        }
+
+    row = np.ones((1, K), dtype=np.int8)
+    product = _run(
+        tmp_path,
+        supply_fine_powers=True,
+        detector_fn=detector_fn,
+        weights=np.repeat(row, REFERENCE_WEIGHT_TERMS, axis=0),
+    )
+    assert np.asarray(product["p_target_u64"]).reshape(-1).tolist() == [5, 10]
+    assert np.asarray(product["p_ref_lower_u64"]).reshape(-1).tolist() == [6, 4]
+    assert np.asarray(product["p_ref_upper_u64"]).reshape(-1).tolist() == [6, 4]
+    assert np.asarray(product["p_ref_sum_u64"]).reshape(-1).tolist() == [12, 8]
+    excess = np.asarray(product["normalized_pilot_excess"]).reshape(-1)
+    assert excess[0] < 0.0 < excess[1]
+    assert np.asarray(product["reject_mask"]).reshape(-1).tolist() == [0, 1]
+    assert np.isnan(np.asarray(product["pilot_excess_db"]).reshape(-1)[0])
+    fine = np.asarray(product["fine_power_u64"])
+    assert np.all(fine[0] == 1)
+    assert np.all(fine[1] == 2)

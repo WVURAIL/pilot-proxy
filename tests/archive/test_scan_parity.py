@@ -44,6 +44,7 @@ from pilot_proxy.archive.chime_coarse import chime_freq_id_from_hz
 NFFT = 16384
 K = 128
 N_FRAMES = 2
+N_FILES = 2
 N_FEEDS = 4
 CHANNELS = {14: 470.3125, 15: 476.3125}  # ATSC channel -> coarse-channel center (MHz)
 # what those centers are as CHIME freq_id (the on-disk / inventory namespace)
@@ -62,11 +63,16 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
         _f, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
-        den = int(round(float(sums[1] + sums[2])))
+        lower = int(round(float(sums[1])))
+        upper = int(round(float(sums[2])))
+        den = lower + upper
         results.append({"block_index": b, "mask": normalized_positive_excess(
                 num, den, target_norm_sq=_nt, reference_norm_sum_sq=_nrs
             ),
-                        "p_target_u64": num, "p_ref_sum_u64": den})
+                        "p_target_u64": num,
+                        "p_ref_lower_u64": lower,
+                        "p_ref_upper_u64": upper,
+                        "p_ref_sum_u64": den})
     return {"batch": int(pk.shape[0]), "detector_rows_per_block": int(pk.shape[1]),
             "rational_overflow_count": 0, "results": results}
 
@@ -101,9 +107,16 @@ def test_chime_scan_matches_runner(tmp_path):
     input_dir = tmp_path / "data"
     input_dir.mkdir()
     for ch, mhz in CHANNELS.items():
-        fmt.make_synth_file(str(input_dir / f"baseband_evt_{FREQ_IDS[ch]}.h5"),
-                            n_time=NFFT * N_FRAMES, n_feeds=N_FEEDS,
-                            f_center_mhz=mhz, f_tone_bb=1300.0 + 7 * ch, seed=ch)
+        for file_index in range(N_FILES):
+            event = 1000 + file_index
+            fmt.make_synth_file(
+                str(input_dir / f"baseband_{event}_{FREQ_IDS[ch]}.h5"),
+                n_time=NFFT * N_FRAMES,
+                n_feeds=N_FEEDS,
+                f_center_mhz=mhz,
+                f_tone_bb=1300.0 + 7 * ch,
+                seed=ch * 10 + file_index,
+            )
 
     profile = dataclasses.replace(
         default_reference_receiver_profile(frame_size_samples=NFFT,
@@ -120,7 +133,8 @@ def test_chime_scan_matches_runner(tmp_path):
         input_dir=input_dir, output_dir=ref_dir, receiver_profile_path=profile_path,
         stream_map_path=None, physical_channels=sorted(CHANNELS),
         frame_size_samples=NFFT, detector_window_samples=K, frames_per_chunk=1,
-        max_frames=N_FRAMES, kernel=_stub_kernel(K), detector_fn=_cpu_ref_detector_fn,
+        max_frames=N_FRAMES * N_FILES, kernel=_stub_kernel(K),
+        detector_fn=_cpu_ref_detector_fn,
         weights_by_channel=weights_by_channel,
     )
 
@@ -131,6 +145,7 @@ def test_chime_scan_matches_runner(tmp_path):
     run_chime_scan(
         input_dir=input_dir, output_dir=scan_dir, source="local",
         analyzer="pilot-proxy-detector", select=freq_id_select, instrument="chime",
+        download_workers=2, max_staged_files=2,
         analyzer_options={
             "detector_fn": _cpu_ref_detector_fn,
             "kernel": _stub_kernel(K),

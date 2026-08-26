@@ -13,6 +13,8 @@
 #   VENV_DIR=~/envs/pilot-proxy PYTHON=python3.12 \
 #     PILOT_PROXY_DIR=~/src/pilot-proxy \
 #     bash scripts/setup_env.sh
+# Set PILOT_PROXY_SKIP_REGISTRY=1 when no remote GPU session will be launched.
+# Set PILOT_PROXY_USE_SYSTEM_PACKAGES=0 for an isolated local environment.
 # To deliberately adopt and clear a genuine pre-guard Python venv, also set:
 #   PILOT_PROXY_ADOPT_LEGACY_VENV=1
 # =============================================================================
@@ -20,10 +22,27 @@ set -euo pipefail
 
 VENV_DIR="${VENV_DIR:-$HOME/pilot-proxy-venv}"
 PILOT_PROXY_ADOPT_LEGACY_VENV="${PILOT_PROXY_ADOPT_LEGACY_VENV:-0}"
+PILOT_PROXY_SKIP_REGISTRY="${PILOT_PROXY_SKIP_REGISTRY:-0}"
+PILOT_PROXY_USE_SYSTEM_PACKAGES="${PILOT_PROXY_USE_SYSTEM_PACKAGES:-1}"
 PYTHON="${PYTHON:-python3.12}"
 PILOT_PROXY_DIR="${PILOT_PROXY_DIR:-$HOME/pilot-proxy}"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 VENV_GUARD="${SCRIPT_DIR}/setup_env_guard.py"
+
+case "${PILOT_PROXY_SKIP_REGISTRY}" in
+    0|1) ;;
+    *)
+        echo "ERROR: PILOT_PROXY_SKIP_REGISTRY must be 0 or 1." >&2
+        exit 1
+        ;;
+esac
+case "${PILOT_PROXY_USE_SYSTEM_PACKAGES}" in
+    0|1) ;;
+    *)
+        echo "ERROR: PILOT_PROXY_USE_SYSTEM_PACKAGES must be 0 or 1." >&2
+        exit 1
+        ;;
+esac
 
 if ! command -v "${PYTHON}" >/dev/null 2>&1; then
     echo "ERROR: ${PYTHON} is not on PATH (set PYTHON=... to override)." >&2
@@ -66,10 +85,14 @@ VENV_DIR="$(
 )"
 unset _venv_adoption_args
 echo "==> (re)creating venv at '${VENV_DIR}' with ${PYTHON}"
-# --system-site-packages so the session image's CuPy/CUDA stack stays importable
-# Pilot Proxy prefers the image's CuPy; PYTHONNOUSERSITE=1 below still blocks
-# ~/.local. The venv's own installs take precedence over the image's packages.
-"${PYTHON}" -m venv --clear --system-site-packages "${VENV_DIR}"
+# Session images can expose their CuPy stack through system packages. Local
+# workstations can set PILOT_PROXY_USE_SYSTEM_PACKAGES=0 for a clean venv.
+_venv_create_args=(--clear)
+if [[ "${PILOT_PROXY_USE_SYSTEM_PACKAGES}" == "1" ]]; then
+    _venv_create_args+=(--system-site-packages)
+fi
+"${PYTHON}" -m venv "${_venv_create_args[@]}" "${VENV_DIR}"
+unset _venv_create_args
 # A successfully created environment also receives a human-visible marker
 # inside it. Rerun authorization comes from the durable sidecar written above.
 "${PYTHON}" "${VENV_GUARD}" mark --venv "${VENV_DIR}"
@@ -80,13 +103,24 @@ echo 'export PYTHONNOUSERSITE=1' >> "${VENV_DIR}/bin/activate"
 source "${VENV_DIR}/bin/activate"
 export PYTHONNOUSERSITE=1
 
+# Keep temporary files on the Linux filesystem.
+PILOT_PROXY_TMPDIR="${PILOT_PROXY_TMPDIR:-/tmp}"
+if [[ ! -d "${PILOT_PROXY_TMPDIR}" || ! -w "${PILOT_PROXY_TMPDIR}" ]]; then
+    echo "ERROR: temporary directory is not writable: ${PILOT_PROXY_TMPDIR}" >&2
+    exit 1
+fi
+export TMPDIR="${PILOT_PROXY_TMPDIR}"
+printf 'export TMPDIR=%q\n' "${PILOT_PROXY_TMPDIR}" >> "${VENV_DIR}/bin/activate"
+
 # --- CANFAR Harbor registry credentials --------------------------------------
 # launch_gpu_session.py (skaha) needs a Harbor CLI secret to pull the session
 # image. Capture it once, store it chmod 600, and source it from the venv
 # activate so every future shell has it. Prompt only when interactive and the
 # creds were not already provided (via env var or a previously saved file).
 CANFAR_ENV_FILE="${CANFAR_ENV_FILE:-$HOME/.canfar_registry.env}"
-if [[ -n "${CANFAR_REGISTRY_USER:-}" && -n "${CANFAR_REGISTRY_SECRET:-}" ]]; then
+if [[ "${PILOT_PROXY_SKIP_REGISTRY}" == "1" ]]; then
+    echo "==> skipping Harbor registry setup"
+elif [[ -n "${CANFAR_REGISTRY_USER:-}" && -n "${CANFAR_REGISTRY_SECRET:-}" ]]; then
     ( umask 077; printf 'export CANFAR_REGISTRY_USER=%q\nexport CANFAR_REGISTRY_SECRET=%q\n' \
         "${CANFAR_REGISTRY_USER}" "${CANFAR_REGISTRY_SECRET}" > "${CANFAR_ENV_FILE}" )
     chmod 600 "${CANFAR_ENV_FILE}"
@@ -115,7 +149,7 @@ else
     echo "    Set them before launch_gpu_session.py (https://images.canfar.net -> profile -> CLI secret)."
 fi
 # Source the saved creds from the venv activate (idempotent) and this shell.
-if [[ -f "${CANFAR_ENV_FILE}" ]]; then
+if [[ "${PILOT_PROXY_SKIP_REGISTRY}" != "1" && -f "${CANFAR_ENV_FILE}" ]]; then
     if ! grep -qF "${CANFAR_ENV_FILE}" "${VENV_DIR}/bin/activate"; then
         echo "[ -f \"${CANFAR_ENV_FILE}\" ] && . \"${CANFAR_ENV_FILE}\"" >> "${VENV_DIR}/bin/activate"
     fi
@@ -123,11 +157,11 @@ if [[ -f "${CANFAR_ENV_FILE}" ]]; then
     . "${CANFAR_ENV_FILE}"
 fi
 
-python -m pip install -U pip setuptools wheel
+python -m pip install -U pip setuptools wheel packaging
 
 # --- scientific stack + editable installs -----------------------------------
 echo "==> installing scientific stack"
-python -m pip install numpy scipy h5py pandas matplotlib pytest
+python -m pip install -U numpy scipy h5py pandas matplotlib pytest
 
 echo "==> installing the tested Datatrail revision"
 python -m pip install -r "${PILOT_PROXY_DIR}/requirements/archive.txt"

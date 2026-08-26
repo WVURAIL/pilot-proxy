@@ -202,9 +202,11 @@ pilot-proxy chime-combine \
 
 ## Order-safety constraint
 
-The detector analyzer appends frames in file delivery order. `chime-scan` forces
-one download worker and one staged file so that concurrent delivery cannot
-change `frame_index` or `relative_time_s`.
+The detector analyzer appends frames in file delivery order. `chime-scan` tags
+downloads with their inventory position and buffers early completions, so
+concurrent transfers cannot change `frame_index` or `relative_time_s`. The
+defaults remain one worker and one staged file. Raise the bounds explicitly with
+`--download-workers` and `--max-staged-files`.
 
 ## Inventory and resume compatibility
 

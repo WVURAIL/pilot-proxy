@@ -60,6 +60,40 @@ def sha256_of(path: Path) -> str:
     return h.hexdigest()
 
 
+def reference_split_matches(
+    lower: np.ndarray,
+    upper: np.ndarray,
+    total: np.ndarray,
+) -> bool:
+    lower_values = np.asarray(lower).reshape(-1)
+    upper_values = np.asarray(upper).reshape(-1)
+    total_values = np.asarray(total).reshape(-1)
+    if not (
+        lower_values.size == upper_values.size == total_values.size
+    ):
+        return False
+    limit = 1 << 64
+    return all(
+        (combined := int(lo) + int(hi)) < limit and combined == int(saved)
+        for lo, hi, saved in zip(lower_values, upper_values, total_values)
+    )
+
+
+def sample_counts_fit(
+    railed: np.ndarray,
+    fill: np.ndarray,
+    total: np.ndarray,
+) -> bool:
+    return all(
+        int(railed_count) + int(fill_count) <= int(frame_total)
+        for railed_count, fill_count, frame_total in zip(
+            np.asarray(railed).reshape(-1),
+            np.asarray(fill).reshape(-1),
+            np.asarray(total).reshape(-1),
+        )
+    )
+
+
 def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tuple[Audit, dict]:
     a = Audit(path.name)
     z = np.load(str(path), allow_pickle=False)
@@ -126,7 +160,8 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
                  "baseband_power_linear", "frame_index", "frame_unit_index",
                  "frame_in_unit", "normalized_pilot_excess"]
     if sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN:
-        per_frame += ["railed_sample_count", "fill_sample_count",
+        per_frame += ["p_ref_lower_u64", "p_ref_upper_u64",
+                      "railed_sample_count", "fill_sample_count",
                       "railed_sample_total"]
     for k in per_frame:
         a.check(r(k).size == n, f"len({k})=={n}")
@@ -140,15 +175,31 @@ def audit_file(path: Path, bank_sha: str | None, manifest_sha: str | None) -> tu
         rt = r("railed_sample_total")
         a.check(rc.dtype == fc.dtype == rt.dtype == np.uint64,
                 "railed/fill u64 dtypes")
-        a.check(bool(np.all(rc + fc <= rt)),
+        a.check(sample_counts_fit(rc, fc, rt),
                 "railed_sample_count + fill_sample_count <= railed_sample_total")
         expected_total = 2 * int(scalar("nfft")) * int(scalar("num_input_streams"))
         a.check(bool(np.all(rt == np.uint64(expected_total))),
                 f"railed_sample_total == 2*nfft*streams ({expected_total})")
 
     # ---- exact integer contract ------------------------------------------
-    pt = r("p_target_u64"); pr = r("p_ref_sum_u64")
+    pt_array = g("p_target_u64"); pr_array = g("p_ref_sum_u64")
+    pt = pt_array.reshape(-1); pr = pr_array.reshape(-1)
     a.check(pt.dtype == np.uint64 and pr.dtype == np.uint64, "u64 dtypes")
+    if sv == PER_PILOT_PRODUCT_SCHEMA_TOKEN:
+        lower_array = g("p_ref_lower_u64")
+        upper_array = g("p_ref_upper_u64")
+        for field, values in (
+            ("p_target_u64", pt_array),
+            ("p_ref_lower_u64", lower_array),
+            ("p_ref_upper_u64", upper_array),
+            ("p_ref_sum_u64", pr_array),
+        ):
+            a.check(values.dtype == np.uint64, f"{field} dtype uint64")
+            a.check(values.shape == (n, 1), f"{field} shape ({n}, 1)")
+        a.check(
+            reference_split_matches(lower_array, upper_array, pr_array),
+            "lower + upper reference powers match p_ref_sum_u64 without overflow",
+        )
     v = r("valid").astype(bool); m = r("reject_mask").astype(bool)
     a.check(np.array_equal(v, pr != 0), "valid == (p_ref_sum != 0)")
     tn = int(scalar("target_norm_sq")); rn = int(scalar("reference_norm_sum_sq"))

@@ -4,6 +4,7 @@ from __future__ import annotations
 import os
 import threading
 import time
+from pathlib import Path
 from typing import Optional
 
 import pytest
@@ -78,6 +79,127 @@ class _FailedResultSource(_ByteSource):
             return False, "temporary outage"
         with open(dest, "wb") as fh:
             fh.write(b"staged")
+        return True, ""
+
+
+class _OutOfOrderSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.first_started = threading.Event()
+        self.second_finished = threading.Event()
+        self.completed: list[str] = []
+        self.lock = threading.Lock()
+
+    def fetch(self, unit, dest):
+        with self.lock:
+            self.fetch_calls.append(unit.key)
+        if unit.key == "unit-1":
+            self.first_started.set()
+            assert self.second_finished.wait(timeout=2)
+            time.sleep(0.05)
+        elif unit.key == "unit-2":
+            assert self.first_started.wait(timeout=2)
+        Path(dest).write_bytes(unit.key.encode())
+        with self.lock:
+            self.completed.append(unit.key)
+        if unit.key == "unit-2":
+            self.second_finished.set()
+        return True, ""
+
+
+class _LaterTransientFailureSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.third_finished = threading.Event()
+
+    def fetch(self, unit, dest):
+        self.fetch_calls.append(unit.key)
+        if unit.key == "unit-2":
+            assert self.third_finished.wait(timeout=2)
+            time.sleep(0.05)
+            return False, "temporary outage"
+        Path(dest).write_bytes(unit.key.encode())
+        if unit.key == "unit-3":
+            self.third_finished.set()
+        return True, ""
+
+
+class _LaterFatalSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.third_failed = threading.Event()
+
+    def fetch(self, unit, dest):
+        self.fetch_calls.append(unit.key)
+        if unit.key in {"unit-1", "unit-2"}:
+            assert self.third_failed.wait(timeout=2)
+            time.sleep(0.05)
+            Path(dest).write_bytes(unit.key.encode())
+            return True, ""
+        Path(dest).write_bytes(b"partial")
+        self.third_failed.set()
+        raise ValueError("source implementation bug")
+
+
+class _HeadFailureWithBlockedPeerSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.peer_started = threading.Event()
+        self.release_peer = threading.Event()
+        self.peer_returned = threading.Event()
+
+    def fetch(self, unit, dest):
+        self.fetch_calls.append(unit.key)
+        if unit.key == "unit-2":
+            Path(dest).write_bytes(b"partial")
+            self.peer_started.set()
+            self.release_peer.wait(timeout=10)
+            self.peer_returned.set()
+            return True, ""
+        assert self.peer_started.wait(timeout=2)
+        return False, "temporary outage"
+
+
+class _LaterFailureWithBlockedPeerSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.peer_started = threading.Event()
+        self.release_peer = threading.Event()
+        self.peer_returned = threading.Event()
+
+    def fetch(self, unit, dest):
+        self.fetch_calls.append(unit.key)
+        if unit.key == "unit-3":
+            Path(dest).write_bytes(b"partial")
+            self.peer_started.set()
+            self.release_peer.wait(timeout=10)
+            self.peer_returned.set()
+            return True, ""
+        assert self.peer_started.wait(timeout=2)
+        if unit.key == "unit-2":
+            return False, "temporary outage"
+        Path(dest).write_bytes(unit.key.encode())
+        return True, ""
+
+
+class _OutOfOrderTailSource(_ByteSource):
+    def __init__(self):
+        super().__init__()
+        self.early_started = threading.Event()
+        self.later_finished = threading.Event()
+        self.completed: list[str] = []
+
+    def fetch(self, unit, dest):
+        self.fetch_calls.append(unit.key)
+        if unit.key == "unit-2":
+            self.early_started.set()
+            assert self.later_finished.wait(timeout=2)
+        elif unit.key == "unit-3":
+            assert self.early_started.wait(timeout=2)
+        Path(dest).write_bytes(unit.key.encode())
+        self.completed.append(unit.key)
+        if unit.key == "unit-3":
+            self.later_finished.set()
         return True, ""
 
 
@@ -180,6 +302,49 @@ class _OrderedPresetResumeAnalyzer(_PresetResumeAnalyzer):
 
     def processed_key_order(self):
         return list(self.order)
+
+
+class _OrderedRecordingAnalyzer(_FileAnalyzer):
+    requires_in_order = True
+
+    def __init__(self):
+        super().__init__()
+        self.order: list[str] = []
+
+    def processed_key_order(self):
+        return list(self.order)
+
+    def consume_file(self, arrays, meta):
+        list(arrays)
+        key = str(meta["unit_key"])
+        self.keys.add(key)
+        self.order.append(key)
+        return 1
+
+    def save(self, path):
+        Path(path).write_text("\n".join(self.order))
+
+
+class _ReloadingOrderedAnalyzer(_OrderedRecordingAnalyzer):
+    def resume(self, path, ctx):
+        product = Path(path)
+        if not product.exists():
+            return False
+        self.order = product.read_text().splitlines()
+        self.keys = set(self.order)
+        return True
+
+
+class _BlockingOrderedSaveAnalyzer(_OrderedRecordingAnalyzer):
+    def __init__(self):
+        super().__init__()
+        self.save_started = threading.Event()
+        self.release_save = threading.Event()
+
+    def save(self, path):
+        self.save_started.set()
+        assert self.release_save.wait(timeout=5)
+        super().save(path)
 
 
 class _BlockingSaveAnalyzer(_FileAnalyzer):
@@ -449,6 +614,291 @@ def test_ordered_run_stops_at_unreadable_unit_without_quarantine(tmp_path):
     assert result.n_failed == 1
     assert result.product_available is False
     assert not (tmp_path / "product.out").exists()
+
+
+def test_parallel_fetch_preserves_ordered_analysis(tmp_path):
+    source = _OutOfOrderSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+
+    result = _run(
+        tmp_path,
+        source=source,
+        reader=_ByteReader(),
+        analyzer=analyzer,
+        units=units,
+        workers=2,
+        staged=2,
+        checkpoint_every=1,
+    )
+
+    assert source.completed[:2] == ["unit-2", "unit-1"]
+    assert analyzer.order == [unit.key for unit in units]
+    assert result.n_new == result.n_done == 3
+    assert (tmp_path / "product.out").read_text().splitlines() == analyzer.order
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+def test_ordered_failure_discards_later_download(tmp_path):
+    source = _LaterTransientFailureSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+
+    result = _run(
+        tmp_path,
+        source=source,
+        reader=_ByteReader(),
+        analyzer=analyzer,
+        units=units,
+        workers=3,
+        staged=3,
+        checkpoint_every=1,
+    )
+
+    assert source.third_finished.is_set()
+    assert analyzer.order == ["unit-1"]
+    assert result.n_new == result.n_done == result.n_failed == 1
+    assert (tmp_path / "product.out").read_text() == "unit-1"
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+def test_later_worker_exception_keeps_ordered_prefix(tmp_path):
+    source = _LaterFatalSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"download worker terminated.*source implementation bug",
+    ) as caught:
+        _run(
+            tmp_path,
+            source=source,
+            reader=_ByteReader(),
+            analyzer=analyzer,
+            units=units,
+            workers=3,
+            staged=3,
+            checkpoint_every=1,
+        )
+
+    assert isinstance(caught.value.__cause__, ValueError)
+    assert analyzer.order == ["unit-1", "unit-2"]
+    assert (tmp_path / "product.out").read_text().splitlines() == analyzer.order
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+def test_ordered_failure_reason_survives_active_peer(tmp_path, monkeypatch):
+    source = _HeadFailureWithBlockedPeerSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key="unit-1", name="unit-1.dat"),
+        Unit(key="unit-2", name="unit-2.dat"),
+    ]
+    scratch = tmp_path / "scratch"
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 0.05)
+    try:
+        with pytest.raises(
+                pipeline.ActiveDownloadWorkersError,
+                match=r"Scratch was retained",
+        ) as caught:
+            _run(
+                tmp_path,
+                source=source,
+                reader=_ByteReader(),
+                analyzer=analyzer,
+                units=units,
+                workers=2,
+                staged=2,
+            )
+
+        assert isinstance(caught.value.__cause__, RuntimeError)
+        assert "unit-1.dat" in str(caught.value.__cause__)
+        assert "temporary outage" in str(caught.value.__cause__)
+        assert (scratch / pipeline._stage_name(units[1])).exists()
+        assert not (tmp_path / "product.out").exists()
+    finally:
+        source.release_peer.set()
+
+    assert source.peer_returned.wait(timeout=2)
+    deadline = time.monotonic() + 2
+    while any(scratch.iterdir()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert list(scratch.iterdir()) == []
+
+
+def test_ordered_prefix_is_saved_before_active_peer_error(tmp_path, monkeypatch):
+    source = _LaterFailureWithBlockedPeerSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+    scratch = tmp_path / "scratch"
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 0.05)
+    try:
+        with pytest.raises(pipeline.ActiveDownloadWorkersError) as caught:
+            _run(
+                tmp_path,
+                source=source,
+                reader=_ByteReader(),
+                analyzer=analyzer,
+                units=units,
+                workers=3,
+                staged=3,
+                checkpoint_every=50,
+            )
+
+        assert isinstance(caught.value.__cause__, RuntimeError)
+        assert "unit-2.dat" in str(caught.value.__cause__)
+        assert analyzer.order == ["unit-1"]
+        assert (tmp_path / "product.out").read_text() == "unit-1"
+        assert (scratch / pipeline._stage_name(units[2])).exists()
+    finally:
+        source.release_peer.set()
+
+    assert source.peer_returned.wait(timeout=2)
+    deadline = time.monotonic() + 2
+    while any(scratch.iterdir()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert list(scratch.iterdir()) == []
+
+
+def test_worker_finishing_during_prefix_save_returns_partial_result(
+        tmp_path, monkeypatch):
+    source = _LaterFailureWithBlockedPeerSource()
+    analyzer = _BlockingOrderedSaveAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+    release_errors = []
+
+    def release_during_save():
+        try:
+            assert analyzer.save_started.wait(timeout=2)
+            source.release_peer.set()
+            assert source.peer_returned.wait(timeout=2)
+        except BaseException as exc:                         # noqa: BLE001
+            release_errors.append(exc)
+        finally:
+            analyzer.release_save.set()
+
+    releaser = threading.Thread(target=release_during_save)
+    releaser.start()
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 0.05)
+    result = _run(
+        tmp_path,
+        source=source,
+        reader=_ByteReader(),
+        analyzer=analyzer,
+        units=units,
+        workers=3,
+        staged=3,
+        checkpoint_every=50,
+    )
+    releaser.join(timeout=2)
+
+    assert not releaser.is_alive()
+    assert release_errors == []
+    assert result.n_new == result.n_done == result.n_failed == 1
+    assert analyzer.order == ["unit-1"]
+    assert (tmp_path / "product.out").read_text() == "unit-1"
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+def test_pending_ordered_file_cleanup_failure_is_surfaced(
+        tmp_path, monkeypatch):
+    source = _LaterTransientFailureSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+    retained = tmp_path / "scratch" / pipeline._stage_name(units[2])
+    real_remove = pipeline.os.remove
+
+    def deny_later_delete(path):
+        if os.path.abspath(path) == str(retained):
+            raise PermissionError("file is busy")
+        return real_remove(path)
+
+    monkeypatch.setattr(pipeline.os, "remove", deny_later_delete)
+
+    with pytest.raises(
+            pipeline.StagedFileCleanupError,
+            match=r"slot was not released",
+    ) as caught:
+        _run(
+            tmp_path,
+            source=source,
+            reader=_ByteReader(),
+            analyzer=analyzer,
+            units=units,
+            workers=3,
+            staged=3,
+            checkpoint_every=1,
+        )
+
+    assert source.third_finished.is_set()
+    assert isinstance(caught.value.__cause__, RuntimeError)
+    assert "unit-2.dat" in str(caught.value.__cause__)
+    assert "temporary outage" in str(caught.value.__cause__)
+    assert analyzer.order == ["unit-1"]
+    assert (tmp_path / "product.out").read_text() == "unit-1"
+    assert retained.exists()
+
+
+def test_parallel_checkpoint_resume_preserves_exact_order(tmp_path):
+    units = [
+        Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
+        for index in range(1, 4)
+    ]
+    first = _OrderedRecordingAnalyzer()
+
+    result = _run(
+        tmp_path,
+        source=_LaterTransientFailureSource(),
+        reader=_ByteReader(),
+        analyzer=first,
+        units=units,
+        workers=3,
+        staged=3,
+        checkpoint_every=1,
+    )
+
+    assert result.n_new == 1
+    assert first.order == ["unit-1"]
+
+    source = _OutOfOrderTailSource()
+    resumed = _ReloadingOrderedAnalyzer()
+    result = _run(
+        tmp_path,
+        source=source,
+        reader=_ByteReader(),
+        analyzer=resumed,
+        units=units,
+        workers=2,
+        staged=2,
+        checkpoint_every=1,
+    )
+
+    assert source.completed == ["unit-3", "unit-2"]
+    assert resumed.order == [unit.key for unit in units]
+    assert len(resumed.order) == len(set(resumed.order))
+    assert result.n_new == 2
+    assert result.n_done == 3
+    assert (tmp_path / "product.out").read_text().splitlines() == resumed.order
+    assert list((tmp_path / "scratch").iterdir()) == []
 
 
 @pytest.mark.parametrize("resume_result", [None, 0, ""])

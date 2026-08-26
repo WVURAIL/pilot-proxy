@@ -19,23 +19,133 @@ hooks ``run_chime_analysis`` exposes), which is how the GPU-free parity tests ru
 """
 from __future__ import annotations
 
+import hashlib
 import json
+from numbers import Integral
 from pathlib import Path
 from typing import Any, Mapping
 
 import numpy as np
 
 from pilot_proxy.atomic_io import atomic_write_json
+from pilot_proxy.provenance import file_sha256
 
 _DETECTOR_ANALYZER = "pilot-proxy-detector"
 _READER_FOR_ANALYZER = {
     _DETECTOR_ANALYZER: "chime-baseband-packed",  # native int4 -> lossless kernel pack
 }
 _SCAN_SCOPE_SCHEMA_VERSION = "pilotproxy_chime_scan_scope_v1"
+_LOCAL_INPUT_MANIFEST_SCHEMA_VERSION = "pilotproxy_local_input_manifest_v1"
+_DEFAULT_LOCAL_FREQ_ID_REGEX = r"_(\d+)\.h5$"
+_DEFAULT_LOCAL_EVENT_REGEX = r"baseband_(\d+)_"
+
+
+def _positive_count(value: Any, *, option: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, Integral) or value <= 0:
+        raise SystemExit(f"chime-scan: --{option} must be a positive integer")
+    return int(value)
 
 
 def _atomic_write_json(path: Path, payload: Mapping[str, Any]) -> None:
     atomic_write_json(path, payload)
+
+
+def _read_existing_scope(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise SystemExit(
+            f"chime-scan: existing scan scope is unreadable: {path}. "
+            "Restore it or use a fresh --output-dir."
+        ) from exc
+    if (
+        not isinstance(payload, dict)
+        or payload.get("schema_version") != _SCAN_SCOPE_SCHEMA_VERSION
+    ):
+        raise SystemExit(
+            f"chime-scan: existing scan scope is incompatible: {path}. "
+            "Use a fresh --output-dir."
+        )
+    return payload
+
+
+def _prior_execution_attempts(
+    scope: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if scope is None:
+        return []
+    attempts = scope.get("execution_attempts")
+    if isinstance(attempts, list) and all(isinstance(item, dict) for item in attempts):
+        return [dict(item) for item in attempts]
+    execution = scope.get("execution")
+    return [dict(execution)] if isinstance(execution, dict) else []
+
+
+def _local_input_manifest(
+    prepared_runs: list[tuple[Any, list[Any]]],
+) -> dict[str, Any]:
+    records: dict[str, dict[str, Any]] = {}
+    for _selection, units in prepared_runs:
+        for unit in units:
+            meta = dict(unit.meta or {})
+            relative_path = meta.get("relative_path")
+            size_bytes = meta.get("size_bytes")
+            sha256 = meta.get("sha256")
+            if (
+                not isinstance(relative_path, str)
+                or not relative_path
+                or Path(relative_path).is_absolute()
+                or ".." in Path(relative_path).parts
+            ):
+                raise SystemExit(
+                    f"chime-scan: local source returned an invalid relative path "
+                    f"for {unit.name!r}"
+                )
+            if (
+                isinstance(size_bytes, bool)
+                or not isinstance(size_bytes, Integral)
+                or size_bytes < 0
+            ):
+                raise SystemExit(
+                    f"chime-scan: local source returned an invalid size for "
+                    f"{relative_path!r}"
+                )
+            if (
+                not isinstance(sha256, str)
+                or len(sha256) != 64
+                or any(char not in "0123456789abcdef" for char in sha256)
+            ):
+                raise SystemExit(
+                    f"chime-scan: local source returned an invalid SHA-256 for "
+                    f"{relative_path!r}"
+                )
+            record = {
+                "path": Path(relative_path).as_posix(),
+                "size_bytes": int(size_bytes),
+                "sha256": sha256,
+            }
+            previous = records.setdefault(record["path"], record)
+            if previous != record:
+                raise SystemExit(
+                    f"chime-scan: local file identity disagrees across selections: "
+                    f"{record['path']!r}"
+                )
+    files = [records[path] for path in sorted(records)]
+    canonical = json.dumps(
+        files,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return {
+        "schema_version": _LOCAL_INPUT_MANIFEST_SCHEMA_VERSION,
+        "file_count": len(files),
+        "total_bytes": sum(record["size_bytes"] for record in files),
+        "sha256": hashlib.sha256(canonical).hexdigest(),
+        "files": files,
+    }
 
 
 def _require_preflight(
@@ -183,8 +293,22 @@ def _failed_current_unit_count(
     ]
     if not pending or not isinstance(exc, RuntimeError):
         return 0
-    message = str(exc)
-    return 1 if str(pending[0].name) in message else 0
+    name = str(pending[0].name)
+    stack: list[BaseException] = [exc]
+    seen: set[int] = set()
+    while stack:
+        current = stack.pop()
+        identity = id(current)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        if name in str(current):
+            return 1
+        if current.__cause__ is not None:
+            stack.append(current.__cause__)
+        if current.__context__ is not None:
+            stack.append(current.__context__)
+    return 0
 
 
 def _refresh_scope_totals(scope: dict[str, Any]) -> None:
@@ -356,8 +480,10 @@ def run_chime_scan(
     max_files: int | None = None,
     max_chunks_per_file: int | None = None,
     work_dir: str | Path | None = None,
+    staging_dir: str | Path | None = None,
     source_glob: str = "*.h5",
     source_freq_id_regex: str | None = None,
+    source_event_regex: str | None = None,
     inventory: str | Path | None = None,
     inventory_name: str | None = None,
     source_root: str | Path | None = None,
@@ -414,6 +540,22 @@ def run_chime_scan(
     from .detector import PilotProxyDetectorAnalyzer
     from .packed_reader import ChimeBasebandPackedReader
 
+    download_workers = _positive_count(
+        download_workers, option="download-workers")
+    max_staged_files = _positive_count(
+        max_staged_files, option="max-staged-files")
+    if download_workers > max_staged_files:
+        raise SystemExit(
+            "chime-scan: --max-staged-files must be at least "
+            "--download-workers"
+        )
+    checkpoint_every = _positive_count(
+        pipeline.DEFAULT_CHECKPOINT_EVERY
+        if checkpoint_every is None
+        else checkpoint_every,
+        option="checkpoint-every",
+    )
+
     if analyzer != _DETECTOR_ANALYZER:
         raise SystemExit(
             f"chime-scan: unknown analyzer {analyzer!r} "
@@ -446,19 +588,6 @@ def run_chime_scan(
             "reads from the inventory. Drop one of the two."
         )
 
-    # The PilotProxy analyzers append frames in delivery order; with download_workers > 1
-    # or max_staged_files > 1, files may arrive out of source order, which
-    # would corrupt frame_index / relative_time_s. Force the single-file, order-safe
-    # path regardless of caller request.
-    if (int(download_workers), int(max_staged_files)) != (1, 1):
-        print(
-            "[chime-scan] note: forcing download_workers=1, max_staged_files=1; the "
-            "Pilot Proxy analyzers require ordered single-file delivery.",
-            flush=True,
-        )
-        download_workers = 1
-        max_staged_files = 1
-
     inst = load_instrument(instrument)
     options: dict[str, Any] = dict(analyzer_options or {})
     if source == "local":
@@ -472,6 +601,8 @@ def run_chime_scan(
         if source_freq_id_regex:
             # An explicit --set of this key wins over the flag.
             options.setdefault("source_freq_id_regex", source_freq_id_regex)
+        if source_event_regex:
+            options.setdefault("source_event_regex", source_event_regex)
         if _selection_is_empty(select):
             raise SystemExit(
                 "chime-scan: --select is required for --source local (e.g. "
@@ -527,6 +658,30 @@ def run_chime_scan(
             f"chime-scan: unknown source {source!r} "
             f"(expected 'local' or 'cadc-datatrail')."
         )
+
+    if source == "local":
+        input_details = {
+            "root": str(Path(options["source_root"]).expanduser().resolve()),
+            "glob": str(options["source_glob"]),
+            "freq_id_regex": str(
+                options.get("source_freq_id_regex")
+                or _DEFAULT_LOCAL_FREQ_ID_REGEX
+            ),
+            "source_event_regex": str(
+                options.get("source_event_regex")
+                or _DEFAULT_LOCAL_EVENT_REGEX
+            ),
+        }
+    else:
+        inventory_path = Path(options["inventory"]).expanduser().resolve()
+        inventory_sha256 = file_sha256(inventory_path)
+        if inventory_sha256 is None:
+            raise SystemExit(f"chime-scan: inventory not found: {inventory_path}")
+        input_details = {
+            "inventory_path": str(inventory_path),
+            "inventory_sha256": inventory_sha256,
+        }
+
     if max_chunks_per_file is not None:
         max_chunks_per_file = int(max_chunks_per_file)
         options["max_chunks_per_file"] = max_chunks_per_file
@@ -557,7 +712,8 @@ def run_chime_scan(
     # of quarantining every unit or dying with a raw error mid-scan. For
     # pilot-proxy-detector, that means cupy, the CUDA kernel library, and the
     # weight bank.
-    _ok, _problems = analyzer_cls().preflight(ctx)
+    analyzer_probe = analyzer_cls()
+    _ok, _problems = analyzer_probe.preflight(ctx)
     if not _ok:
         raise SystemExit(
             f"chime-scan: {analyzer} preflight failed:\n  - "
@@ -565,22 +721,101 @@ def run_chime_scan(
             + "\n  (a detector run needs a GPU node with a built "
             "cuda/libfstatistic.so and the weight bank; run setup_env.sh on a "
             "GPU node.)")
+    fine_retention = analyzer_probe.fine_retention_scope(ctx)
 
     runs = analyzer_cls().plan_runs(ctx, select)
     if not runs:
         raise SystemExit("chime-scan: --select resolved to an empty set")
+    requested_selections = [_selection_values(run) for run in runs]
+    enumerated_runs: list[tuple[Any, list[Any]]] = []
+    for sub_sel in runs:
+        ctx.selection = sub_sel
+        enumerated_runs.append((sub_sel, list(src.enumerate(ctx))))
+    if source == "local":
+        input_details["file_manifest"] = _local_input_manifest(enumerated_runs)
 
     work = Path(work_dir) if work_dir is not None else Path(output_dir) / "_per_pilot"
     work.mkdir(parents=True, exist_ok=True)
-    tmp_dir = str(work / "_staging")
+    staging = Path(staging_dir) if staging_dir is not None else work / "_staging"
+    staging = staging.expanduser().resolve()
+    if source == "local":
+        input_root = Path(options["source_root"]).expanduser().resolve()
+        try:
+            staging.relative_to(input_root)
+        except ValueError:
+            pass
+        else:
+            raise SystemExit(
+                "chime-scan: --staging-dir must be outside the local input tree"
+            )
+    staging.mkdir(parents=True, exist_ok=True)
     quarantine_path = str(work / "quarantine.jsonl")
     scope_path = Path(output_dir) / "scan_scope.json"
+    previous_scope = _read_existing_scope(scope_path)
+    if previous_scope is not None and previous_scope.get("source") != source:
+        raise SystemExit(
+            "chime-scan: source differs from the existing scan scope; "
+            "restore the original source or use a fresh --output-dir"
+        )
+    if previous_scope is not None:
+        previous_selections = previous_scope.get("requested_selections")
+        if previous_selections != requested_selections:
+            raise SystemExit(
+                "chime-scan: selection differs from the existing scan scope; "
+                "restore the original --select value or use a fresh --output-dir"
+            )
+        if previous_scope.get("fine_retention") != fine_retention:
+            raise SystemExit(
+                "chime-scan: fine-product retention differs from the existing "
+                "scan scope; restore the original fine_products setting and "
+                "backend capability or use a fresh --output-dir"
+            )
+    if source == "cadc-datatrail" and previous_scope is not None:
+        previous_input = previous_scope.get("input")
+        previous_digest = (
+            previous_input.get("inventory_sha256")
+            if isinstance(previous_input, dict)
+            else None
+        )
+        current_digest = input_details["inventory_sha256"]
+        if not isinstance(previous_digest, str) or not previous_digest:
+            raise SystemExit(
+                "chime-scan: existing scan scope has no inventory SHA-256; "
+                "use a fresh --output-dir"
+            )
+        if previous_digest != current_digest:
+            raise SystemExit(
+                "chime-scan: inventory SHA-256 differs from the existing "
+                "scan scope; restore the original inventory or use a fresh "
+                "--output-dir"
+            )
+    if source == "local" and previous_scope is not None:
+        if previous_scope.get("input") != input_details:
+            raise SystemExit(
+                "chime-scan: local input differs from the existing scan scope; "
+                "restore the original files and local source settings or use a "
+                "fresh --output-dir"
+            )
+    execution = {
+        "preserve_source_order": True,
+        "download_workers": download_workers,
+        "max_staged_files": max_staged_files,
+        "checkpoint_every": checkpoint_every,
+        "staging_dir": str(staging),
+    }
+    execution_attempts = _prior_execution_attempts(previous_scope)
+    execution_attempts.append(dict(execution))
     scope: dict[str, Any] = {
         "schema_version": _SCAN_SCOPE_SCHEMA_VERSION,
         "source": str(source),
+        "input": input_details,
         "allow_partial": bool(allow_partial),
+        "max_files": max_files,
         "max_chunks_per_file": max_chunks_per_file,
-        "requested_selections": [_selection_values(run) for run in runs],
+        "execution": execution,
+        "execution_attempts": execution_attempts,
+        "requested_selections": requested_selections,
+        "fine_retention": fine_retention,
         "requested_pilots": len(runs),
         "pilots": [
             {
@@ -606,10 +841,9 @@ def run_chime_scan(
     _atomic_write_json(scope_path, scope)
 
     prepared_runs: list[tuple[Any, list[Any], Path]] = []
-    for run_index, sub_sel in enumerate(runs):
+    for run_index, (sub_sel, units) in enumerate(enumerated_runs):
         scope_entry = scope["pilots"][run_index]
         ctx.selection = sub_sel
-        units = list(src.enumerate(ctx))
         unit_keys = {str(unit.key) for unit in units}
         scope_entry["enumerated"] = len(units)
         scope_entry["requested"] = len(units)
@@ -678,16 +912,15 @@ def run_chime_scan(
             print(f"  [chime-scan] select={sub_sel}: {len(units)} file(s) -> {out}",
                       flush=True)
         analyzer_obj = analyzer_cls()  # fresh analyzer per product
+        pilot_staging = str(staging / out_path.stem)
         try:
             result = pipeline.run(
                 source=src, reader=rdr, analyzer=analyzer_obj, units=units,
-                out_path=out, tmp_dir=tmp_dir, ctx=ctx,
-                download_workers=int(download_workers),
-                max_staged_files=int(max_staged_files),
+                out_path=out, tmp_dir=pilot_staging, ctx=ctx,
+                download_workers=download_workers,
+                max_staged_files=max_staged_files,
                 max_files=max_files, max_frames_per_file=max_chunks_per_file,
-                checkpoint_every=(
-                    50 if checkpoint_every is None else int(checkpoint_every)
-                ),
+                checkpoint_every=checkpoint_every,
                 quarantine_path=quarantine_path, verbose=False,
             )
         except BaseException as exc:

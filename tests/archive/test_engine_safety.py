@@ -402,6 +402,26 @@ def test_local_source_duplicate_basenames_distinct_keys():
     assert len({_stage_name(u) for u in units}) == 2   # -> distinct scratch names
 
 
+def test_local_source_rejects_bytes_changed_after_enumeration():
+    work = _tmp("local_changed")
+    source_path = os.path.join(work, "baseband_x_844.h5")
+    _touch(source_path)
+    inst = inst_mod.load_instrument("chime")
+    ctx = RunContext(
+        instrument=inst,
+        selection=[844],
+        options={"source_root": work, "source_glob": "*.h5"},
+    )
+    source = LocalDirectorySource()
+    unit = list(source.enumerate(ctx))[0]
+    with open(source_path, "ab") as stream:
+        stream.write(b"x")
+
+    ok, error = source.fetch(unit, os.path.join(work, "staged.h5"))
+    assert ok is False
+    assert "changed after enumeration" in error
+
+
 def test_quarantine_uses_stable_unit_identity_for_duplicate_basenames():
     work = _tmp("quarantine_identity")
     ledger = os.path.join(work, "quarantine.jsonl")

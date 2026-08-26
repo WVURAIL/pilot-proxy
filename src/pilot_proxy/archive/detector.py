@@ -91,6 +91,7 @@ from pilot_proxy.product_contract import (
     PSD_DB_MAX as _PSD_DB_MAX,
     PSD_DB_MIN as _PSD_DB_MIN,
     CurrentProductContractError,
+    FINE_STATUS_WITHOUT_TERMS,
     PER_PILOT_PRODUCT_SCHEMA_NAME,
     PER_PILOT_PRODUCT_SCHEMA_REVISION,
     PER_PILOT_PRODUCT_SCHEMA_TOKEN,
@@ -537,6 +538,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_mode_opt: str = "auto"
         self._fine_supported: bool | None = None
         self._fine_status: str = "not_configured"
+        self._resumed_fine_retention: bool | None = None
         self._fine_bins: int = 0
         self._fine_p_fa: float = float(CFAR_DEFAULT_P_FA)
         self._fine_guard: int = int(CFAR_DEFAULT_GUARD_FINE_BINS)
@@ -756,8 +758,20 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._reject_mask = [int(x) for x in _col("reject_mask")]
         # Restore the current fine-diagnostic arrays; current checkpoints carry
         # these fields even when there are zero frames.
+        self._fine_status = str(np.asarray(data["fine_status"]).reshape(()).item())
         _fine_u64 = np.asarray(data["fine_power_u64"], dtype=np.uint64)
-        self._fine_bins = int(_fine_u64.shape[2]) if _fine_u64.ndim == 3 else 0
+        legacy_empty_fine = (
+            self._fine_status in FINE_STATUS_WITHOUT_TERMS
+            and _fine_u64.ndim == 3
+            and _fine_u64.shape[1] == REFERENCE_WEIGHT_TERMS
+            and _fine_u64.shape[2] > 0
+        )
+        if legacy_empty_fine:
+            self._fine_bins = 0
+        elif _fine_u64.ndim == 3:
+            self._fine_bins = int(_fine_u64.shape[2])
+        else:
+            self._fine_bins = 0
         psd_codes = np.asarray(data["psd_frame_db_i16"], dtype=np.int16)
         psd_ref = np.asarray(data["psd_db_reference"], dtype=np.float64)
         if psd_codes.ndim == 2 and psd_codes.shape[1]:
@@ -766,10 +780,11 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         else:
             self._psd_codes = []
             self._psd_ref = []
-        exact_arr = np.asarray(data["fine_power_u64"], dtype=np.uint64)
-        self._fine_power_u64 = [
-            exact_arr[i] for i in range(exact_arr.shape[0])
-        ]
+        self._fine_power_u64 = (
+            []
+            if legacy_empty_fine
+            else [_fine_u64[i] for i in range(_fine_u64.shape[0])]
+        )
         self._fine_p_fa = float(np.asarray(data["fine_p_fa"]))
         self._fine_guard = int(np.asarray(data["fine_guard_fine_bins"]))
         self._fine_designated = [int(x) for x in _col("fine_designated_bins")]
@@ -780,7 +795,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_census = [
             int(x) for x in _col("fine_census_excluded_bins")
         ]
-        self._fine_status = str(np.asarray(data["fine_status"]).reshape(()).item())
+        if self._fine_status in {"enabled", "pending"}:
+            self._resumed_fine_retention = True
+        elif self._fine_status != "not_applicable_pilot_out_of_band":
+            self._resumed_fine_retention = False
         self._valid = [int(x) for x in _col("valid")]
         self._baseband_power = [float(x) for x in _col("baseband_power_linear")]
         self._railed_count = [int(x) for x in _col("railed_sample_count")]
@@ -826,6 +844,53 @@ class PilotProxyDetectorAnalyzer(Analyzer):
     def processed_key_order(self) -> list[str]:
         return list(self._unit_order)
 
+    @staticmethod
+    def _fine_retention_resolution(
+        opts: Mapping[str, Any],
+        *,
+        detector_fn: Any = None,
+        kernel: Any = None,
+    ) -> dict[str, str]:
+        requested = str(opts.get("fine_products", "auto")).lower()
+        if requested not in {"auto", "on", "off"}:
+            raise ValueError(
+                "detector analyzer: fine_products must be auto|on|off, got "
+                f"{requested!r}."
+            )
+        if requested == "off":
+            return {"requested": requested, "resolved": "disabled_by_option"}
+
+        if detector_fn is None:
+            detector_fn = opts.get("detector_fn")
+        if detector_fn is None:
+            from pilot_proxy.chime.runner import detect_packed_for_positive_excess
+
+            detector_fn = detect_packed_for_positive_excess
+
+        if kernel is None:
+            kernel = opts.get("kernel")
+        if kernel is None:
+            from pilot_proxy.kernel import FStatKernel
+            from pilot_proxy.paths import DEFAULT_LIB_PATH
+
+            kernel = FStatKernel(opts.get("lib_path", DEFAULT_LIB_PATH))
+
+        detector_supports = _callable_accepts_keyword(
+            detector_fn, "emit_row_projections"
+        )
+        probe = getattr(kernel, "supports_row_projections", None)
+        kernel_supports = bool(probe()) if callable(probe) else False
+        if kernel_supports and detector_supports:
+            resolved = "enabled"
+        elif kernel_supports:
+            resolved = "detector_fn_lacks_matched_filter_row_projections"
+        else:
+            resolved = "kernel_library_lacks_matched_filter_row_projections"
+        return {"requested": requested, "resolved": resolved}
+
+    def fine_retention_scope(self, ctx: RunContext) -> dict[str, str]:
+        return self._fine_retention_resolution(dict(ctx.options or {}))
+
     def preflight(self, ctx: RunContext) -> tuple[bool, list[str]]:
         """Report detector runtime problems before a long scan starts."""
         import importlib.util
@@ -850,6 +915,21 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 problems.append(f"detector weight bank not found: {weights_path}")
         except Exception as exc:  # noqa: BLE001 - preflight should report rather than crash.
             problems.append(f"detector preflight failed: {type(exc).__name__}: {exc}")
+        try:
+            fine_retention = self.fine_retention_scope(ctx)
+            if (
+                fine_retention["requested"] == "on"
+                and fine_retention["resolved"] != "enabled"
+            ):
+                problems.append(
+                    "fine_products=on requires matched-filter row projections; "
+                    f"resolved status is {fine_retention['resolved']}"
+                )
+        except Exception as exc:  # noqa: BLE001 - preflight reports all failures.
+            problems.append(
+                "fine-product preflight failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
         return (not problems), problems
 
     # -- lifecycle ----------------------------------------------------------
@@ -940,12 +1020,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             )
 
         # detector backend: injectable, mirroring run_chime_analysis
-        self._fine_mode_opt = str(opts.get("fine_products", "auto")).lower()
-        if self._fine_mode_opt not in {"auto", "on", "off"}:
-            raise ValueError(
-                "detector analyzer: fine_products must be auto|on|off, got "
-                f"{self._fine_mode_opt!r}."
-            )
         self._fine_p_fa = float(opts.get("fine_p_fa", CFAR_DEFAULT_P_FA))
         self._fine_guard = int(
             opts.get("fine_guard_fine_bins", CFAR_DEFAULT_GUARD_FINE_BINS)
@@ -965,9 +1039,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         self._fine_census = [
             int(b) for b in opts.get("fine_census_excluded_bins", [])
         ]
-        self._fine_status = (
-            "disabled_by_option" if self._fine_mode_opt == "off" else "pending"
-        )
         self._detector_fn = opts.get("detector_fn")
         if self._detector_fn is None:
             from pilot_proxy.chime.runner import detect_packed_for_positive_excess
@@ -981,6 +1052,38 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             from pilot_proxy.kernel import FStatKernel
             from pilot_proxy.paths import DEFAULT_LIB_PATH
             self._kernel = FStatKernel(opts.get("lib_path", DEFAULT_LIB_PATH))
+        fine_retention = self._fine_retention_resolution(
+            opts,
+            detector_fn=self._detector_fn,
+            kernel=self._kernel,
+        )
+        self._fine_mode_opt = fine_retention["requested"]
+        resolved_fine_status = fine_retention["resolved"]
+        if self._fine_mode_opt == "on" and resolved_fine_status != "enabled":
+            raise RuntimeError(
+                "detector analyzer: fine_products=on but the configured "
+                "kernel/detector backend does not explicitly support row-sum "
+                f"emission ({resolved_fine_status})."
+            )
+        fine_enabled = resolved_fine_status == "enabled"
+        if (
+            self._resumed_fine_retention is not None
+            and self._resumed_fine_retention != fine_enabled
+        ):
+            raise SystemExit(
+                "pilot-proxy-detector: resumed product fine-product retention "
+                "mode differs from the current backend or fine_products option. "
+                "Restore the original setting and capability, or use a clean "
+                "--output-dir."
+            )
+        self._fine_supported = fine_enabled
+        self._fine_status = (
+            "not_applicable_pilot_out_of_band"
+            if not self._pilot_in_band
+            else "pending"
+            if fine_enabled
+            else resolved_fine_status
+        )
         self._K = int(getattr(getattr(self._kernel, "specs", None), "K",
                               DETECTOR_WINDOW_SAMPLES))
         if int(self._nfft) % int(self._K) != 0:
@@ -1455,10 +1558,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 self._railed_count.append(int(railed_count))
                 self._fill_count.append(int(fill_count))
                 self._railed_total.append(int(railed_total))
-                self._ensure_fine_width(
-                    fine_bin_count(int(self._nfft) // int(self._K))
-                )
-                self._append_zero_fine_powers()
                 self._frame_unit_index.append(unit_idx)
                 self._frame_in_unit.append(chunk_in_unit)
                 n += 1
@@ -1475,9 +1574,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                 sample_encoding=CHIME_NATIVE_OFFSET_BINARY_COMPLEX_INT4,
                 selected_coarse_channel=0,   # unused on the native (lossless) path
                 physical_channel=self._physical_channel,
-            )
-            self._ensure_fine_width(
-                fine_bin_count(int(self._nfft) // int(self._K))
             )
             want_fine = self._fine_mode_opt != "off"
             if want_fine and self._fine_supported is None:
@@ -1502,6 +1598,10 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     self._fine_status = "enabled"
             emit_fine = bool(want_fine and self._fine_supported)
             if emit_fine:
+                self._fine_status = "enabled"
+                self._ensure_fine_width(
+                    fine_bin_count(int(self._nfft) // int(self._K))
+                )
                 detection = self._detector_fn(
                     packed=packed.packed,
                     weights=self._weights,
@@ -1537,49 +1637,65 @@ class PilotProxyDetectorAnalyzer(Analyzer):
                     f"detector result per nfft chunk, got {len(results)}. The "
                     "chime-baseband-packed reader yields one frame per chunk."
                 )
-            matched_filter_row_projections = detection.get("matched_filter_row_projections") if emit_fine else None
-            if matched_filter_row_projections is not None:
-                first = results[0]
-                fine_powers = tuple(
-                    _exact_backend_u64(first.get(field, 0), field=field)
-                    for field in (
-                        "p_target_u64",
-                        "p_ref_lower_u64",
-                        "p_ref_upper_u64",
-                    )
+            power_rows: list[tuple[int, int, int, int]] = []
+            for row in results:
+                required = (
+                    "p_target_u64",
+                    "p_ref_lower_u64",
+                    "p_ref_upper_u64",
+                    "p_ref_sum_u64",
                 )
+                missing = [field for field in required if field not in row]
+                if missing:
+                    raise ValueError(
+                        "detector analyzer: backend result is missing exact power "
+                        f"field(s) {missing}"
+                    )
+                num = _exact_backend_u64(row["p_target_u64"], field="p_target_u64")
+                lower = _exact_backend_u64(
+                    row["p_ref_lower_u64"], field="p_ref_lower_u64"
+                )
+                upper = _exact_backend_u64(
+                    row["p_ref_upper_u64"], field="p_ref_upper_u64"
+                )
+                den = _exact_backend_u64(
+                    row["p_ref_sum_u64"], field="p_ref_sum_u64"
+                )
+                combined = lower + upper
+                if combined >= (1 << 64):
+                    raise ValueError(
+                        "detector analyzer: lower and upper reference power sum "
+                        "exceeds uint64"
+                    )
+                if den != combined:
+                    raise ValueError(
+                        "detector analyzer: p_ref_sum_u64 does not equal the lower "
+                        "and upper reference powers"
+                    )
+                power_rows.append((num, lower, upper, den))
+
+            matched_filter_row_projections = (
+                detection.get("matched_filter_row_projections")
+                if emit_fine
+                else None
+            )
+            if emit_fine and matched_filter_row_projections is None:
+                raise RuntimeError(
+                    "detector analyzer: fine support was enabled but the backend "
+                    "returned no matched-filter row projections"
+                )
+            if matched_filter_row_projections is not None:
                 rs0 = matched_filter_row_projections[0]
                 # The exact terms are the measurement. The float reduction
                 # and its CFAR ran here; both are recomputable from these
                 # and neither was bit-equal to the deployed statistic, so
                 # the scan no longer spends a transform on them.
-                _ = fine_powers
                 self._append_exact_fine_powers(detection, rs0)
-                # Global index of THIS frame: frames committed before this
-                # unit (_n_frames advances once per consume_file, at the end)
-                # plus frames already appended within this unit. Without the
-                # +n, every detection in a unit is stamped with the unit's
-                # first frame index.
-            elif self._fine_bins:
-                self._append_zero_fine_powers()
-            for local_index, row in enumerate(results):
-                num = _exact_backend_u64(
-                    row.get("p_target_u64", 0), field="p_target_u64"
-                )
-                den = _exact_backend_u64(
-                    row.get("p_ref_sum_u64", 0), field="p_ref_sum_u64"
-                )
+            for local_index, powers in enumerate(power_rows):
+                num, lower, upper, den = powers
                 self._p_target.append(num)
-                self._p_ref_lower.append(
-                    _exact_backend_u64(
-                        row.get("p_ref_lower_u64", 0), field="p_ref_lower_u64"
-                    )
-                )
-                self._p_ref_upper.append(
-                    _exact_backend_u64(
-                        row.get("p_ref_upper_u64", 0), field="p_ref_upper_u64"
-                    )
-                )
+                self._p_ref_lower.append(lower)
+                self._p_ref_upper.append(upper)
                 self._p_ref_sum.append(den)
                 self._coarse_power_ratio.append(
                     float(power_terms_to_coarse_power_ratio(num, den))
@@ -1683,15 +1799,6 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             self._unit_scope.append(str(meta.get("scope", "")))
         return n
 
-    def _append_zero_fine_powers(self) -> None:
-        """Placeholder terms for a frame that never reached the transform."""
-        # Mirror the retained fine width exactly, so np.stack in save()
-        # cannot hit a ragged mix of real bins and placeholders.
-        width = int(self._fine_bins)
-        self._fine_power_u64.append(
-            np.zeros((REFERENCE_WEIGHT_TERMS, width), dtype=np.uint64)
-        )
-
     def _append_exact_fine_powers(self, detection: Mapping[str, Any], rs0) -> None:
         """Retain the exact uint64 fine terms for this frame.
 
@@ -1701,14 +1808,26 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         """
         exact = detection.get("fine_powers_u64")
         if exact is not None:
-            arr = np.asarray(exact, dtype=np.uint64)
+            arr = np.asarray(exact)
+            expected = (1, REFERENCE_WEIGHT_TERMS, int(self._fine_bins))
+            if arr.dtype != np.dtype(np.uint64) or arr.shape != expected:
+                raise ValueError(
+                    "detector analyzer: fine_powers_u64 must have dtype uint64 "
+                    f"and shape {expected}"
+                )
             self._fine_power_u64.append(np.ascontiguousarray(arr[0]))
             return
         host = rs0.get() if hasattr(rs0, "get") else np.asarray(rs0)
+        host = np.asarray(host)
+        if host.dtype.kind not in "iu":
+            raise TypeError(
+                "detector analyzer: matched-filter row projections must use an "
+                "integer dtype"
+            )
         self._fine_power_u64.append(
             np.ascontiguousarray(
                 fine_power_fx(
-                    np.asarray(host, dtype=np.int64),
+                    host,
                     num_streams=int(self._num_input_streams),
                     windows_per_stream=int(self._nfft) // int(self._K),
                     num_weight_terms=REFERENCE_WEIGHT_TERMS,
@@ -1749,6 +1868,22 @@ class PilotProxyDetectorAnalyzer(Analyzer):
         frame_index = np.arange(n, dtype=np.int64)
         col_f = lambda lst: np.asarray(lst, dtype=np.float64).reshape(n, 1)
         col_u = lambda lst, dt: np.asarray(lst, dtype=dt).reshape(n, 1)
+        if self._fine_status == "enabled":
+            if len(self._fine_power_u64) != n:
+                raise RuntimeError(
+                    "detector analyzer: enabled fine measurements do not match "
+                    "the frame count"
+                )
+            fine_power_u64 = np.stack(self._fine_power_u64).astype(
+                np.uint64, copy=False
+            )
+        else:
+            if any(np.asarray(row).size for row in self._fine_power_u64):
+                raise RuntimeError(
+                    "detector analyzer: fine terms exist under a status without "
+                    "measurements"
+                )
+            fine_power_u64 = np.zeros((n, 0, 0), dtype=np.uint64)
         Path(path).parent.mkdir(parents=True, exist_ok=True)
         atomic_savez_compressed(
             Path(path),
@@ -1775,11 +1910,7 @@ class PilotProxyDetectorAnalyzer(Analyzer):
             # Everything downstream of the transform -- ratio, CFAR, null
             # bulk, any future eta or Q16 threshold -- is exactly
             # recomputable from these; nothing recovers them afterwards.
-            fine_power_u64=(
-                np.stack(self._fine_power_u64).astype(np.uint64)
-                if self._fine_power_u64
-                else np.zeros((n, 0, 0), dtype=np.uint64)
-            ),
+            fine_power_u64=fine_power_u64,
             fine_pad_factor=np.asarray(int(FINE_PAD_FACTOR), dtype=np.int64),
             fine_num_bins=np.asarray(int(self._fine_bins), dtype=np.int64),
             fine_p_fa=np.asarray(float(self._fine_p_fa), dtype=np.float64),

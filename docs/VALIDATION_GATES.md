@@ -1,138 +1,141 @@
-# Validation gates for a CHIME archive relaunch
+# Validation gates for the local archive run
 
-This is the complete gate set for restarting a production scan after the
-2026-07-29 baseband-frame correction. Every gate has a command and a pass
-criterion. The scan
-does not relaunch until every gate in both sections has passed; the
-container-verified section records the evidence already in hand, and the
-A100 section is the remaining mandatory work on production infrastructure.
+These are the mandatory gates for the approved local historical estimation and
+sufficient-statistic reprocessing run. The coarse positive-excess flag is
+retained as a bootstrap diagnostic; the fine rank/eta decision is inactive and
+no calibrated detection policy is applied.
 
-Ground-truth inputs used throughout: CHIME/FRB baseband raw event
-`68399317.h5` (freq_id 844, DTV channel 14) and the first-epoch
-`chime-pilots` per-channel products (now the *legacy-halfband epoch*; see
-PAPER_PLAN Amendment A1).
+Gate evidence must match one clean source revision, its package-source digest,
+and the preserved SM89 library. A source change after a gate invalidates that
+gate. The scientific and product pins are in
+[`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md), the sole
+production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), and the
+actual values belong in the run ledger.
 
-## Section 1 - verified in-container (2026-07-29)
+## Ground truth already closed
 
-1. **Frame audit on the rebuilt bank.**
-   `PYTHONPATH=src python3 tools/framing_audit.py <event.h5> --chunks 4`
-   Pass: `VERDICT: ALIGNED`, exit 0. Measured: target lobe +3056.4 Hz,
-   miss +0.52 kHz (equal to the strongest transmitter's -517 Hz offset),
-   deployed target response at the line -0.4 dB.
+The 2026-07-29 frame correction and 23-channel parity census established the
+active CHIME frame convention and DC-centered weight bank. The active receiver
+profile and weight manifest resolve that convention. Historical half-band
+weights remain under `weights/legacy_halfband/` and are not operational inputs.
 
-2. **Deployed-configuration recovery of the buried detection.** The numpy
-   replica of the production configuration (2048 streams, per-stream
-   3-sigma int4 quantization, spectral flip, shipped int4 weights) on the
-   event file. Pass: per-chunk coarse (F) far above the mistuned baseline.
-   Measured: F = 12.85-13.99 over 12 chunks (mean excess +1228%), versus
-   0.997 +/- 0.002 with the archived legacy bank.
+The original supporting gates remain:
 
-3. **Full test tree.**
-   `PYTHONPATH=src python3 -m pytest tests -q`
-   Pass: zero failures. GPU- and archive-dependent tests may skip only when
-   their optional runtime dependencies are absent.
+1. `tools/framing_audit.py` reports `VERDICT: ALIGNED` for event 68399317,
+   `freq_id` 844 when run with four chunks.
+2. The production-geometry NumPy replica recovers the known signal with a mean
+   coarse excess above 1200 percent, while the historical bank remains near the
+   null.
+3. The parity census covers all 23 selected channels. An additional odd-channel
+   framing audit is optional.
+4. The shipped CHIME bank selects `K = 128`, one skipped guard cell, and a
+   two-cell reference offset.
 
-4. **CPU kernel-reference self-test.**
-   `make -C cuda test_ref`
-   Pass: builds with g++ and exits 0. Covers exact row sums against an
-   independently ordered brute force and the bit-exact all-bin coarse-power
-   marginal identity.
+Changing the detector window, weights, references, repack, frame convention, or
+fine transform creates a new run contract and requires new approval.
 
-5. **Active/historical bank separation.** The active CHIME manifest resolves
-   the DC-centered profile and its binary digest. The historical half-band
-   pair remains under `weights/legacy_halfband/`; no default resource or
-   operational example resolves it. See `weights/README.md`.
+## Final-source CPU gates
 
-## Section 2 - mandatory on the A100 before relaunch
+Run these from a clean checkout of the exact revision recorded in the ledger:
 
-Run in order on the production node (`cupy-gpu`); stop at the first
-failure.
+```bash
+test -z "$(git status --porcelain)"
+git rev-parse HEAD
+PYTHONPATH=src python - <<'PY'
+from pilot_proxy.provenance import package_source_sha256
+print(package_source_sha256())
+PY
+PYTHONPATH=src python -m pytest tests -q
+make -C cuda test_ref
+```
 
-1. **Rebuild the kernel library.**
-   `make -C cuda clean && make -C cuda`
-   Pass: builds; `FStat_GetVersion` reports 2.3.0
-   (`python3 -c "from pilot_proxy.kernel import FStatKernel; print(FStatKernel().version.as_string())"`).
+Pass criteria:
 
-2. **CUDA regression + exact fixed-point parity.**
-   `make -C cuda test_cuda`
-   Pass: exit 0. Includes `test_matched_filter_row_projections_exact` and
-   `test_matched_filter_row_projections_batch_exact`: GPU row sums equal the CPU reference
-   exactly (integers, no tolerance) across grid-stride row counts and
-   batches, and the GPU marginal reproduces `Compute_Powers_U64`
-   bit-for-bit.
+- the source tree is clean;
+- the complete test tree has zero failures;
+- optional tests skip only when their documented external dependency is absent;
+- the CPU kernel reference exits zero; and
+- the commit and package-source digest are recorded in the ledger.
 
-3. **GPU pytest gates.**
-   `PYTHONPATH=src python3 -m pytest tests/kernel -q`
-   Pass: zero failures, zero skips. `test_matched_filter_row_projections_gpu.py` enforces the
-   numpy-reference equality, the marginal identity, and the pre-registered
-   ULP gate (cupy complex64 fine reduction within 5e-6 relative of the
-   float64 prototype). These tests fail rather than skip if the loaded library
-   lacks a required current capability.
+## Final-source RTX/SM89 gates
 
-4. **Frame parity - CLOSED by census (2026-07-29).** The legacy-epoch
-   integrated spectra (salvaged before the CANFAR teardown) settle the
-   odd/even question without new baseband: across all 23 channels, every
-   detectable transmitter flock sits at the center-at-DC position (even
-   freq_ids: 10 of 13 with strong flocks, peaks 41x-8880x over floor; odd
-   freq_ids: 8 of 10, peaks 5.9x-693x) and the half-band alternative is
-   consistent with noise on every channel of both parities (max 1.3x). The
-   five quiet channels show nothing at either hypothesis and carry no
-   evidence. `channel_center_normalized_odd_channels` is therefore NOT
-   set; the profile and bank stand as shipped. Evidence:
-   `docs/evidence/frame_parity_census.csv` / `.png`.
-   Independent control from the same census: freq_id 598's pilot offset
-   (+96.81 kHz) lies 847 Hz from fs/4, where the half-band error
-   self-cancels; its legacy lobe missed the true pilot by only 1.69 kHz
-   and the channel ran at mean excess +1043% (F ~ 23) through the entire
-   legacy scan - the one accidentally-tuned channel detected at full
-   strength while the other 22 sat at the bias floor.
-   Optional belt-and-braces on the A100: one odd-freq_id baseband file
-   through `tools/framing_audit.py` (expect ALIGNED).
+The approved host is the local RTX 5000 Ada workstation. Do not replace the
+already preserved library during this run. The explicit load below and the
+real-file gates exercise that exact artifact. The later build and kernel-test
+commands exercise a disposable SM89 build from the same frozen CUDA source.
 
-5. **End-to-end smoke on real infrastructure.** One short `pilot-proxy chime-scan` run
-   (a handful of files, one even and one odd freq_id) with the current
-   analyzer:
-   pass criteria, all from the produced npz:
-   - `schema_version == pilotproxy_per_pilot_product_v5`;
-   - `source_event_key_schema_version ==
-     pilotproxy_namespaced_source_event_key_v1`, so basename-only development
-     products cannot align across archive or campaign namespaces;
-   - `detector_version` embeds the installed `pilot-proxy/<version>`,
-     kernel 2.3.0, the library sha, and the profile hash via the weight
-     bank;
-   - `fine_status == enabled`, `fine_power_u64.shape == (n_frames, 3, 256)`
-     (uint64; frames x [target, lower reference, upper reference] x
-     `fine_num_bins`). The scan stores only these exact terms; the float
-     ratio is recomputed from them in post-processing, not read from the npz;
-   - no v1-marginal identity assertion fired (the run raises on
-     mismatch);
-   - the null-bulk exceedance fraction, recomputed in post-processing from
-     `fine_power_u64` (it is not a stored field), is bounded to `[0, 1]` on
-     valid frames and interpreted as an in-sample threshold diagnostic rather
-     than an independent false-alarm-rate measurement;
-   - resume test: interrupt after a checkpoint, resume, and verify the
-     frame count and `unit_order` continue without duplication (run this
-     half in an output directory without a chunk cap: a capped product
-     refuses completion under a different cap, by design).
+```bash
+KERNEL_LIB=/home/djg/rail/pilot-proxy/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so
+printf '%s  %s\n' \
+  e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b \
+  "$KERNEL_LIB" | sha256sum --check --strict
 
-6. **Fine-spectrum sanity against the walkthrough.** Run the smoke
-   product for freq_id 844 over the archived event and confirm the fine
-   spectrum shows the known line forest (strongest lines near +143 Hz and
-   +524 Hz envelope with the +524 line's F capped near ~130 by reference
-   leak, per PAPER_PLAN A1.4).
+PYTHONPATH=src python - "$KERNEL_LIB" <<'PY'
+import sys
+from pilot_proxy.kernel import FStatKernel
 
-7. **Combine compatibility.** `chime-combine` over two smoke products.
-   Pass: succeeds when both products satisfy
-   `pilotproxy_per_pilot_product_v5` and the required namespaced source-event
-   identity version; refuses any missing, mismatched, or non-current
-   schema/decision identity. Fine products remain in the authoritative
-   per-channel NPZ files rather than the combined stack.
+kernel = FStatKernel(sys.argv[1])
+assert kernel.version.as_string() == "2.3.0"
+assert kernel.supports_fine_powers()
+assert kernel.supports_fused_fine()
+print("kernel", kernel.version.as_string(), kernel.get_fine_specs())
+PY
 
-## Relaunch configuration
+make -C cuda test_cuda SM=89
+PYTHONPATH=src python -m pytest tests/kernel -q
+```
 
-Use the rebuilt bank (`weights/chime_dtv_weights_k128.bin`, binary SHA-256
-prefix `1383c6d0ca521a26`, manifest SHA-256 prefix `d0ccc8162a350e9d`),
-`--checkpoint-every 50`, and a non-versioned operational run name such as
-`--name chime-pilots-current`. Do not resume legacy-epoch products; the
-detector-version invariant refuses them by design. `fine_products=auto` is the default;
-set `fine_products=on` to hard-fail if the library on the node is stale.
+Pass criteria:
+
+- the preserved byte digest matches;
+- the library reports core 2.3.0 and the required exact fine capabilities;
+- the disposable SM89 CUDA reference and fixed-point parity tests exit zero;
+- the kernel test directory has zero failures and zero skips against that
+  disposable build; and
+- the preserved bytes pass the explicit capability check and real-file gates.
+
+## Real-file and resume gates
+
+Repeat both gates after the source revision is frozen:
+
+1. Process one full detector chunk from the 2048-stream `freq_id` 844 file.
+   Require product validation to pass and peak VRAM to remain below 13,900 MiB.
+2. Process eight archive units with four download workers, eight staged-file
+   slots, and a two-unit rehearsal checkpoint. Interrupt after a durable
+   checkpoint, rerun the identical command, and require eight unique unit keys,
+   no duplicate frames, valid v5 products, and empty staging.
+
+The exact commands and evidence paths are in `LOCAL_PROCESSING.md`. These gates
+must embed the final package-source digest and preserved kernel digest. A capped
+rehearsal output is never reused for production.
+
+For every per-pilot v5 product inspected during these gates, require:
+
+- all valid frames remain in the per-frame arrays on both sides of zero excess;
+- exact target, lower-reference, upper-reference, and summed-reference powers;
+- exact fine powers with shape `[N, 3, 256]` and unsigned 64-bit dtype;
+- `fine_status == enabled` and an inactive fine candidate decision;
+- the positive-excess bit affects only the recorded bootstrap flag and the
+  after-mask diagnostic spectrum; and
+- the source, kernel, profile, bank, and inventory identities match the ledger.
+
+The authoritative products are `_per_pilot/<freq_id>.npz`. The combined product
+is a derived common-frame projection and is not a substitute for them.
+
+## Production settings
+
+The approved local command uses:
+
+- the frozen 165,682-unit inventory and all 23 selected `freq_id` values;
+- four download workers and eight staged-file slots;
+- a 250-unit production checkpoint interval;
+- the preserved SM89 library named above;
+- `fine_products=on`; this retains exact fine powers and does not enable fine
+  detection;
+- no file cap, no chunk cap, and no partial-run acknowledgement; and
+- a fresh output directory outside the checkout.
+
+The full synthetic detection frontier, residual-contamination calibration,
+rho/eta selection, and final detection policy are later work. They are not
+prelaunch gates because this run preserves the sufficient statistics needed to
+perform them without reacquiring the archive.

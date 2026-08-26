@@ -7,10 +7,14 @@ schema_version = "pilotproxy_per_pilot_product_v5"
 source_event_key_schema_version = "pilotproxy_namespaced_source_event_key_v1"
 ```
 
-This is the only supported per-pilot product contract. PilotProxy had no public
-product release before this revision, so development snapshots are not
-accepted, converted, repaired, or resumed. Delete them and regenerate from
-authoritative inputs with the current checkout.
+This is the only supported per-pilot product contract. Earlier schema
+revisions are not accepted, converted, repaired, or resumed. Delete them and
+regenerate from authoritative inputs with the current checkout.
+
+One v5 migration is explicit: an older no-measurement checkpoint may carry an
+all-zero fine-term placeholder. Resume accepts only the exact zero form and
+normalizes it to `(N, 0, 0)` with zero bins. Nonzero placeholders are invalid,
+and current writers never emit placeholders.
 
 Detailed arrays are listed in
 [`PER_PILOT_PRODUCT_FIELDS.md`](PER_PILOT_PRODUCT_FIELDS.md) and

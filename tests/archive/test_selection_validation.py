@@ -178,7 +178,7 @@ def _write_min_detector_product(
         integrated_spectrum_before_mask=np.zeros(int(nfft), dtype=np.float64),
         integrated_spectrum_after_mask=np.zeros(int(nfft), dtype=np.float64),
         fine_power_ratio=np.zeros((int(n_frames), 0), dtype=np.float32),
-        fine_power_u64=np.zeros((int(n_frames), 3, 0), dtype=np.uint64),
+        fine_power_u64=np.zeros((int(n_frames), 0, 0), dtype=np.uint64),
         psd_frame_db_i16=np.zeros((int(n_frames), 0), dtype=np.int16),
         psd_db_reference=np.ones((int(n_frames), 1), dtype=np.float64),
         fine_cfar_location=np.full(shape, np.nan, dtype=np.float64),
@@ -194,7 +194,7 @@ def _write_min_detector_product(
         fine_guard_fine_bins=np.asarray(1, dtype=np.int64),
         fine_designated_bins=np.asarray([0], dtype=np.int64),
         fine_census_excluded_bins=np.asarray([], dtype=np.int64),
-        fine_status=np.asarray("disabled"),
+        fine_status=np.asarray("disabled_by_option"),
         fine_null_bulk_exceedance_fraction=np.full(
             shape, np.nan, dtype=np.float64
         ),

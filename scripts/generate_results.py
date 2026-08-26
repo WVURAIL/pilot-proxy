@@ -53,6 +53,7 @@ import collections
 import contextlib
 import importlib.util
 import io
+import itertools
 import json
 import os
 import re
@@ -368,15 +369,13 @@ def preregistered_subset(event_sets: dict[int, set], *, min_channels: int,
 
 def exact_subset_search(event_sets: dict[int, set], *, min_channels: int,
                         out_npz: Path | None = None) -> dict:
-    """Exact best common-event count per subset size.
-
-    Candidates are the observed per-event presence signatures; each candidate
-    is closed over the events it covers (the intersection of their
-    signatures), which is the maximal channel set for that event block --
-    so the per-block (channels, common-event) answer is exact.
-    """
+    """Exact best common-event count at each allowed subset size."""
     fids = sorted(event_sets)
     n = len(fids)
+    if not 1 <= min_channels <= n:
+        raise ValueError(
+            f"min_channels must be between 1 and {n}, got {min_channels}."
+        )
     presence: dict[str, int] = {}
     for i, f in enumerate(fids):
         for e in event_sets[f]:
@@ -389,27 +388,30 @@ def exact_subset_search(event_sets: dict[int, set], *, min_channels: int,
         np.savez_compressed(str(out_npz),
                             freq_ids=np.asarray(fids, dtype=np.int64),
                             signature=sigs, count=cnts)
-    best: dict[int, tuple[int, int]] = {}
-    for S in sigs.tolist():
-        cover = (sigs & S) == S
-        total = int(cnts[cover].sum())
-        closed = int(np.bitwise_and.reduce(sigs[cover])) if total else int(S)
-        k = bin(closed).count("1")
-        cur = best.get(k)
-        if cur is None or total > cur[0]:
-            best[k] = (total, closed)
     by_k = []
-    for k in sorted(best, reverse=True):
-        total, S = best[k]
-        chans = [fids[i] for i in range(n) if (S >> i) & 1]
-        by_k.append({"k": k, "common_events": total, "channels": chans,
+    subsets_evaluated = 0
+    for k in range(n, min_channels - 1, -1):
+        best_total = -1
+        best_indices = None
+        for indices in itertools.combinations(range(n), k):
+            mask = sum(1 << index for index in indices)
+            total = int(cnts[(sigs & mask) == mask].sum())
+            subsets_evaluated += 1
+            if total > best_total:
+                best_total = total
+                best_indices = indices
+        assert best_indices is not None
+        chans = [fids[index] for index in best_indices]
+        by_k.append({"k": k, "common_events": best_total, "channels": chans,
                      "excluded": [f for f in fids if f not in chans]})
     eligible = [r for r in by_k
                 if r["k"] >= min_channels and r["common_events"] > 0]
     selected = (max(eligible, key=lambda r: (r["common_events"], r["k"]))
                 if eligible else None)
     return {"n_signatures": int(sigs.size), "n_events": int(cnts.sum()),
-            "min_channels": min_channels, "by_k": by_k, "selected": selected}
+            "min_channels": min_channels,
+            "subsets_evaluated": subsets_evaluated,
+            "by_k": by_k, "selected": selected}
 
 
 # --------------------------------------------------------------------------
@@ -932,7 +934,7 @@ def main(argv: list[str] | None = None) -> int:
                        f"{reg['final_intersection_events']} common events "
                        f"({reg['stopping_reason']})")
             runner.say("  exact best common events per subset size "
-                       "(signature closure):")
+                       "(exhaustive search):")
             for r in exact["by_k"][:8]:
                 runner.say(f"    k={r['k']:>2}  common={r['common_events']:>6}  "
                            f"excluded={r['excluded']}")
@@ -965,8 +967,8 @@ def main(argv: list[str] | None = None) -> int:
                     "Amendment to PAPER_PLAN.md pre-registered decision 1 "
                     "(registered 2026-07-08): stacked subset chosen to "
                     "maximize the common-event count subject to retaining at "
-                    f"least {args.min_channels} channels (exact search over "
-                    "event-presence signatures with closure). The registered "
+                    f"least {args.min_channels} channels (exhaustive subset "
+                    "search over event-presence signatures). The registered "
                     "greedy rule's outcome and full drop-curve are recorded "
                     "here and reported in the appendix.")
             elif mode == "explicit-amendment":

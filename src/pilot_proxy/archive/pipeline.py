@@ -10,9 +10,8 @@ Unit in a selection it:
     ask the Analyzer to checkpoint its product every N successfully consumed files
 
 Scratch usage is bounded by a semaphore: at most `max_staged_files` files are
-on disk at once, and the defaults (one file, one worker) hold exactly one file
-at a time in source order. An analyzer that needs source order must use the
-defaults; the storage-safety comment in the engine body has the mechanics.
+on disk at once. Downloads may finish in any order, but analyzers that require
+source order always receive it.
 
 Restartable: on restart the analyzer re-loads its product, reports which units it
 already holds, and the engine processes only the rest.
@@ -302,6 +301,7 @@ class RunResult:
 
 @dataclass
 class _ReadyItem:
+    ordinal: int
     unit: Unit
     dest: str
     ok: bool
@@ -310,6 +310,7 @@ class _ReadyItem:
 
 @dataclass
 class _WorkerFailure:
+    ordinal: Optional[int]
     unit: Optional[Unit]
     error: BaseException
 
@@ -487,22 +488,7 @@ def _run_with_output_lock_held(
     if max_files:
         units = units[:max_files]
 
-    # Correctness guard: an analyzer that depends on consume order (a CFAR
-    # baseline, any running/trailing statistic) declares requires_in_order. The
-    # default 1 worker / 1 slot delivers files in source order; raising either
-    # setting relaxes that public contract and could silently change an
-    # order-dependent product. Refuse the combination rather than produce a wrong
-    # result. (A commutative analyzer leaves the flag False.)
     requires_in_order = bool(getattr(analyzer, "requires_in_order", False))
-    if requires_in_order and (
-            download_workers > 1 or max_staged_files > 1):
-        name = getattr(getattr(analyzer, "info", None), "name", type(analyzer).__name__)
-        raise SystemExit(
-            f"analyzer {name!r} requires in-order file delivery, which is "
-            f"incompatible with --download-workers {download_workers} / "
-            f"--max-staged-files {max_staged_files} (these settings relax the "
-            f"source-order contract). Rerun with --download-workers 1 and "
-            f"--max-staged-files 1 (the defaults).")
 
     # Make engine-level run parameters visible to the analyzer BEFORE resume, so it
     # can stamp them into its product and refuse an incompatible resume (e.g. a
@@ -626,22 +612,20 @@ def _run_with_output_lock_held(
     # all reading, accumulation, and checkpointing as the sole writer while the
     # run-level output lock prevents a second process from writing this product.
     #
-    # Storage safety: a bounded semaphore caps files-on-scratch at max_staged_files.
-    # A downloader acquires a slot BEFORE staging a file; the slot is released by
-    # the consumer only AFTER it deletes that file. So disk never exceeds the bound
-    # regardless of how many download threads run. Default 1/1 = exactly one file
-    # at a time, delivered in source order.
+    # A slot is held from fetch through analysis and deletion.
     n_workers = min(download_workers, max_staged_files, len(todo))
     n_slots = max_staged_files
     stage_slots = threading.BoundedSemaphore(n_slots)
-    work_q: "queue.Queue[Unit]" = queue.Queue()
-    for u in todo:
-        work_q.put(u)
+    work_q: "queue.Queue[tuple[int, Unit]]" = queue.Queue()
+    for ordinal, unit in enumerate(todo):
+        work_q.put((ordinal, unit))
     ready_q: "queue.Queue[_ReadyItem]" = queue.Queue(maxsize=n_slots + 1)
     worker_failures: "queue.Queue[_WorkerFailure]" = queue.Queue()
+    pending: dict[int, _ReadyItem | _WorkerFailure] = {}
     cleanup_failures: list[StagedFileCleanupError] = []
     cleanup_lock = threading.Lock()
     stop = threading.Event()
+    ordered_stop_reason: Optional[BaseException] = None
 
     def _record_cleanup_failure(exc: StagedFileCleanupError) -> None:
         with cleanup_lock:
@@ -657,33 +641,36 @@ def _run_with_output_lock_held(
                 pass
         return False
 
+    def _discard_item(item: _ReadyItem | _WorkerFailure) -> None:
+        """Delete one buffered file and release its slot."""
+        if isinstance(item, _WorkerFailure):
+            return
+        try:
+            _rm(item.dest)
+        except StagedFileCleanupError as exc:
+            _record_cleanup_failure(exc)
+        else:
+            stage_slots.release()
+
     def _discard_ready() -> None:
-        """Delete unconsumed staged files, retaining slots whose delete fails."""
+        """Delete buffered files, retaining slots whose delete fails."""
+        buffered = list(pending.values())
+        pending.clear()
         while True:
             try:
-                item = ready_q.get_nowait()
+                buffered.append(ready_q.get_nowait())
             except queue.Empty:
-                return
-            try:
-                _rm(item.dest)
-            except StagedFileCleanupError as exc:
-                _record_cleanup_failure(exc)
-            else:
-                stage_slots.release()
+                break
+        for item in buffered:
+            _discard_item(item)
 
     def _downloader() -> None:
+        ordinal: Optional[int] = None
         unit: Optional[Unit] = None
         dest: Optional[str] = None
         owns_slot = False
         try:
             while not stop.is_set():
-                try:
-                    unit = work_q.get_nowait()
-                except queue.Empty:
-                    return
-
-                # Timed acquisition lets cancellation wake workers even when a
-                # consumer retained a slot after a failed staged-file deletion.
                 while not stop.is_set():
                     if stage_slots.acquire(timeout=_WORKER_POLL_SECONDS):
                         owns_slot = True
@@ -691,6 +678,13 @@ def _run_with_output_lock_held(
                 if not owns_slot:
                     return
                 if stop.is_set():
+                    stage_slots.release()
+                    owns_slot = False
+                    return
+
+                try:
+                    ordinal, unit = work_q.get_nowait()
+                except queue.Empty:
                     stage_slots.release()
                     owns_slot = False
                     return
@@ -709,17 +703,18 @@ def _run_with_output_lock_held(
                         f"source.fetch() must return (bool, str), got "
                         f"{fetch_result!r}")
                 ok, err = fetch_result
-                if not _queue_ready(_ReadyItem(unit, dest, ok, err)):
+                if not _queue_ready(_ReadyItem(ordinal, unit, dest, ok, err)):
                     return
                 # The consumer now owns cleanup and the corresponding slot.
                 owns_slot = False
+                ordinal = None
                 unit = None
                 dest = None
         except BaseException as exc:                           # noqa: BLE001
             # BaseException (notably SystemExit) otherwise terminates this daemon
             # silently and leaves the main thread waiting forever for len(todo)
             # ready items.  The unbounded terminal queue cannot be back-pressured.
-            worker_failures.put(_WorkerFailure(unit, exc))
+            worker_failures.put(_WorkerFailure(ordinal, unit, exc))
         finally:
             if owns_slot:
                 try:
@@ -729,11 +724,7 @@ def _run_with_output_lock_held(
                 else:
                     stage_slots.release()
 
-    def _raise_worker_failure() -> None:
-        try:
-            failure = worker_failures.get_nowait()
-        except queue.Empty:
-            return
+    def _raise_worker_failure(failure: _WorkerFailure) -> None:
         label = failure.unit.name if failure.unit is not None else "<unknown>"
         exc = failure.error
         raise RuntimeError(
@@ -741,22 +732,54 @@ def _run_with_output_lock_held(
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
-    def _next_ready() -> _ReadyItem:
-        """Return the next item or surface a dead/failed downloader promptly."""
+    def _store_pending(item: _ReadyItem | _WorkerFailure) -> None:
+        ordinal = item.ordinal
+        if ordinal is None:
+            assert isinstance(item, _WorkerFailure)
+            _raise_worker_failure(item)
+        if ordinal in pending:
+            _discard_item(item)
+            raise RuntimeError(f"duplicate download outcome for unit {ordinal}")
+        pending[ordinal] = item
+
+    def _next_ready(expected: Optional[int] = None) -> _ReadyItem:
+        """Return one staged file, preserving order when requested."""
         while True:
-            _raise_worker_failure()
+            while True:
+                try:
+                    failure = worker_failures.get_nowait()
+                except queue.Empty:
+                    break
+                if expected is None:
+                    _raise_worker_failure(failure)
+                _store_pending(failure)
+            if expected is not None and expected in pending:
+                item = pending.pop(expected)
+                if isinstance(item, _WorkerFailure):
+                    _raise_worker_failure(item)
+                return item
             try:
-                return ready_q.get(timeout=_WORKER_POLL_SECONDS)
+                item = ready_q.get(timeout=_WORKER_POLL_SECONDS)
             except queue.Empty:
-                # A worker can report its failure during the timed get and then
-                # exit; inspect the terminal queue before emitting the generic
-                # all-workers-dead fallback.
-                _raise_worker_failure()
                 if not any(worker.is_alive() for worker in workers):
+                    while True:
+                        try:
+                            failure = worker_failures.get_nowait()
+                        except queue.Empty:
+                            break
+                        if expected is None:
+                            _raise_worker_failure(failure)
+                        _store_pending(failure)
+                    if expected is not None and expected in pending:
+                        continue
                     raise RuntimeError(
                         "all download workers exited before reporting an outcome "
                         "for every selected unit"
                     )
+                continue
+            if expected is None or item.ordinal == expected:
+                return item
+            _store_pending(item)
 
     workers = [threading.Thread(target=_downloader, daemon=True)
                for _ in range(n_workers)]
@@ -781,8 +804,8 @@ def _run_with_output_lock_held(
             print(f"streaming with {len(started_workers)} download worker(s), "
                   f"<= {n_slots} file(s) on scratch", flush=True)
 
-        for _ in range(len(todo)):           # exactly one ready item per todo unit
-            item = _next_ready()
+        for ordinal in range(len(todo)):
+            item = _next_ready(ordinal if requires_in_order else None)
             unit, dest, ok, err = item.unit, item.dest, item.ok, item.error
             try:
                 if not ok:
@@ -790,6 +813,9 @@ def _run_with_output_lock_held(
                     fail += 1
                     print(f"  FAIL fetch {unit.name}: {err}", file=sys.stderr)
                     if requires_in_order:
+                        ordered_stop_reason = RuntimeError(
+                            f"fetch failed for {unit.name}: {err}"
+                        )
                         stop.set()
                         break
                     continue
@@ -814,6 +840,9 @@ def _run_with_output_lock_held(
                         fail += 1
                         print(f"  FAIL read {unit.name}: {reason}", file=sys.stderr)
                     if requires_in_order and not quarantine_path:
+                        ordered_stop_reason = RuntimeError(
+                            f"read failed for {unit.name}: {reason}"
+                        )
                         stop.set()
                         break
                     continue
@@ -936,31 +965,60 @@ def _run_with_output_lock_held(
         # A fetch may have completed while the workers were being joined.
         _discard_ready()
 
-    active_workers = [worker for worker in started_workers if worker.is_alive()]
+    ordered_prefix_saved = False
+    prefix_save_failure: Optional[BaseException] = None
+    if ordered_stop_reason is not None and started:
+        try:
+            analyzer.save(out_path)
+            if not os.path.exists(out_path):
+                raise RuntimeError(
+                    f"analyzer save returned without creating {out_path!r}"
+                )
+        except BaseException as exc:                         # noqa: BLE001
+            prefix_save_failure = exc
+        else:
+            product_written = True
+            ordered_prefix_saved = True
 
+    active_workers = [worker for worker in started_workers if worker.is_alive()]
     with cleanup_lock:
         cleanup_failure = cleanup_failures[0] if cleanup_failures else None
+    base_cause = run_failure or ordered_stop_reason
+    if cleanup_failure is not None and base_cause is not None:
+        cleanup_failure.__cause__ = base_cause
+        cleanup_failure.__suppress_context__ = True
+    if prefix_save_failure is not None:
+        prefix_cause = cleanup_failure or base_cause
+        if prefix_cause is not None:
+            prefix_save_failure.__cause__ = prefix_cause
+            prefix_save_failure.__suppress_context__ = True
+    primary_failure = (
+        prefix_save_failure or cleanup_failure or run_failure
+        or ordered_stop_reason
+    )
     if active_workers:
         active_error = ActiveDownloadWorkersError(
             f"{len(active_workers)} download worker(s) did not stop within "
             f"{_WORKER_JOIN_SECONDS:g} seconds; source.fetch() is still in "
             f"progress. Scratch was retained at {tmp_dir!r} to prevent deletion "
-            "under an active writer. Exit this process or wait for the source "
-            "operation to finish before removing that directory.",
+            "under an active writer. Do not start another run with this scratch "
+            "directory. Exit this process or wait for the source operation to "
+            "finish before removing or reusing it.",
             scratch_dir=tmp_dir,
         )
-        cause = cleanup_failure or run_failure
-        if cause is not None:
-            raise active_error from cause
+        if primary_failure is not None:
+            raise active_error from primary_failure
         raise active_error
+    if prefix_save_failure is not None:
+        raise prefix_save_failure
     if cleanup_failure is not None:
-        if run_failure is not None:
-            raise cleanup_failure from run_failure
+        if base_cause is not None:
+            raise cleanup_failure from base_cause
         raise cleanup_failure
     if run_failure is not None:
         raise run_failure
 
-    if started:
+    if started and not ordered_prefix_saved:
         analyzer.save(out_path)
         if not os.path.exists(out_path):
             raise RuntimeError(

@@ -19,6 +19,7 @@ takes every file matching `--source-glob`.
 from __future__ import annotations
 
 import glob
+import hashlib
 import os
 import re
 import shutil
@@ -31,6 +32,32 @@ from ..selection import parse_selection
 # baseband_<event>_<freq_id>.h5. Override with --source-event-regex for other
 # layouts; a filename with no parseable event simply has no event to filter on.
 _DEFAULT_EVENT_RE = r"baseband_(\d+)_"
+
+
+def _file_snapshot(path: str) -> tuple[int, str]:
+    digest = hashlib.sha256()
+    with open(path, "rb") as stream:
+        before = os.fstat(stream.fileno())
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+        after = os.fstat(stream.fileno())
+    identity_before = (
+        before.st_dev,
+        before.st_ino,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    identity_after = (
+        after.st_dev,
+        after.st_ino,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    if identity_before != identity_after:
+        raise RuntimeError(f"local input changed while hashing: {path}")
+    return int(after.st_size), digest.hexdigest()
 
 
 class LocalDirectorySource(DataSource):
@@ -50,6 +77,7 @@ class LocalDirectorySource(DataSource):
         root = o.get("source_root")
         if not root:
             raise SystemExit("local source: pass --source-root <dir>")
+        root = os.path.abspath(os.path.expanduser(str(root)))
         pattern = o.get("source_glob", "*.h5")
         paths = sorted(glob.glob(os.path.join(root, "**", pattern), recursive=True))
         n_channels = getattr(ctx.instrument, "n_channels", None)
@@ -75,7 +103,14 @@ class LocalDirectorySource(DataSource):
                 continue
             if not sel.wants_event(event):
                 continue
-            meta: dict[str, object] = {"src_path": src_path}
+            size_bytes, sha256 = _file_snapshot(src_path)
+            relative_path = os.path.relpath(src_path, root)
+            meta: dict[str, object] = {
+                "src_path": src_path,
+                "relative_path": relative_path,
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+            }
             if freq_id is not None:
                 # `explore` reads this metadata to summarize the available bands.
                 meta["freq_id"] = freq_id
@@ -95,6 +130,13 @@ class LocalDirectorySource(DataSource):
                 os.link(src, dest)                 # cheap: hardlink if same fs
             except OSError:
                 shutil.copy2(src, dest)            # fallback: copy across fs
+            expected_size = unit.meta.get("size_bytes")
+            expected_sha256 = unit.meta.get("sha256")
+            actual_size, actual_sha256 = _file_snapshot(dest)
+            if actual_size != expected_size or actual_sha256 != expected_sha256:
+                raise RuntimeError(
+                    f"local input changed after enumeration: {src}"
+                )
             return (os.path.getsize(dest) > 0), ""
         except Exception as exc:                   # noqa: BLE001
             return False, f"{type(exc).__name__}: {exc}"

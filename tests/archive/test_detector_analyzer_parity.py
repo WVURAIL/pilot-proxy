@@ -63,13 +63,17 @@ def _cpu_ref_detector_fn(*, packed, weights, kernel):
         samples = unpack_packed_complex(pk[b], INT4_COMPONENT_BITS)
         _fstat, sums = coarse_power_ratio_cpu_reference(samples, w)
         num = int(round(float(sums[0])))
-        den = int(round(float(sums[1] + sums[2])))
+        lower = int(round(float(sums[1])))
+        upper = int(round(float(sums[2])))
+        den = lower + upper
         results.append({
             "block_index": b,
             "mask": normalized_positive_excess(
                 num, den, target_norm_sq=nt, reference_norm_sum_sq=nrs
             ),
             "p_target_u64": num,
+            "p_ref_lower_u64": lower,
+            "p_ref_upper_u64": upper,
             "p_ref_sum_u64": den,
         })
     return {

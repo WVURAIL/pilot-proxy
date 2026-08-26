@@ -746,9 +746,21 @@ def test_chime_scan_forwards_explicit_allow_partial(monkeypatch, tmp_path) -> No
             str(tmp_path / "output"),
             "--select",
             "844",
+            "--download-workers",
+            "3",
+            "--max-staged-files",
+            "5",
+            "--staging-dir",
+            str(tmp_path / "staging"),
+            "--source-event-regex",
+            r"baseband_(evt\d+)_",
             "--allow-partial",
         ]
     )
 
     assert result == 0
     assert calls[0]["allow_partial"] is True
+    assert calls[0]["download_workers"] == 3
+    assert calls[0]["max_staged_files"] == 5
+    assert calls[0]["staging_dir"] == tmp_path / "staging"
+    assert calls[0]["source_event_regex"] == r"baseband_(evt\d+)_"

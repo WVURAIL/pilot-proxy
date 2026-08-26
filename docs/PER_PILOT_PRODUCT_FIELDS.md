@@ -56,7 +56,7 @@ integrated spectrum receives the frame.
 | `p_ref_sum_u64` | `(N, 1)` | `uint64` | Lower plus upper reference power |
 | `p_ref_lower_u64` | `(N, 1)` | `uint64` | Lower reference power, kept unsummed |
 | `p_ref_upper_u64` | `(N, 1)` | `uint64` | Upper reference power, kept unsummed |
-| `fine_power_u64` | `(N, 3, 256)` | `uint64` | **Exact** fine-power terms from the frozen `fxfft256` |
+| `fine_power_u64` | `(N, 3, 256)` when enabled; `(N, 0, 0)` otherwise | `uint64` | **Exact** fine-power terms from the frozen `fxfft256`; never a zero placeholder |
 | `psd_frame_db_i16` | `(N, 16384)` | `int16` | Per-frame PSD, feeds summed, in dB about `psd_db_reference` |
 | `coarse_power_ratio` | `(N, 1)` | `float64` | `2*p_target/p_ref_sum` |
 | `normalized_coarse_power_ratio_db` | `(N, 1)` | `float64` | `10*log10(F)` |
@@ -101,14 +101,19 @@ post-processing can decide and replay exactly.
 
 | Array | Shape | Dtype | Meaning |
 |---|---:|---|---|
-| `fine_status` | `()` | `str` | `enabled` when the fine terms were computed this run |
-| `fine_num_bins` | `()` | `int64` | Fine transform length actually used (`256`) |
+| `fine_status` | `()` | `str` | `enabled` when terms exist; `pending` only for an empty checkpoint; otherwise an explicit no-measurement reason |
+| `fine_num_bins` | `()` | `int64` | Fine transform length actually used (`256` when enabled, otherwise `0`) |
 | `fine_pad_factor` | `()` | `int64` | Zero-padding factor of the fine transform (`2`) |
 | `fine_guard_fine_bins` | `()` | `int64` | Guard bins excluded either side of the designated window (`1`) |
 | `fine_p_fa` | `()` | `float64` | Declared per-bin false-alarm rate (`0.001`) |
 | `fine_designated_bins` | `(D,)` | `int64` | Designated-window bin indices |
 | `fine_census_excluded_bins` | `(E,)` | `int64` | Bins excluded from the census; empty when none |
 | `decision_contract_json` | `()` | `str` | The whole contract as JSON, for exact replay |
+
+An older v5 no-measurement checkpoint can contain an all-zero
+`(N, 3, B)` placeholder. Resume accepts that one form and rewrites it as the
+canonical `(N, 0, 0)` array with zero bins. Current products never create the
+placeholder, and any nonzero value is invalid.
 
 ### Per-unit fields (length equal to `unit_order`)
 
@@ -188,6 +193,11 @@ geometry, so `uint64` is both necessary and sufficient.
 `p_ref_lower_u64` and `p_ref_upper_u64` are kept for the same reason at the
 coarse level: the sum alone cannot show that only one reference window was
 contaminated.
+
+All four coarse power fields are exact `uint64 (N, 1)` arrays. The product
+contract checks each split in Python integer arithmetic and rejects overflow or
+any row where lower plus upper does not equal `p_ref_sum_u64`. A backend that
+omits one of these terms fails instead of writing a placeholder.
 
 ### Mask convention
 

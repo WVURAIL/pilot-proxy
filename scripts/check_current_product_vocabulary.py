@@ -52,6 +52,8 @@ def current_files() -> list[Path]:
                 continue
             if path.name == Path(__file__).name:
                 continue
+            if path == ROOT / "src" / "pilot_proxy" / "archived_product_keys.py":
+                continue
             if any(part in EXCLUDED_PARTS for part in path.parts):
                 continue
             files.append(path)

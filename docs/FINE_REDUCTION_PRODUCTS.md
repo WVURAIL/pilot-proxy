@@ -9,8 +9,8 @@ positive-excess rule recorded by `decision_contract_json`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `fine_status` | str | `enabled`, `disabled_by_option`, or an explicit capability-failure status. `fine_products=on` fails instead of degrading. |
-| `fine_num_bins` | int64 | Padded fine-bin count. |
+| `fine_status` | str | `enabled`, `pending` for an empty checkpoint, `disabled_by_option`, `not_applicable_pilot_out_of_band`, or an explicit capability-failure status. `fine_products=on` fails instead of degrading. |
+| `fine_num_bins` | int64 | Padded fine-bin count; zero when no fine terms exist. |
 | `fine_pad_factor` | int64 | Zero-padding factor of the window-axis transform. |
 | `fine_designated_bins` | int64[] | Designated transmitter bins used by the diagnostic analysis. |
 | `fine_census_excluded_bins` | int64[] | Fine bins excluded from the diagnostic null bulk. |
@@ -21,7 +21,7 @@ positive-excess rule recorded by `decision_contract_json`.
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `fine_power_u64` | uint64 `(N, 3, fine_num_bins)` | Exact deployed-statistic power terms per fine bin — target, lower reference, upper reference — from the frozen fixed-point transform. |
+| `fine_power_u64` | uint64 `(N, 3, fine_num_bins)` when enabled; `(N, 0, 0)` otherwise | Exact deployed-statistic power terms per fine bin — target, lower reference, upper reference — from the frozen fixed-point transform. |
 
 That row is the whole per-frame fine product: the scan stores the exact terms
 and nothing derived from them. The float power ratio, the null-bulk location,
@@ -31,6 +31,12 @@ recomputed in post-processing from `fine_power_u64`, at whatever operating point
 is calibrated there; the scan applies no fine decision of its own. Earlier
 schema revisions stored those derived arrays, and `fine_power_ratio` still
 appears under that spelling when reading the archived survey products.
+
+The current contract fails closed on status/shape disagreement. An enabled
+product has a positive bin count and all three terms for every frame. A pending
+status is valid only for an empty checkpoint. Every other no-measurement status
+has `fine_num_bins = 0` and shape `(N, 0, 0)`; zeros are never substituted for
+missing measurements.
 
 One caveat carries over to the recomputation. The null-bulk exceedance fraction
 is an in-sample fraction of the same independent null-bulk bins used to estimate

@@ -593,12 +593,16 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
         max_files=args.max_files,
         max_chunks_per_file=args.max_chunks_per_file,
         checkpoint_every=args.checkpoint_every,
+        download_workers=args.download_workers,
+        max_staged_files=args.max_staged_files,
         inventory=args.inventory,
         inventory_name=args.inventory_name,
         source_root=args.source_root,
         work_dir=args.work_dir,
+        staging_dir=args.staging_dir,
         source_glob=args.source_glob,
         source_freq_id_regex=args.source_freq_id_regex,
+        source_event_regex=args.source_event_regex,
         analyzer_options=analyzer_options,
         allow_partial=args.allow_partial,
     )
@@ -1821,8 +1825,29 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Write the per-pilot product every N files "
                                  "(default 50); resume reloads the last checkpoint. "
                                  "Lower = less redo after a kill, more I/O.")
+    chime_scan.add_argument(
+        "--download-workers",
+        type=int,
+        default=1,
+        help="Concurrent source fetches (default 1). Analysis stays in source order.",
+    )
+    chime_scan.add_argument(
+        "--max-staged-files",
+        type=int,
+        default=1,
+        help=(
+            "Maximum in-progress and completed staged files (default 1; must "
+            "be at least --download-workers)."
+        ),
+    )
     chime_scan.add_argument("--work-dir", type=Path, default=None,
                             help="Per-pilot products + staging (default: <output-dir>/_per_pilot).")
+    chime_scan.add_argument(
+        "--staging-dir",
+        type=Path,
+        default=None,
+        help="Temporary raw files (default: <work-dir>/_staging).",
+    )
     chime_scan.add_argument("--source-glob", default="*.h5")
     chime_scan.add_argument(
         "--source-freq-id-regex",
@@ -1832,6 +1857,14 @@ def build_parser() -> argparse.ArgumentParser:
             "stored as source_freq_id_regex for the local archive source. "
             "An explicit --set 'source_freq_id_regex=...' takes precedence "
             "over this flag."
+        ),
+    )
+    chime_scan.add_argument(
+        "--source-event-regex",
+        default=None,
+        help=(
+            "Filename->event regex for --source local. An explicit --set "
+            "'source_event_regex=...' takes precedence over this flag."
         ),
     )
     chime_scan.add_argument("--weights-path", type=Path, default=None)
