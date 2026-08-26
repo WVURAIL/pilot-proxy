@@ -212,7 +212,7 @@ fine terms while the fine decision remains inactive.
 |---|---|---|
 | Archive certificate | Present locally, owner-only, expires 2026-09-03 | Renew before launch; at least 72 hours before each expiry, stop after a checkpoint, renew, and resume with the identical command |
 | Local archive environment and client | Final-source environment refreshed; full suite passed | Preserve the environment and never record secrets in the ledger |
-| Real-data GPU capacity | Final-source gate passed with 2,445 MiB peak and zero validation errors | Complete; evidence path and embedded digests are in the external ledger |
+| Real-data GPU capacity | Final-source gate passed below the 13,900 MiB limit with zero validation errors | Complete; exact measurement, evidence path, and embedded digests are in the external ledger |
 | Production-profile resume | Final-source gate passed with eight unique units, 22 unique frames, and empty staging | Complete; interruption and resume evidence are in the external ledger |
 
 Do not promote the recorded testbench rank to deployed runtime data. An exported
