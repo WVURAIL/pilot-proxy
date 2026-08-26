@@ -1,5 +1,5 @@
 <meta charset="utf-8">
-<title>DTV Masking Policy</title>
+<title>Historical DTV Masking Comparison</title>
 <style>
   :root {
     --page: #f9f9f7; --surface: #fcfcfb; --ink: #0b0b0b; --ink-2: #52514e;
@@ -81,18 +81,18 @@
 <div class="wrap">
 <header>
   <p class="eyebrow">CHIME 21 cm &times; ATSC DTV &middot; completed pilot-proxy survey &middot; 2026-08-20</p>
-  <h1>DTV Masking Policy</h1>
+  <h1>Historical DTV Masking Comparison</h1>
   <p class="lede">
     The deployed mask rejects any frame with positive pilot excess (F&nbsp;&gt;&nbsp;&mu;<sub>0</sub>) &mdash;
     the most conservative possible rule. Priced through the CHIME Fisher forecast, that rule masks
     so much of the DTV band that the z&nbsp;&asymp;&nbsp;1.45 distance bin becomes unmeasurable, and it keeps
-    masking channels whose transmitters died years ago. This brief recommends the working threshold
-    (F&nbsp;&gt;&nbsp;&eta;&mu;<sub>0</sub>, &eta;&nbsp;=&nbsp;1.4) instead: the channels with no remaining
-    transmitter are <b>clean</b> under it, and the channels with a live carrier are kept-and-masked or
-    excised. <b>The trawl is complete: all 23 channels (14&ndash;36) are complete against their
+    masking channels whose transmitters died years ago. This historical brief compares it with the
+    fixed report rule F&nbsp;&gt;&nbsp;&eta;&mu;<sub>0</sub>, &eta;&nbsp;=&nbsp;1.4. It does not select or
+    recommend an operational threshold. The report labels channels with no remaining transmitter
+    <b>clean</b>, and labels channels with a live carrier kept-and-masked or excised.
+    <b>The trawl is complete: all 23 channels (14&ndash;36) are complete against their
     archive holdings</b> (the archive itself is thin for the two strongest
-    carriers, ch&nbsp;24/30); companion data report:
-    <a href="https://claude.ai/code/artifact/4df69d2f-397a-4ea7-a288-b85c0f7f18e8">Pilot Proxy Trawl</a>.
+    carriers, ch&nbsp;24/30); see the companion Pilot Proxy Trawl data report.
   </p>
 </header>
 
@@ -100,7 +100,7 @@
 
 <section class="sec">
   <p class="eyebrow">The picture</p>
-  <h2>The threshold's development, step by step</h2>
+  <h2>How the historical report rule was constructed</h2>
   <p class="cap">
     Fraction of current-epoch frames (<span id="winlabel" class="mono"></span>, every month after the
     last detected transmitter transition) that each step of the threshold's development masks.
@@ -108,12 +108,12 @@
     <b>Step 2</b>: F&nbsp;&gt;&nbsp;&mu;<sub>0</sub>, the exact per-channel null mean calibrated from the
     survey's own results (open circle) &mdash; the conservative rule we ran with while the tolerance
     machinery was built; the step-1&rarr;2 shift is tens of percent on quiet channels because &mu;<sub>0</sub>
-    sits up to &plusmn;1.1% from unity. <b>Step 3</b>: the working threshold
-    F&nbsp;&gt;&nbsp;1.4&thinsp;&mu;<sub>0</sub> from the BAO-tolerance pricing (filled dot).
+    sits up to &plusmn;1.1% from unity. <b>Step 3</b>: the fixed historical report rule
+    F&nbsp;&gt;&nbsp;1.4&thinsp;&mu;<sub>0</sub> from the science-residual pricing (filled dot).
     <b>Step 4</b> &mdash; selecting each channel's excess threshold
-    &rho;&#770;&nbsp;=&nbsp;F/&mu;<sub>0</sub>&nbsp;&minus;&nbsp;1 from its own residual chain &mdash; is the
-    per-epoch evaluation in progress. Channels with a live transmitter stay masked at every step;
-    the ladder frees only the clean channels.
+    &rho;&#770;&nbsp;=&nbsp;F/&mu;<sub>0</sub>&nbsp;&minus;&nbsp;1 from its own residual chain &mdash; belongs to the
+    current calibration path and is outside this artifact. Channels with a live transmitter stay
+    masked at every report step; the ladder frees only channels labeled clean.
   </p>
   <div class="card">
     <div class="legend">
@@ -127,15 +127,15 @@
 </section>
 
 <section class="sec">
-  <p class="eyebrow">Applied</p>
-  <h2>The policy, run against every archived frame</h2>
+  <p class="eyebrow">Historical replay</p>
+  <h2>The fixed report rule, run against every archived frame</h2>
   <p class="cap">
-    The products store the raw statistic per frame, so the recommended thresholds are applied
+    The products store the raw statistic per frame, so the fixed report rule is applied
     <i>exactly</i>, post hoc, to every health-included frame in the full 2018&ndash;2026 archive &mdash; no reprocessing. Monthly masked
-    fraction under the deployed rule (top) and under this policy (bottom): dark = masked. In the
+    fraction under the deployed rule (top) and under the historical rule (bottom): dark = masked. In the
     current epoch the deployed rule keeps <b id="keptDep"></b> of valid frames on the
-    <span id="nRetunedCap"></span> clean channels; the working threshold keeps <b id="keptPol"></b>. Frames the working
-    threshold keeps carry at most +1.46&nbsp;dB of pilot excess by construction (&eta;&nbsp;=&nbsp;1.4,
+    <span id="nRetunedCap"></span> historically clean-labeled channels; the report rule keeps <b id="keptPol"></b>.
+    Frames the report rule keeps carry at most +1.46&nbsp;dB of pilot excess by construction (&eta;&nbsp;=&nbsp;1.4,
     i.e. &rho;&#770;&nbsp;&lt;&nbsp;0.4); hover a row for each channel's observed kept-frame leakage.
   </p>
   <div class="card">
@@ -144,18 +144,19 @@
 </section>
 
 <section class="sec">
-  <p class="eyebrow">Recommendations</p>
-  <h2>Per-channel policy</h2>
+  <p class="eyebrow">Historical labels</p>
+  <h2>Per-channel report comparison</h2>
   <p class="cap">
-    &ldquo;Clean&rdquo; channels carry the working threshold (&eta;&nbsp;=&nbsp;1.4) with no data loss
-    beyond the residual burst tail; &ldquo;excise&rdquo; prices the 6&nbsp;MHz as lost volume; costs are
-    survey-level multipliers on integration time to a fixed BAO target, evaluated at the coherence cap
+    A &ldquo;clean&rdquo; report label applies the fixed &eta;&nbsp;=&nbsp;1.4 rule; an &ldquo;excise&rdquo;
+    label prices the 6&nbsp;MHz as lost volume. These are historical labels, not operational
+    dispositions. Costs are
+    survey-level integration-time multipliers for a fixed science target, evaluated at the coherence cap
     (the residual bracket's pessimistic end). &mu;<sub>0</sub> is each channel's exact null mean under
     its calibrated configuration &mdash; calibrated per channel from the survey's own results, then
     fixed; the exactness is in the arithmetic, the per-channel values are measurements. Kept
     &rho;&#770; is the measured pilot excess (F/&mu;<sub>0</sub>&nbsp;&minus;&nbsp;1, in dB) of the frames
-    the working threshold keeps; per-channel &rho;&#770; thresholds from each channel's residual chain
-    are step 4 of the development, pending the per-epoch evaluation.
+    the report rule keeps. Per-channel &rho;&#770; thresholds from each channel's residual chain are
+    selected by the current calibration path, not by this artifact.
   </p>
   <div class="card" id="tablecard"></div>
 </section>
@@ -166,7 +167,7 @@
   <ul class="notes">
     <li><b>Inputs:</b> 21 per-pilot survey products (<span class="mono">pilotproxy_detector_datatrawl_v3</span>,
       one kernel, 2018-12&ndash;2026-07, 9,192 events probed, complete against archive holdings), the
-      <span class="mono">bao-noise-tolerance</span> Fisher bank (CHIME Overview 2022, Planck-2018;
+      <span class="mono">RFIsher</span> forecast bank (CHIME Overview 2022, Planck-2018;
       clean survey 5&sigma; = <span id="cleanh"></span> on-sky hours), and
       <span class="mono">residual.threshold_sweep</span> for the contamination side.</li>
     <li><b>Window rule:</b> masked fractions are computed from months after the most recent detected
@@ -177,8 +178,8 @@
     <li><b>Coherence bracket:</b> residual ratios are evaluated at the measured correlation time where
       the estimator's gates pass, and otherwise at BOTH bracket ends &mdash; the sidereal-day cap
       (pessimistic: flatters masking) and the thermal floor n<sub>coh</sub>&nbsp;=&nbsp;1 (optimistic).
-      A verdict that holds at both ends is decided; where the ends disagree the survey-cost spread
-      is quoted and is &lt;1% in every such case.</li>
+      A historical label that holds at both ends is reported; where the ends disagree the survey-cost
+      spread is quoted and is &lt;1% in every such case.</li>
     <li><b>Sign-off channels forward:</b> kept-frame residual is set to zero for channels with no
       remaining transmitter; the archival off-epoch floors (&minus;26 to &minus;34&nbsp;dB shelves) put any
       true residual far below thermal after ground and delay filtering.</li>
@@ -186,9 +187,9 @@
       <span class="mono">floor_provenance</span> &sigma;-implied substitute (flagged per row). Ch&nbsp;30
       has no current-epoch data because CHIME stopped collecting that channel in Sep 2023 due to the
       contamination itself &mdash; the instrument's own operational exclusion independently corroborates
-      the excision verdict. The same curtailment explains the thin ch&nbsp;24 archive. After the v1
+      the historical excision label. The same curtailment explains the thin ch&nbsp;24 archive. After the v1
       health gate, channels 22 and 24 have no stored-mask kept/null frame; their floor and sweep are
-      therefore unavailable, and the policy conservatively excises them pending independent clean/off
+      therefore unavailable, and the historical report labels them excised pending independent clean/off
       evidence rather than claiming a coherence-bracket result.</li>
   </ul>
 </section>
@@ -204,10 +205,10 @@
       ~10&nbsp;s cadence) but may not be executed; the within-event frame-to-frame coherence already in
       the archive is the fallback measurement. If neither happens, the sidereal-day caps stand as
       permanent conservative bounds and certification shifts downstream: blocked holdout, per-channel
-      jackknife in the final BAO analysis, and the spectral sentinel. Inclusion stays safe because the
+      jackknife in the final science analysis, and the spectral sentinel. Inclusion stays safe because the
       mask is software &mdash; every kept channel can be dropped post hoc; excision is the only
       irreversible act, which is why it is now applied only where nothing is recoverable.</li>
-    <li><b>Adopt the coarse per-channel &eta; thresholds operationally</b> and re-trawl or post-process the archive at the recommended value per channel. Do not promote the broad predicted fine acquisition neighborhood to a deployed designation: the archive-health audit&rsquo;s narrow measured anchors use provisional UTC-quarter evidence and remain retrospective until a prospective anchor/null contract is frozen.</li>
+    <li><b>Do not adopt the fixed &eta;=1.4 report rule operationally.</b> The current calibration path must select or refuse per-channel thresholds from its recorded evidence. The archive-health audit&rsquo;s narrow measured anchors use provisional UTC-quarter evidence and remain retrospective until a prospective anchor/null contract is frozen.</li>
     <li><b>Periodic spot-collection on excluded channels:</b> three transmitters died during this survey, but a channel CHIME stops collecting (ch&nbsp;30 since Sep 2023) can never report its own sign-off. A low-cadence probe &mdash; a few baseband dumps per quarter on the excised freq_ids &mdash; is cheap insurance against permanently writing off recovered spectrum.</li>
   </ul></div>
 </section>
@@ -215,7 +216,7 @@
 <footer>
   Generated 2026-08-20 from the completed <span class="mono">_per_pilot</span> products
   (all 23 channels, 14&ndash;36; the trawl is complete).
-  Costs are ratios of required integration time to a fixed BAO target versus an RFI-free survey;
+  Costs are ratios of required integration time to a fixed science target versus an RFI-free survey;
   absolute times inherit the Fisher forecast's idealizations. Worst bin = z&nbsp;1.40&ndash;1.50.
 </footer>
 </div>
@@ -249,7 +250,7 @@ function pillFor(action) {
   if (action.startsWith("excise")) return ["excise", action.includes("pending") ? "excise · pending data" : "excise"];
   if (action.startsWith("keep and mask")) return ["keep", "keep & mask (τ unverified)"];
   if (action.startsWith("keep")) return ["keep", "keep (carry residual)"];
-  if (action.startsWith("mask")) return ["keep", "mask at optimum"];
+  if (action.startsWith("mask")) return ["keep", "mask at scan point"];
   return ["pend", action];
 }
 
@@ -259,12 +260,12 @@ function pillFor(action) {
   const isClean = a => a.startsWith("clean") || a.startsWith("retune");
   const nRetune = CHS.filter(c => isClean(PD.channels[c].recommendation.action)).length;
   document.getElementById("tiles").innerHTML = [
-    { v: `×${p.survey_x.toFixed(3)}`, k: "survey time under this policy (vs RFI-free)",
+    { v: `×${p.survey_x.toFixed(3)}`, k: "survey time in the historical comparison (vs RFI-free)",
       s: `deployed rule: ×${p.deployed_survey_x.toFixed(3)}` },
     { v: `×${p.worst_bin_x.toFixed(2)}`, k: "worst bin, z ≈ 1.45",
       s: p.deployed_worst_bin_x == null ? "deployed rule: unmeasurable (∞)" : `deployed: ×${p.deployed_worst_bin_x.toFixed(2)}` },
-    { v: String(nRetune), k: "clean channels at the working threshold", s: "no transmitter left to fight" },
-    { v: String(p.n_excised), k: "channels excised", s: "priced as lost volume" },
+    { v: String(nRetune), k: "channels labeled clean by the historical rule", s: "no transmitter left to fight" },
+    { v: String(p.n_excised), k: "channels labeled excised", s: "priced as lost volume" },
   ].map(t => `<div class="tile"><div class="v">${t.v}</div><div class="k">${t.k}</div><div class="k" style="color:var(--ink-2)">${t.s}</div></div>`).join("");
   document.getElementById("winlabel").textContent = PD.since + " →";
   document.getElementById("winlabel2").textContent = PD.since;
@@ -342,7 +343,7 @@ function drawApplied() {
 
   const blocks = [
     { y0: mTop, key: "monthly_deployed", title: "deployed rule (F > μ0)" },
-    { y0: mTop + blockH + gap + 16, key: "monthly_policy", title: "recommended policy" },
+    { y0: mTop + blockH + gap + 16, key: "monthly_policy", title: "historical eta=1.4 report rule" },
   ];
   for (const blk of blocks) {
     txt(blk.title, mL, blk.y0 - 6, { "font-size": 11.5, fill: "var(--ink-2)", "font-weight": 650 }, s);
@@ -372,7 +373,7 @@ function drawApplied() {
         const v = excisedRow ? null : series && series[m];
         const leak = ap.kept_excess_db;
         showTip(`<b>ch ${ch}</b> · ${ML[m]}<br>` +
-          (excisedRow ? "excised under this policy" :
+          (excisedRow ? "labeled excised in the historical report" :
             v == null ? "no processed data" :
             `${(100 * v).toFixed(1)}% of valid frames masked (${blk.title})`) +
           (leak && blk.key === "monthly_policy"
@@ -447,7 +448,7 @@ function drawApplied() {
   document.getElementById("tablecard").innerHTML =
     `<table class="data"><thead><tr>
       <th class="l">DTV ch</th><th>pilot MHz</th><th>21 cm z</th><th class="l">status</th>
-      <th>μ₀</th><th>masked @ η=1</th><th>@ η=1.4</th><th>η</th><th>kept ρ̂ med/p99 dB</th><th class="l">recommendation</th><th>survey cost</th>
+      <th>μ₀</th><th>masked @ η=1</th><th>@ η=1.4</th><th>η</th><th>kept ρ̂ med/p99 dB</th><th class="l">historical report label</th><th>survey cost</th>
     </tr></thead><tbody>${rows}</tbody></table>`;
 })();
 </script>

@@ -22,11 +22,11 @@ order. Everything the right panel can and cannot say follows from that,
 including missing floors on channels where mu0 < 1, which are an arithmetic
 consequence rather than a statement about the transmitter.
 
-The floor-provenance checks come from the released ``baonoise`` package
-(bao-noise-tolerance): floor_provenance re-derives the shelf offset from the
-product and verifies both the deployed rule and the level formula before
-answering, so the numbers annotated on the plate are checked rather than
-assumed. Install baonoise into the analysis environment to run this script.
+The floor-provenance checks come from RFIsher: floor_provenance re-derives the
+shelf offset from the product and verifies both the deployed rule and the level
+formula before answering, so the numbers annotated on the plate are checked
+rather than assumed. Install RFIsher into the analysis environment to run this
+script.
 
     python3 analysis/plot_channel_histograms.py --out ~/paper/out
 """
@@ -44,12 +44,12 @@ import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 
-from baonoise import residual as R
+from rfisher import residual as R
 
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_DATA_SHELF_SNR_DB)
-from pilot_proxy.archive_health import temporary_baonoise_health_views
+from pilot_proxy.archive_health import temporary_residual_health_views
 import _products as P
 
 DEFAULT_CHANNELS = (32, 33, 34, 35, 36)
@@ -260,7 +260,7 @@ def main(argv=None):
     products = (args.products if args.products is not None
                 else list(P.paths(channels=DEFAULT_CHANNELS).values()))
 
-    with temporary_baonoise_health_views(
+    with temporary_residual_health_views(
         [Path(product) for product in products]
     ) as health_views:
         rows = [channel_row(path) for path in health_views]

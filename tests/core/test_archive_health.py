@@ -17,7 +17,7 @@ from pilot_proxy.archived_product_keys import (
 )
 from pilot_proxy.archive_health import (
     ARCHIVE_HEALTH_SUMMARY_SCHEMA_VERSION,
-    BAONOISE_HEALTH_VIEW_SCHEMA_VERSION,
+    RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION,
     CORRECTED_SPECTRA_SCHEMA_VERSION,
     ENCODING_INTERPRETATION,
     EXCLUSION_LEDGER_SCHEMA_VERSION,
@@ -37,9 +37,9 @@ from pilot_proxy.archive_health import (
     main,
     proportion_summary,
     recompute_corrected_fine_diagnostics,
-    temporary_baonoise_health_views,
+    temporary_residual_health_views,
     unix_utc_to_lmst_hours,
-    write_baonoise_health_view,
+    write_residual_health_view,
 )
 from pilot_proxy import archive_health
 from pilot_proxy.fine_reduction import calibrate_cfar
@@ -387,7 +387,7 @@ def test_proportion_summary_reports_wilson_uncertainty() -> None:
     assert summary["wilson_95"]["low"] < 0.2 < summary["wilson_95"]["high"]
 
 
-def test_baonoise_view_filters_frames_and_records_source(tmp_path) -> None:
+def test_residual_view_filters_frames_and_records_source(tmp_path) -> None:
     product = _product(
         valid=[1, 0, 1, 1],
         reject=[0, 0, 0, 1],
@@ -397,9 +397,9 @@ def test_baonoise_view_filters_frames_and_records_source(tmp_path) -> None:
     )
     source = _save_product(tmp_path / "798.npz", product)
     destination = tmp_path / "view" / source.name
-    assert write_baonoise_health_view(source, destination) == destination
+    assert write_residual_health_view(source, destination) == destination
     with np.load(destination, allow_pickle=False) as view:
-        assert str(view["schema_version"].item()) == BAONOISE_HEALTH_VIEW_SCHEMA_VERSION
+        assert str(view["schema_version"].item()) == RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION
         assert str(view["archive_health_gate_schema_version"].item()) == (
             FRAME_HEALTH_GATE_SCHEMA_VERSION
         )
@@ -407,14 +407,14 @@ def test_baonoise_view_filters_frames_and_records_source(tmp_path) -> None:
         assert int(view["health_included_frame_count"]) == 2
         assert int(view["health_excluded_frame_count"]) == 2
         assert view["frame_index"].tolist() == [0, 1]
-        # The view is a published interface consumed by baonoise, so it keeps
+        # The view is a published interface, so it keeps
         # the archived column names until that migration is coordinated.
         assert view[ARCHIVED_COARSE_POWER_RATIO][:, 0].tolist() == [1.0, 2.0]
         assert "coarse_power_ratio" not in view.files
         assert np.all(view["valid"] == 1)
         assert ARCHIVED_FINE_POWER_RATIO not in view.files
 
-    with temporary_baonoise_health_views([source]) as paths:
+    with temporary_residual_health_views([source]) as paths:
         transient = paths[0]
         assert transient.is_file()
     assert not transient.exists()

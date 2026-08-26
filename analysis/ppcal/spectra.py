@@ -28,6 +28,12 @@ DC_HALF_WIDTH_HZ = 60.0        # channel-centre artefact, ~2 spectrum bins
 PILOT_SEARCH_HZ = 5.0e3        # repo convention for refining the pilot peak
 PEAK_MIN_DB = 3.0
 PEAK_MIN_SEPARATION_HZ = 3.0e3
+PEAK_MAX_COUNT = 8
+FINE_UPPER_PERCENTILE = 90.0
+FINE_LINE_MIN_DB = 1.5
+FINE_LINE_MIN_PROMINENCE_DB = 1.5
+FINE_LINE_MIN_SEPARATION_HZ = 48.0
+FINE_LINE_MAX_COUNT = 6
 
 
 @dataclass(frozen=True)
@@ -61,7 +67,8 @@ def spectrum_db(channel, which="before"):
 
 
 def peak_census(channel, min_db=PEAK_MIN_DB,
-                min_separation_hz=PEAK_MIN_SEPARATION_HZ, max_peaks=8):
+                min_separation_hz=PEAK_MIN_SEPARATION_HZ,
+                max_peaks=PEAK_MAX_COUNT):
     """Isolated features in the channel-wide spectrum, classified.
 
     The bin at the channel centre is an instrumental artefact of the CHIME
@@ -138,7 +145,7 @@ def era_fine_spectrum(channel, frame_mask):
         nan = np.full(rf.size, np.nan)
         return rf, nan, nan
     med = np.median(f, axis=0)
-    p90 = np.percentile(f, 90, axis=0)
+    p90 = np.percentile(f, FINE_UPPER_PERCENTILE, axis=0)
 
     def to_db(a):
         return 10.0 * np.log10(np.maximum(a, 1e-6) / channel.mu0)
@@ -228,15 +235,20 @@ def fine_spectrogram(channel, months_grid=None, statistic="median"):
         if statistic == "median":
             v = np.median(block, axis=0)
         elif statistic == "p90":
-            v = np.percentile(block, 90, axis=0)
+            v = np.percentile(block, FINE_UPPER_PERCENTILE, axis=0)
         else:
             v = block.mean(axis=0)
         img[:, j] = 10.0 * np.log10(np.maximum(v, 1e-6) / channel.mu0)
     return months_grid, rf, img
 
 
-def fine_line_census(channel, frame_mask, min_db=1.5, min_prominence_db=1.5,
-                     min_separation_hz=48.0, max_lines=6):
+def fine_line_census(
+        channel,
+        frame_mask,
+        min_db=FINE_LINE_MIN_DB,
+        min_prominence_db=FINE_LINE_MIN_PROMINENCE_DB,
+        min_separation_hz=FINE_LINE_MIN_SEPARATION_HZ,
+        max_lines=FINE_LINE_MAX_COUNT):
     """Resolved lines in the era-averaged fine spectrum.
 
     A line is a local maximum that stands ``min_prominence_db`` clear of the

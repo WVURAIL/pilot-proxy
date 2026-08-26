@@ -45,6 +45,10 @@ i.e. ``F2[b] > (multiplier_q16 / 2**16) * F2_r``. Degenerate
 denominators can never fire (the coarse rule's "zero-reference forced
 0", applied per bin), and a frame with a degenerate bulk is forced 0.
 
+``fine_required_multiplier_q16`` inverts this strict comparison. It
+returns the smallest integer Q16 multiplier that keeps the frame, so exact
+change points can be collected without a floating-point threshold grid.
+
 Why rank-based (order-statistic) CFAR: the survey's recorded per-frame
 calibration (``fine_reduction.calibrate_cfar``) uses float medians and
 interpolated quantiles, which cannot be made bit-exact across
@@ -74,6 +78,8 @@ FINE_DECISION_VERSION = "fine_decision_v1"
 FINE_BINS = 256
 MULTIPLIER_Q = 16
 MULTIPLIER_ONE = 1 << MULTIPLIER_Q
+MAX_MULTIPLIER_Q16 = (1 << 64) - 1
+ALWAYS_MASKED_Q16 = 1 << 64
 
 
 def _exact_integer(value: object, *, field: str) -> int:
@@ -137,9 +143,106 @@ class FineDecision:
     fired_bin: int     # first designated bin that fired (-1 when mask=0)
 
 
+@dataclass(frozen=True)
+class FineRequiredMultiplier:
+    """Exact Q16 keep boundary for one frame and rank."""
+
+    valid: bool
+    n_bulk: int
+    rank_bin: int
+    limiting_bin: int
+    multiplier_q16: int | None
+
+
 def _f2_less(num_i: int, den_i: int, num_j: int, den_j: int) -> bool:
     """Exact ``F2_i < F2_j`` by cross multiplication (dens > 0)."""
     return num_i * den_j < num_j * den_i
+
+
+def _rank_value(num, den, mask_arr, rank):
+    bulk = [b for b in range(FINE_BINS) if mask_arr[b] and den[b] > 0]
+    if rank >= len(bulk):
+        return bulk, -1
+    for i in bulk:
+        c_lt = 0
+        c_eq = 0
+        for j in bulk:
+            if _f2_less(num[j], den[j], num[i], den[i]):
+                c_lt += 1
+            elif not _f2_less(num[i], den[i], num[j], den[j]):
+                c_eq += 1
+        if c_lt <= rank < c_lt + c_eq:
+            return bulk, i
+    raise AssertionError("rank selection failed")
+
+
+def fine_required_multiplier_q16(
+    fine_powers: Any,
+    *,
+    anchor_bin: int,
+    designated_half_width: int,
+    bulk_mask: Sequence[bool] | Sequence[int],
+    cfar_rank: int,
+) -> FineRequiredMultiplier:
+    """Return the exact Q16 boundary for one frame and rank.
+
+    ``ALWAYS_MASKED_Q16`` marks a valid frame that no deployable multiplier
+    can keep. ``None`` marks an invalid rank because too few bulk bins have a
+    positive reference denominator.
+    """
+    S = np.asarray(fine_powers)
+    if S.shape != (3, FINE_BINS):
+        raise ValueError("fine_powers must have shape [3, 256].")
+    if S.dtype != np.dtype(np.uint64):
+        raise TypeError("fine_powers must have exact uint64 dtype.")
+    rank = _exact_integer(cfar_rank, field="cfar_rank")
+    if not 0 <= rank < FINE_BINS:
+        raise ValueError(f"cfar_rank must be in [0, {FINE_BINS - 1}].")
+    designated = designated_bins(anchor_bin, designated_half_width)
+    if len(bulk_mask) == 4:
+        mask_arr = unpack_bulk_mask(bulk_mask)
+    else:
+        mask_arr = np.asarray(bulk_mask)
+        if mask_arr.dtype != np.dtype(bool):
+            raise TypeError("bulk mask entries must be booleans.")
+    if mask_arr.shape != (FINE_BINS,):
+        raise ValueError("bulk mask must describe exactly 256 bins.")
+
+    num = [2 * int(S[WEIGHT_TERM_TARGET, b]) for b in range(FINE_BINS)]
+    den = [
+        int(S[WEIGHT_TERM_REF_LOWER, b]) + int(S[WEIGHT_TERM_REF_UPPER, b])
+        for b in range(FINE_BINS)
+    ]
+    bulk, rank_bin = _rank_value(num, den, mask_arr, rank)
+    if rank_bin < 0:
+        return FineRequiredMultiplier(
+            valid=False, n_bulk=len(bulk), rank_bin=-1, limiting_bin=-1,
+            multiplier_q16=None)
+
+    num_r = num[rank_bin]
+    den_r = den[rank_bin]
+    required = 1
+    limiting_bin = -1
+    for raw_bin in designated:
+        bin_index = int(raw_bin)
+        if den[bin_index] <= 0 or num[bin_index] == 0:
+            continue
+        if num_r == 0:
+            return FineRequiredMultiplier(
+                valid=True, n_bulk=len(bulk), rank_bin=rank_bin,
+                limiting_bin=bin_index,
+                multiplier_q16=ALWAYS_MASKED_Q16)
+        numerator = num[bin_index] * MULTIPLIER_ONE * den_r
+        denominator = num_r * den[bin_index]
+        boundary = (numerator + denominator - 1) // denominator
+        if boundary > required:
+            required = boundary
+            limiting_bin = bin_index
+    if required > MAX_MULTIPLIER_Q16:
+        required = ALWAYS_MASKED_Q16
+    return FineRequiredMultiplier(
+        valid=True, n_bulk=len(bulk), rank_bin=rank_bin,
+        limiting_bin=limiting_bin, multiplier_q16=required)
 
 
 def fine_mask_decision(
@@ -186,31 +289,13 @@ def fine_mask_decision(
         for b in range(FINE_BINS)
     ]
 
-    bulk = [b for b in range(FINE_BINS) if mask_arr[b] and den[b] > 0]
+    bulk, rank_bin = _rank_value(num, den, mask_arr, rank)
     n_bulk = len(bulk)
-    if rank >= n_bulk:
+    if rank_bin < 0:
         return FineDecision(
             mask=0, valid=False, n_bulk=n_bulk, rank_bin=-1, fired_bin=-1
         )
 
-    # Rank selection by counting: bin i holds the rank value iff
-    # (# strictly below) <= rank < (# strictly below) + (# equal).
-    # Every qualifying bin carries the same rational value, so the
-    # decision is representative-independent; the reference reports the
-    # lowest qualifying bin as the representative.
-    rank_bin = -1
-    for i in bulk:
-        c_lt = 0
-        c_eq = 0
-        for j in bulk:
-            if _f2_less(num[j], den[j], num[i], den[i]):
-                c_lt += 1
-            elif not _f2_less(num[i], den[i], num[j], den[j]):
-                c_eq += 1
-        if c_lt <= rank < c_lt + c_eq:
-            rank_bin = i
-            break
-    assert rank_bin >= 0  # counting selection always finds the rank value
     num_r = num[rank_bin]
     den_r = den[rank_bin]
 

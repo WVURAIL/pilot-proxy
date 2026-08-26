@@ -17,9 +17,9 @@ Vocabulary, fixed by how the survey was actually run:
     statistic for that channel in that era.  This module produces it.
 
 ``F > eta * mu``
-    The working rule.  ``eta`` is not a false-alarm parameter; it comes from
-    the BAO noise tolerance, which prices how much residual shelf power the
-    science can absorb.
+    The historical report rule. ``eta`` is not a false-alarm parameter; it
+    comes from the science tolerance, which prices how much residual shelf
+    power the analysis can absorb.
 
 Estimating ``mu``.  The distribution of F is a very narrow null core with a
 heavy transient tail on the right, so no moment-based estimator is usable.
@@ -28,23 +28,30 @@ sample, which is the null core wherever a null exists and the carrier lobe
 where the channel is fully occupied, and that distinction is itself the
 evidence for the disposition.  The scale is then estimated from frames at or
 below the centre, which a carrier can only ever add to from above, using the
-released ``baonoise.residual.NULL_SCALE_PROBES`` convention: the p-th
+released ``rfisher.residual.NULL_SCALE_PROBES`` convention: the p-th
 percentile of a lower-half sample is the (p/2)-th percentile of the full
 null.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, asdict
+from statistics import NormalDist
 
 import numpy as np
 
-# the released left-side quantile probes and their full-null deviates
+# Released left-side probes and their full-null deviates.
 NULL_SCALE_PROBES = ((32.0, 1.0000), (5.0, 1.9600), (0.3, 2.9677))
 
-ETA_LADDER = (1.0, 1.1, 1.2, 1.4, 2.0, 5.0)
-NULL_TOLERANCE_DB = 0.20       # |mu / mu0_provisional| within this -> agreement
-EXCISE_OCCUPANCY = 0.50        # occupancy that costs the band outright
-CLEAN_OCCUPANCY = 0.10
+REPORT_ETA_LADDER = (1.0, 1.1, 1.2, 1.4, 2.0, 5.0)
+
+# Compatibility for older report scripts.
+ETA_LADDER = REPORT_ETA_LADDER
+NULL_TOLERANCE_DB = 0.20
+MIN_LOWER_TAIL_FRAMES = 20
+DETECTION_FLOOR_GAUSSIAN_TAIL_PROBABILITY = 1.0e-3
+DETECTION_FLOOR_Z = NormalDist().inv_cdf(
+    1.0 - DETECTION_FLOOR_GAUSSIAN_TAIL_PROBABILITY)
+KEPT_TAIL_PERCENTILE = 99.0
 
 
 def half_sample_mode(x):
@@ -78,7 +85,7 @@ def null_scale_about(f, centre):
     scale should be read as indicative only.
     """
     lower = f[f <= centre]
-    if lower.size < 20:
+    if lower.size < MIN_LOWER_TAIL_FRAMES:
         return float("nan"), float("nan")
     ests = [(centre - float(np.percentile(lower, p))) / z
             for p, z in NULL_SCALE_PROBES]
@@ -123,7 +130,7 @@ class Calibration:
 
 
 def calibrate(channel, frame_mask, era_label, n_units,
-              eta_ladder=ETA_LADDER):
+              eta_ladder=REPORT_ETA_LADDER):
     """Calibrate ``mu`` and the ladder on the frames selected by the mask."""
     f = channel.fstat[frame_mask]
     mu0 = channel.mu0
@@ -145,10 +152,12 @@ def calibrate(channel, frame_mask, era_label, n_units,
         thr = eta * mu
         occupancy[key] = float(np.mean(f > thr))
         kept = f[f <= thr]
-        leakage[key] = (float(10.0 * np.log10(np.percentile(kept, 99) / mu))
+        leakage[key] = (float(10.0 * np.log10(
+            np.percentile(kept, KEPT_TAIL_PERCENTILE) / mu))
                         if kept.size else float("nan"))
 
-    floor_eta = ((mu + 3.0902 * sigma) / mu) if np.isfinite(sigma) else float("nan")
+    floor_eta = ((mu + DETECTION_FLOOR_Z * sigma) / mu
+                 if np.isfinite(sigma) else float("nan"))
 
     return Calibration(
         ch=channel.ch, fid=channel.fid, era_label=era_label, n_frames=n,

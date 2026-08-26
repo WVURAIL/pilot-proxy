@@ -37,6 +37,7 @@ split are reported as single-era, which is the expected outcome for most.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 
 import numpy as np
 
@@ -47,6 +48,8 @@ MIN_DAYS = 270.0
 MIN_STEP_DB = 2.0
 Z_CRIT = 4.0
 MAX_ERAS = 5
+SECONDS_PER_DAY = 86400.0
+ERA_LEVEL_UPPER_PERCENTILE = 90.0
 
 
 @dataclass(frozen=True)
@@ -97,15 +100,15 @@ def _mann_whitney_z(a, b):
     return float((u - mu) / np.sqrt(var))
 
 
-def _best_split(months, med, cnt, lo, hi, cfg):
+def _best_split(months, med, first_time, last_time, lo, hi, cfg):
     """Strongest admissible split index in [lo, hi), or None."""
     best = None
     for k in range(lo + cfg["min_months"], hi - cfg["min_months"] + 1):
         left, right = med[lo:k], med[k:hi]
         if left.size < cfg["min_months"] or right.size < cfg["min_months"]:
             continue
-        span_l = (months[k - 1] - months[lo] + 1) * 30.44
-        span_r = (months[hi - 1] - months[k] + 1) * 30.44
+        span_l = (last_time[k - 1] - first_time[lo]) / SECONDS_PER_DAY
+        span_r = (last_time[hi - 1] - first_time[k]) / SECONDS_PER_DAY
         if span_l < cfg["min_days"] or span_r < cfg["min_days"]:
             continue
         step = abs(float(np.median(right)) - float(np.median(left)))
@@ -120,26 +123,45 @@ def _best_split(months, med, cnt, lo, hi, cfg):
     return best
 
 
-def _segment(months, med, cnt, lo, hi, cfg, out):
+def _segment(months, med, first_time, last_time, lo, hi, cfg, out):
     if len(out) >= cfg["max_eras"] - 1:
         return
-    best = _best_split(months, med, cnt, lo, hi, cfg)
+    best = _best_split(months, med, first_time, last_time, lo, hi, cfg)
     if best is None:
         return
     _, k, _, _ = best
     out.append(k)
-    _segment(months, med, cnt, lo, k, cfg, out)
-    _segment(months, med, cnt, k, hi, cfg, out)
+    _segment(months, med, first_time, last_time, lo, k, cfg, out)
+    _segment(months, med, first_time, last_time, k, hi, cfg, out)
 
 
 def segment(channel, min_months=MIN_MONTHS, min_days=MIN_DAYS,
             min_step_db=MIN_STEP_DB, z_crit=Z_CRIT, max_eras=MAX_ERAS):
     """Segment one :class:`~ppcal.products.Channel` into activity eras."""
-    months, med, cnt = channel.monthly_level_db()
+    min_months = operator.index(min_months)
+    max_eras = operator.index(max_eras)
+    if min_months < 1:
+        raise ValueError("min_months must be positive")
+    if max_eras < 1:
+        raise ValueError("max_eras must be positive")
+    for name, value in (("min_days", min_days),
+                        ("min_step_db", min_step_db),
+                        ("z_crit", z_crit)):
+        if not np.isfinite(value) or value < 0.0:
+            raise ValueError("%s must be finite and non-negative" % name)
+    months, med, _ = channel.monthly_level_db()
+    if not len(months):
+        raise ValueError("channel has no retained acquisitions")
+    unit_time = channel.units[0]
+    unit_month = channel.unit_month
+    first_time = np.array([unit_time[unit_month == month].min()
+                           for month in months])
+    last_time = np.array([unit_time[unit_month == month].max()
+                          for month in months])
     cfg = dict(min_months=min_months, min_days=min_days,
                min_step_db=min_step_db, z_crit=z_crit, max_eras=max_eras)
     cuts = []
-    _segment(months, med, cnt, 0, len(months), cfg, cuts)
+    _segment(months, med, first_time, last_time, 0, len(months), cfg, cuts)
     bounds = [0] + sorted(cuts) + [len(months)]
 
     lvl = channel.unit_level_db
@@ -152,7 +174,8 @@ def segment(channel, min_months=MIN_MONTHS, min_days=MIN_DAYS,
         eras.append(Era(index=i, month_start=m0, month_end=m1,
                         n_units=int(sel.sum()),
                         level_median_db=float(np.median(lvl[sel])),
-                        level_p90_db=float(np.percentile(lvl[sel], 90))))
+                        level_p90_db=float(np.percentile(
+                            lvl[sel], ERA_LEVEL_UPPER_PERCENTILE))))
     return eras
 
 

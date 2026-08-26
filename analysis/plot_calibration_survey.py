@@ -21,7 +21,7 @@ from ppcal.plotting import (CRITICAL, EXCISE_COLOR, INK, INK2, KEEP_COLOR,
                             setup_style)  # noqa: E402
 from ppcal.products import COARSE_HZ, M0, NMONTHS  # noqa: E402
 
-ETA = ST.ETA_WORKING
+ETA = ST.FALLBACK_ETA
 
 
 def col_of(s):
@@ -77,8 +77,10 @@ def fig_mu(st, out):
     cols = [col_of(s) for s in st]
     a0.bar(chs, shift, color=cols, width=0.72)
     a0.set_yscale("log")
-    a0.axhline(ST.CARRIER_DOMINATED_DB, color=INK2, lw=1.2, ls=(0, (4, 3)))
-    a0.annotate("carrier-dominated above %.0f dB" % ST.CARRIER_DOMINATED_DB,
+    a0.axhline(ST.CARRIER_DOMINATED_LEVEL_DB, color=INK2, lw=1.2,
+               ls=(0, (4, 3)))
+    a0.annotate("carrier-dominated above %.0f dB"
+                % ST.CARRIER_DOMINATED_LEVEL_DB,
                 xy=(13.6, 3.6), color=INK2, fontsize=9.5)
     a0.axhspan(3e-3, 1.0, color=SERIES[0], alpha=0.12, lw=0)
     a0.annotate("null recovered: every kept channel lies below 1 dB",
@@ -139,15 +141,15 @@ def fig_ladder_summary(st, out):
     ax.set_xlabel("fraction of latest-era frames masked")
     kept_med = np.median([s.occ_working for s in keep])
     kept_prov = np.median([s.cal.occupancy_provisional for s in keep])
-    ax.annotate("excised: $\\mu$ is the carrier itself,\nso the working-rule "
-                "bar (hatched) is not\nan operating point",
+    ax.annotate("excised: $\\mu$ is the carrier itself,\nso the report-rule "
+                "bar (hatched) is not\na report point",
                 xy=(0.30, len(exc) - 3.4), fontsize=9.5, color=EXCISE_COLOR)
     handles = [Patch(color=CRITICAL, label="$F > 1$  (provisional, as "
                                            "collected)"),
                Patch(color=SERIES[0], label="$F > \\mu$  (calibrated on the "
                                             "collected data)"),
-               Patch(color=KEEP_COLOR, label="$F > \\eta\\,\\mu$  (each "
-                                             "channel's BAO-priced $\\eta$)")]
+               Patch(color=KEEP_COLOR, label="$F > \\eta\\,\\mu$  (report "
+                                             "threshold for each channel)")]
     fig.legend(handles=handles, loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.025))
     etas = [s.eta_channel for s in st]
@@ -196,8 +198,7 @@ def fig_histograms(st, out):
                plt.Line2D([], [], color=SERIES[0], lw=1.6, ls=(0, (1, 2)),
                           label="$\\mu$ calibrated on this era"),
                plt.Line2D([], [], color=KEEP_COLOR, lw=1.6, ls=(0, (4, 3)),
-                          label="$F > \\eta\\,\\mu$, this channel's "
-                                "BAO-priced $\\eta$")]
+                          label="$F > \\eta\\,\\mu$, report threshold")]
     fig.legend(handles=handles, loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.012))
     fig.suptitle("Latest-era statistic per channel: a narrow null core, a "
@@ -286,7 +287,7 @@ def fig_ladder(st, out):
     a0.annotate("$\\eta=1$", (1.01, 1.3e-4), color=SERIES[0], fontsize=9)
     fig.suptitle("Threshold ladder on the calibrated null: what each channel "
                  "costs at each $\\eta$\n"
-                 "markers are each channel's own BAO-priced operating point",
+                 "markers are report points, not an operational export",
                  fontsize=13, x=0.5, y=1.02)
     fig.tight_layout()
     return save_fig(fig, os.path.join(out, "fig06_threshold_ladder.png"))
@@ -347,7 +348,8 @@ def fig_dispositions(st, out):
     a1.barh(y, [max(s.cal.mu_shift_db, 3e-3) for s in order], color=cols,
             height=0.66)
     a1.set_xscale("log")
-    a1.axvline(ST.CARRIER_DOMINATED_DB, color=INK2, lw=1.2, ls=(0, (4, 3)))
+    a1.axvline(ST.CARRIER_DOMINATED_LEVEL_DB, color=INK2, lw=1.2,
+               ls=(0, (4, 3)))
     a1.annotate("carrier-dominated", xy=(3.4, 0.6), color=INK2, fontsize=9.5)
     a1.set_xlabel("$10\\log_{10}(\\mu/\\mu_0)$  [dB]")
     a1.set_title("Evidence: does a null exist in this era at all?",
@@ -357,8 +359,9 @@ def fig_dispositions(st, out):
                Patch(color=EXCISE_COLOR, label="excise")]
     fig.legend(handles=handles, loc="lower center", ncol=3,
                bbox_to_anchor=(0.5, -0.02))
-    fig.suptitle("Per-channel disposition from the latest era alone -- all 23 "
-                 "reproduce the published policy", fontsize=13, x=0.5, y=1.0)
+    fig.suptitle("Historical report labels from the latest era alone -- all "
+                 "23 reproduce the published policy", fontsize=13,
+                 x=0.5, y=1.0)
     fig.tight_layout()
     return save_fig(fig, os.path.join(out, "fig08_dispositions.png"))
 
@@ -410,18 +413,20 @@ def fig_census(st, out):
     return save_fig(fig, os.path.join(out, "fig09_carrier_census.png"))
 
 
-def fig_bao(st, out):
+def fig_residual_tolerance(st, out):
     """Residual against tolerance at both ends of the coherence bracket."""
-    have = [s for s in st if s.bao and s.bao.get("r_tol_dilation")]
+    have = [s for s in st
+            if s.thresholds and s.thresholds.get("r_tol_dilation")]
     if not have:
         return None
-    order = sorted(have, key=lambda s: -(s.bao.get("r_cost_cap") or 0))
+    order = sorted(
+        have, key=lambda s: -(s.thresholds.get("r_cost_cap") or 0))
     y = np.arange(len(order))
     fig, ax = plt.subplots(figsize=(11.0, 7.6))
     for k, s in enumerate(order):
-        rt = s.bao["r_tol_dilation"]
-        cap = (s.bao.get("r_cost_cap") or np.nan) / rt
-        th = (s.bao.get("r_cost_thermal") or np.nan) / rt
+        rt = s.thresholds["r_tol_dilation"]
+        cap = (s.thresholds.get("r_cost_cap") or np.nan) / rt
+        th = (s.thresholds.get("r_cost_thermal") or np.nan) / rt
         ax.plot([th, cap], [k, k], color=MUTED, lw=1.6, zorder=1,
                 solid_capstyle="round")
         ax.scatter([cap], [k], s=52, color=EXCISE_COLOR, zorder=3,
@@ -435,7 +440,7 @@ def fig_bao(st, out):
     ax.set_xscale("log")
     ax.set_yticks(y)
     ax.set_yticklabels(["ch %d%s" % (s.ch, "  $\\tau$ measured"
-                                     if s.bao.get("tau_measured") else "")
+                                     if s.thresholds.get("tau_measured") else "")
                         for s in order], fontsize=9.5)
     ax.set_xlabel("masked residual $r$ / channel bias tolerance $r_{\\rm tol}$")
     handles = [plt.Line2D([], [], marker="o", ls="", color=SERIES[0],
@@ -450,7 +455,8 @@ def fig_bao(st, out):
                  "channel outside tolerance there is uncertified rather than "
                  "disqualified", fontsize=12.5, loc="left")
     fig.tight_layout()
-    return save_fig(fig, os.path.join(out, "fig12_bao_bracket.png"))
+    return save_fig(
+        fig, os.path.join(out, "fig12_residual_tolerance_bracket.png"))
 
 
 def fig_eta(st, out):
@@ -476,8 +482,8 @@ def fig_eta(st, out):
                  "$(1+r)/(1-f)$ at the conservative coherence bound, with the "
                  "10 dB fine-stage credit applied", fontsize=12.5, loc="left")
 
-    dil = [s.bao.get("r_tol_dilation") for s in have]
-    gro = [s.bao.get("r_tol_growth") for s in have]
+    dil = [s.thresholds.get("r_tol_dilation") for s in have]
+    gro = [s.thresholds.get("r_tol_growth") for s in have]
     a1.plot(chs, dil, marker="o", ms=4, color=SERIES[1], lw=1.4,
             label="acoustic-dilation tolerance")
     a1.plot(chs, gro, marker="s", ms=4, color=SERIES[0], lw=1.4,
@@ -561,7 +567,8 @@ def fig_bracket_stability(st, out):
     ax.set_xscale("log")
     ax.set_yticks(y)
     ax.set_yticklabels(
-        ["ch %d%s" % (x.ch, "  $\\tau$ meas." if x.bao.get("tau_measured")
+        ["ch %d%s" % (x.ch, "  $\\tau$ meas."
+                      if x.thresholds.get("tau_measured")
                       else "") for x in order], fontsize=9.5)
     ax.set_xlabel("$\\eta$   (circle: adopted cap end;  diamond: thermal end)")
     handles = [plt.Line2D([], [], marker="o", ls="", color=KEEP_COLOR,
@@ -583,13 +590,14 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--products", default=None)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--bao", default=None)
+    ap.add_argument("--thresholds", default=None)
+    ap.add_argument("--bao", dest="thresholds", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     args.products = args.products or str(P.PER_PILOT)
     args.out = args.out or str(P.OUT / "figures")
-    args.bao = args.bao or str(P.ETA_BAO)
+    args.thresholds = args.thresholds or str(P.THRESHOLD_TABLE)
     setup_style()
-    st = ST.build(args.products, bao_csv=args.bao)
+    st = ST.build(args.products, threshold_csv=args.thresholds)
     made = [fig_timeline(st, args.out),
             fig_mu(st, args.out),
             fig_histograms(st, args.out),
@@ -605,7 +613,7 @@ def main(argv=None):
             fig_dispositions(st, args.out),
             fig_census(st, args.out),
             fig_ladder_summary(st, args.out),
-            fig_bao(st, args.out),
+            fig_residual_tolerance(st, args.out),
             fig_eta(st, args.out),
             fig_mask_effect(st, args.out),
             fig_bracket_stability(st, args.out)]

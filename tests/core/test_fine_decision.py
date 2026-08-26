@@ -16,10 +16,13 @@ import numpy as np
 import pytest
 
 from pilot_proxy.fine_decision import (
+    ALWAYS_MASKED_Q16,
     FINE_BINS,
+    MAX_MULTIPLIER_Q16,
     MULTIPLIER_ONE,
     designated_bins,
     fine_mask_decision,
+    fine_required_multiplier_q16,
     pack_bulk_mask,
     unpack_bulk_mask,
 )
@@ -46,6 +49,32 @@ def _oracle(S, anchor, half_width, mask, rank, mult_q16):
         if int(den[b]) > 0 and Fraction(int(num[b]), int(den[b])) > thr:
             return 1
     return 0
+
+
+def _required_multiplier_oracle(S, anchor, half_width, mask, rank):
+    """Naive exact keep boundary with Fractions."""
+    num = 2 * S[0].astype(object)
+    den = S[1].astype(object) + S[2].astype(object)
+    bulk = [
+        Fraction(int(num[b]), int(den[b]))
+        for b in range(FINE_BINS)
+        if mask[b] and int(den[b]) > 0
+    ]
+    if rank >= len(bulk):
+        return None
+    rank_value = sorted(bulk)[rank]
+    required = 1
+    for b in designated_bins(anchor, half_width):
+        if int(den[b]) <= 0 or int(num[b]) == 0:
+            continue
+        if rank_value == 0:
+            return ALWAYS_MASKED_Q16
+        ratio = Fraction(int(num[b]), int(den[b])) / rank_value
+        scaled = ratio * MULTIPLIER_ONE
+        boundary = (scaled.numerator + scaled.denominator - 1) // scaled.denominator
+        required = max(required, boundary)
+    return (required if required <= MAX_MULTIPLIER_Q16
+            else ALWAYS_MASKED_Q16)
 
 
 def _random_powers(rng, scale=1 << 40):
@@ -85,6 +114,135 @@ def test_matches_fraction_oracle_randomized():
             multiplier_q16=mult,
         )
         assert got.mask == _oracle(S, 62, 2, mask, rank, mult), trial
+
+
+def test_required_multiplier_reproduces_the_exact_decision():
+    rng = np.random.default_rng(RNG_SEED + 3)
+    mask = independent_bin_mask(FINE_BINS, designated_bins=[62])
+    probes = (1, MULTIPLIER_ONE, 2 * MULTIPLIER_ONE,
+              4 * MULTIPLIER_ONE)
+    for _ in range(80):
+        S = _random_powers(rng)
+        rank = int(rng.integers(0, 100))
+        boundary = fine_required_multiplier_q16(
+            S, anchor_bin=62, designated_half_width=2,
+            bulk_mask=mask, cfar_rank=rank)
+        assert boundary.valid
+        assert boundary.multiplier_q16 == _required_multiplier_oracle(
+            S, 62, 2, mask, rank)
+        exact_probes = list(probes)
+        if boundary.multiplier_q16 <= MAX_MULTIPLIER_Q16:
+            exact_probes.append(boundary.multiplier_q16)
+            if boundary.multiplier_q16 > 1:
+                exact_probes.append(boundary.multiplier_q16 - 1)
+        for multiplier in exact_probes:
+            decision = fine_mask_decision(
+                S, anchor_bin=62, designated_half_width=2,
+                bulk_mask=mask, cfar_rank=rank,
+                multiplier_q16=multiplier)
+            assert decision.mask == int(multiplier < boundary.multiplier_q16)
+
+
+def test_zero_rank_value_has_an_always_masked_boundary():
+    S = np.zeros((3, FINE_BINS), dtype=np.uint64)
+    mask = np.zeros(FINE_BINS, dtype=bool)
+    S[1, 2] = S[2, 2] = 1
+    mask[2] = True
+    S[0, 100] = 1
+    S[1, 100] = S[2, 100] = 1
+    boundary = fine_required_multiplier_q16(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=0)
+    assert boundary.valid
+    assert boundary.multiplier_q16 == ALWAYS_MASKED_Q16
+
+
+def test_required_multiplier_marks_an_invalid_rank():
+    S = np.ones((3, FINE_BINS), dtype=np.uint64)
+    mask = np.zeros(FINE_BINS, dtype=bool)
+    mask[2] = True
+    boundary = fine_required_multiplier_q16(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=1)
+    assert not boundary.valid
+    assert boundary.multiplier_q16 is None
+
+
+def test_required_multiplier_uses_one_when_no_designated_bin_can_fire():
+    S = np.ones((3, FINE_BINS), dtype=np.uint64)
+    S[0, 100] = 0
+    mask = np.zeros(FINE_BINS, dtype=bool)
+    mask[2] = True
+    boundary = fine_required_multiplier_q16(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=0)
+    assert boundary.valid
+    assert boundary.multiplier_q16 == 1
+    assert fine_mask_decision(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=0, multiplier_q16=1).mask == 0
+
+
+def test_required_multiplier_marks_a_boundary_above_uint64():
+    top = np.iinfo(np.uint64).max
+    S = np.zeros((3, FINE_BINS), dtype=np.uint64)
+    mask = np.zeros(FINE_BINS, dtype=bool)
+    S[0, 2] = 1
+    S[1, 2] = S[2, 2] = top
+    mask[2] = True
+    S[0, 100] = top
+    S[1, 100] = S[2, 100] = 1
+    boundary = fine_required_multiplier_q16(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=0)
+    assert boundary.valid
+    assert boundary.multiplier_q16 == ALWAYS_MASKED_Q16
+    assert fine_mask_decision(
+        S, anchor_bin=100, designated_half_width=0,
+        bulk_mask=mask, cfar_rank=0,
+        multiplier_q16=MAX_MULTIPLIER_Q16).mask == 1
+
+
+def test_required_multiplier_is_tie_representative_independent():
+    S = np.zeros((3, FINE_BINS), dtype=np.uint64)
+    mask = np.zeros(FINE_BINS, dtype=bool)
+    for bin_index, values in {0: (1, 2, 2), 2: (2, 4, 4)}.items():
+        S[0, bin_index], S[1, bin_index], S[2, bin_index] = values
+        mask[bin_index] = True
+    S[0, 100], S[1, 100], S[2, 100] = 3, 2, 2
+    expected = 3 * MULTIPLIER_ONE
+    for rank in (0, 1):
+        boundary = fine_required_multiplier_q16(
+            S, anchor_bin=100, designated_half_width=0,
+            bulk_mask=pack_bulk_mask(mask), cfar_rank=rank)
+        assert boundary.valid
+        assert boundary.rank_bin == 0
+        assert boundary.multiplier_q16 == expected
+        assert fine_mask_decision(
+            S, anchor_bin=100, designated_half_width=0,
+            bulk_mask=mask, cfar_rank=rank,
+            multiplier_q16=expected - 1).mask == 1
+        assert fine_mask_decision(
+            S, anchor_bin=100, designated_half_width=0,
+            bulk_mask=mask, cfar_rank=rank,
+            multiplier_q16=expected).mask == 0
+
+
+def test_required_multiplier_matches_decision_input_validation():
+    S = np.ones((3, FINE_BINS), dtype=np.uint64)
+    mask = np.ones(FINE_BINS, dtype=bool)
+    with pytest.raises(TypeError, match="fine_powers.*uint64"):
+        fine_required_multiplier_q16(
+            S.astype(float), anchor_bin=0, designated_half_width=0,
+            bulk_mask=mask, cfar_rank=0)
+    with pytest.raises(TypeError, match="bulk mask entries must be booleans"):
+        fine_required_multiplier_q16(
+            S, anchor_bin=0, designated_half_width=0,
+            bulk_mask=mask.astype(np.uint8), cfar_rank=0)
+    with pytest.raises(TypeError, match="cfar_rank"):
+        fine_required_multiplier_q16(
+            S, anchor_bin=0, designated_half_width=0,
+            bulk_mask=mask, cfar_rank=0.0)
 
 
 def test_tied_rank_values_are_representative_independent():

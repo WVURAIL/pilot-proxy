@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Run the detector calibration over the completed per-pilot survey.
 
-Writes ``calibration.json`` and the CSV tables the figures and report are
-built from.  Run bao-noise-tolerance's ``eta_bao.py`` first if the per-channel
-thresholds should be merged in; without it the ladder and dispositions are
-still complete, on a single global eta.
+Writes ``calibration.json`` and the CSV tables used by the figures and report.
+Supply a per-channel threshold table to merge science-priced thresholds;
+without it the historical report fallback remains explicit.
 
     python3 analysis/make_calibration_data.py [--products DIR] [--out DIR]
 """
@@ -20,8 +19,7 @@ import _calibration_paths as P  # noqa: F401
 
 import numpy as np  # noqa: E402
 
-from ppcal import spectra as S, state as ST  # noqa: E402
-from ppcal.calib import ETA_LADDER  # noqa: E402
+from ppcal import calib as C, eras as E, spectra as S, state as ST  # noqa: E402
 from ppcal.products import FRAME_SECONDS, month_label  # noqa: E402
 
 
@@ -41,20 +39,56 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--products", default=None)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--bao", default=None)
+    ap.add_argument("--thresholds", default=None)
+    ap.add_argument("--bao", dest="thresholds", help=argparse.SUPPRESS)
     args = ap.parse_args(argv)
     args.products = args.products or str(P.PER_PILOT)
     args.out = args.out or str(P.OUT)
-    args.bao = args.bao or str(P.ETA_BAO)
+    args.thresholds = args.thresholds or str(P.THRESHOLD_TABLE)
     tables = os.path.join(args.out, "tables")
     os.makedirs(tables, exist_ok=True)
 
-    st = ST.build(args.products, bao_csv=args.bao)
+    st = ST.build(args.products, threshold_csv=args.thresholds)
     inv, era_rows, cal_rows, tx_rows, line_rows = [], [], [], [], []
     doc = {"generated": dt.datetime.now(dt.timezone.utc).isoformat(),
-           "products": args.products, "eta_ladder": list(ETA_LADDER),
-           "eta_working_fallback": ST.ETA_WORKING,
-           "carrier_dominated_db": ST.CARRIER_DOMINATED_DB,
+           "products": args.products,
+           "decision_scope": "report_only",
+           "era_policy": {
+               "minimum_observed_months": E.MIN_MONTHS,
+               "minimum_elapsed_span_days": E.MIN_DAYS,
+               "minimum_step_db": E.MIN_STEP_DB,
+               "rank_z_threshold": E.Z_CRIT,
+               "maximum_eras": E.MAX_ERAS,
+           },
+           "report_policy": {
+               "eta_ladder": list(C.REPORT_ETA_LADDER),
+               "null_tolerance_db": C.NULL_TOLERANCE_DB,
+               "minimum_lower_tail_frames": C.MIN_LOWER_TAIL_FRAMES,
+               "detection_floor_gaussian_tail_probability":
+                   C.DETECTION_FLOOR_GAUSSIAN_TAIL_PROBABILITY,
+               "kept_tail_percentile": C.KEPT_TAIL_PERCENTILE,
+               "carrier_dominated_level_db":
+                   ST.CARRIER_DOMINATED_LEVEL_DB,
+               "excise_masked_fraction": ST.EXCISE_MASKED_FRACTION,
+               "light_masking_fraction": ST.LIGHT_MASKING_FRACTION,
+               "historical_eta_fallback": ST.FALLBACK_ETA,
+               "maximum_threshold_bracket_ratio":
+                   ST.MAX_THRESHOLD_BRACKET_RATIO,
+           },
+           "spectral_report_policy": {
+               "centre_exclusion_half_width_hz": S.DC_HALF_WIDTH_HZ,
+               "pilot_search_half_width_hz": S.PILOT_SEARCH_HZ,
+               "peak_minimum_db": S.PEAK_MIN_DB,
+               "peak_minimum_separation_hz": S.PEAK_MIN_SEPARATION_HZ,
+               "peak_maximum_count": S.PEAK_MAX_COUNT,
+               "fine_upper_percentile": S.FINE_UPPER_PERCENTILE,
+               "fine_line_minimum_db": S.FINE_LINE_MIN_DB,
+               "fine_line_minimum_prominence_db":
+                   S.FINE_LINE_MIN_PROMINENCE_DB,
+               "fine_line_minimum_separation_hz":
+                   S.FINE_LINE_MIN_SEPARATION_HZ,
+               "fine_line_maximum_count": S.FINE_LINE_MAX_COUNT,
+           },
            "channels": {}}
 
     tot_frames = tot_units = 0
@@ -108,6 +142,8 @@ def main(argv=None):
             eta_bracket_ratio=round(s.eta_bracket_ratio, 4),
             eta_is_identified=s.eta_is_identified,
             eta_is_per_channel=s.eta_is_per_channel,
+            threshold_status=s.threshold_status,
+            decision_scope=s.decision_scope,
             occ_at_eta_channel=round(s.occ_working, 6),
             occ_at_eta_global=round(s.occ_global, 6),
             verdict=s.verdict, disposition=s.disposition, reason=s.reason,
@@ -121,11 +157,11 @@ def main(argv=None):
             era_blind_occ_working=round(float(np.mean(
                 c.fstat > s.eta_channel * s.blind.mu)), 6),
             era_blind_mu_shift_db=round(s.blind.mu_shift_db, 4),
-            residual_basis=s.bao.get("residual_basis", ""),
-            r_tol_dilation=s.bao.get("r_tol_dilation", ""),
-            tau_seconds=s.bao.get("tau_seconds", ""),
-            tau_measured=s.bao.get("tau_measured", ""),
-            r_cost_cap=s.bao.get("r_cost_cap", ""))
+            residual_basis=s.thresholds.get("residual_basis", ""),
+            r_tol_dilation=s.thresholds.get("r_tol_dilation", ""),
+            tau_seconds=s.thresholds.get("tau_seconds", ""),
+            tau_measured=s.thresholds.get("tau_measured", ""),
+            r_cost_cap=s.thresholds.get("r_cost_cap", ""))
         cal_rows.append({k: (round(v, 6) if isinstance(v, float) else v)
                          for k, v in row.items()})
 
@@ -151,7 +187,10 @@ def main(argv=None):
             eras=[dict(span=e.label, units=e.n_units,
                        level_median_db=e.level_median_db,
                        level_p90_db=e.level_p90_db) for e in segs],
-            calibration=cal.row(), era_blind=s.blind.row(), bao=s.bao,
+            calibration=cal.row(), era_blind=s.blind.row(),
+            thresholds=s.thresholds,
+            threshold_status=s.threshold_status,
+            decision_scope=s.decision_scope,
             mask_effect=mstats, wide_pair_is_latest_era=wide_ok,
             verdict=s.verdict, disposition=s.disposition, reason=s.reason,
             agrees_with_published=s.agrees_with_published,
@@ -180,7 +219,8 @@ def main(argv=None):
         eta_min=float(min(s.eta_channel for s in st)),
         eta_max=float(max(s.eta_channel for s in st)),
         eta_median=float(np.median([s.eta_channel for s in st])),
-        eta_per_channel=sum(1 for s in st if s.eta_is_per_channel))
+        eta_per_channel=sum(1 for s in st if s.eta_is_per_channel),
+        decision_scope="report_only")
     with open(os.path.join(args.out, "calibration.json"), "w",
               encoding="utf-8") as fh:
         json.dump(doc, fh, indent=1, sort_keys=True, default=float)
@@ -192,12 +232,14 @@ def main(argv=None):
                                          else 0)):
         tau_rows.append(dict(
             ch=s_.ch,
-            tau_measured=s_.bao.get("tau_measured", ""),
-            tau_seconds=s_.bao.get("tau_seconds", ""),
+            tau_measured=s_.thresholds.get("tau_measured", ""),
+            tau_seconds=s_.thresholds.get("tau_seconds", ""),
             eta_cap=round(s_.eta_channel, 4),
             eta_thermal=round(s_.eta_thermal, 4),
             bracket_ratio=round(s_.eta_bracket_ratio, 4),
             identified=s_.eta_is_identified,
+            threshold_status=s_.threshold_status,
+            decision_scope=s_.decision_scope,
             verdict=s_.verdict,
             masked_at_eta_cap=round(s_.occ_working, 4)))
     write_csv(os.path.join(tables, "tau_priority.csv"), tau_rows)
@@ -211,7 +253,8 @@ def main(argv=None):
     print("\n%d channels, %s frames (%.2f h), %s units"
           % (t["channels"], "{:,}".format(t["frames"]), t["integration_hours"],
              "{:,}".format(t["units"])))
-    print("kept %d / excised %d; %d of %d agree with the published policy"
+    print("report labels: kept %d / excised %d; %d of %d agree with the "
+          "published policy"
           % (t["kept"], t["excised"], t["agree_with_published"], t["channels"]))
     print("per-channel eta: %.3f .. %.3f (median %.3f), %d of %d priced "
           "individually"

@@ -75,7 +75,8 @@ ARCHIVE_HEALTH_SUMMARY_SCHEMA_VERSION = "pilotproxy_archive_health_summary_v1"
 EXCLUSION_LEDGER_SCHEMA_VERSION = "pilotproxy_archive_exclusion_ledger_v1"
 DIAGNOSTIC_MANIFEST_SCHEMA_VERSION = "pilotproxy_archive_diagnostic_manifest_v1"
 CORRECTED_SPECTRA_SCHEMA_VERSION = "pilotproxy_archive_corrected_spectra_v1"
-BAONOISE_HEALTH_VIEW_SCHEMA_VERSION = "pilotproxy_baonoise_health_view_v1"
+RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION = "pilotproxy_baonoise_health_view_v1"
+BAONOISE_HEALTH_VIEW_SCHEMA_VERSION = RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION
 
 DRAO_LONGITUDE_DEGREES_EAST = -119.6175
 LOCAL_CIVIL_TIME_ZONE = "America/Vancouver"
@@ -160,14 +161,14 @@ SPECTRAL_LIMITATION = (
 _REASON_ORDER = tuple(REASON_DEFINITIONS)
 _VERSION_TOKEN = re.compile(r"(?P<key>[^=\s]+)=(?P<value>[^\s]+)")
 
-_BAONOISE_FRAME_FIELDS = (
+_RESIDUAL_FRAME_FIELDS = (
     "frame_index",
     "valid",
     "reject_mask",
     "coarse_power_ratio",
     "frame_unit_index",
 )
-_BAONOISE_METADATA_FIELDS = (
+_RESIDUAL_METADATA_FIELDS = (
     "physical_channel",
     "freq_id",
     "chime_frequency_hz",
@@ -399,22 +400,19 @@ def evaluate_frame_health(product: Mapping[str, Any]) -> FrameHealthResult:
     return FrameHealthResult(include=~excluded, reasons=reasons)
 
 
-def _baonoise_view_key(name: str) -> str:
-    """Column name the baonoise view publishes for an internal field name.
+def _residual_view_key(name: str) -> str:
+    """Published column name for an internal field name.
 
-    The view is an interface, versioned by BAONOISE_HEALTH_VIEW_SCHEMA_VERSION
-    and consumed by a package that cannot import this one. It still publishes
-    the archived spellings; moving it to the current vocabulary is a
-    coordinated release with baonoise, whose Fisher banks are de-authenticated
-    by any edit to its scientific source.
+    The view still publishes its archived spellings and schema value so older
+    consumers can read it.
     """
     return _ARCHIVED_SPELLING.get(name, name)
 
 
-def write_baonoise_health_view(source: Path, destination: Path) -> Path:
-    """Write the minimal health-filtered NPZ view consumed by ``baonoise``.
+def write_residual_health_view(source: Path, destination: Path) -> Path:
+    """Write the minimal health-filtered NPZ residual-analysis view.
 
-    The released ``baonoise`` APIs accept paths and load the per-frame columns
+    The released residual APIs accept paths and load the per-frame columns
     internally.  Passing an original archive product would silently restore
     rows excluded by the v1 gate.  This deliberately incomplete derived view
     retains only the coarse-policy/residual columns those APIs consume, slices
@@ -431,18 +429,18 @@ def write_baonoise_health_view(source: Path, destination: Path) -> Path:
         health = evaluate_frame_health(product)
         n_frames = int(health.include.size)
         arrays: dict[str, np.ndarray] = {}
-        for name in _BAONOISE_FRAME_FIELDS:
+        for name in _RESIDUAL_FRAME_FIELDS:
             value = _array(product, name)
             if value.ndim == 0 or value.shape[0] != n_frames:
                 raise ArchiveHealthError(
-                    f"baonoise frame field {name!r} must have leading length "
+                    f"residual frame field {name!r} must have leading length "
                     f"{n_frames}; got {value.shape}"
                 )
-            arrays[_baonoise_view_key(name)] = np.asarray(value[health.include])
-        for name in _BAONOISE_METADATA_FIELDS:
-            arrays[_baonoise_view_key(name)] = np.asarray(_array(product, name))
+            arrays[_residual_view_key(name)] = np.asarray(value[health.include])
+        for name in _RESIDUAL_METADATA_FIELDS:
+            arrays[_residual_view_key(name)] = np.asarray(_array(product, name))
         # Derived, not copied: the product stores the integer pair only.
-        arrays[_baonoise_view_key("null_power_ratio")] = np.asarray(
+        arrays[_residual_view_key("null_power_ratio")] = np.asarray(
             [null_power_ratio_of(product)], dtype=np.float64
         )
 
@@ -450,10 +448,10 @@ def write_baonoise_health_view(source: Path, destination: Path) -> Path:
     arrays["frame_index"] = np.arange(included, dtype=np.int64)
     if not np.all(np.asarray(arrays["valid"]) == 1):
         raise ArchiveHealthError(
-            "health-filtered baonoise view unexpectedly retains an invalid row"
+            "health-filtered residual view unexpectedly retains an invalid row"
         )
     arrays.update(
-        schema_version=np.asarray(BAONOISE_HEALTH_VIEW_SCHEMA_VERSION),
+        schema_version=np.asarray(RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION),
         archive_health_gate_schema_version=np.asarray(
             FRAME_HEALTH_GATE_SCHEMA_VERSION
         ),
@@ -474,23 +472,27 @@ def write_baonoise_health_view(source: Path, destination: Path) -> Path:
 
 
 @contextlib.contextmanager
-def temporary_baonoise_health_views(
+def temporary_residual_health_views(
     product_paths: Sequence[Path],
 ) -> Iterator[list[Path]]:
-    """Yield transient, v1-filtered inputs for path-only ``baonoise`` APIs."""
+    """Yield transient, v1-filtered inputs for path-only residual APIs."""
 
     paths = [Path(path) for path in product_paths]
     names = [path.name for path in paths]
     if len(names) != len(set(names)):
         raise ArchiveHealthError(
-            "cannot materialize baonoise health views with duplicate basenames"
+            "cannot materialize residual health views with duplicate basenames"
         )
-    with tempfile.TemporaryDirectory(prefix="pilotproxy-baonoise-health-") as root:
+    with tempfile.TemporaryDirectory(prefix="pilotproxy-residual-health-") as root:
         root_path = Path(root)
         views = [
-            write_baonoise_health_view(path, root_path / path.name) for path in paths
+            write_residual_health_view(path, root_path / path.name) for path in paths
         ]
         yield views
+
+
+write_baonoise_health_view = write_residual_health_view
+temporary_baonoise_health_views = temporary_residual_health_views
 
 
 def _spectral_sense_name(product: Mapping[str, Any]) -> str:
@@ -3672,6 +3674,7 @@ if __name__ == "__main__":
 __all__ = [
     "ARCHIVE_HEALTH_SUMMARY_SCHEMA_VERSION",
     "BAONOISE_HEALTH_VIEW_SCHEMA_VERSION",
+    "RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION",
     "ArchiveHealthError",
     "CORRECTED_SPECTRA_SCHEMA_VERSION",
     "DIAGNOSTIC_MANIFEST_SCHEMA_VERSION",
@@ -3700,8 +3703,10 @@ __all__ = [
     "proportion_summary",
     "recompute_corrected_fine_diagnostics",
     "temporary_baonoise_health_views",
+    "temporary_residual_health_views",
     "unix_utc_to_lmst_hours",
     "verify_supporting_evidence",
     "write_baonoise_health_view",
+    "write_residual_health_view",
     "write_archive_audit",
 ]

@@ -14,6 +14,7 @@ import os
 from string import Template
 
 import _calibration_paths as P
+from ppcal.state import CARRIER_DOMINATED_LEVEL_DB
 
 OUT = str(P.OUT)
 FIG = os.path.join(OUT, "figures")
@@ -83,7 +84,10 @@ def main(argv=None):
     tx = rows("transmitter_census.csv")
 
     multi = sorted({r["ch"] for r in eras if int(r["n_eras"]) > 1}, key=int)
-    quiet = [r for r in cal if float(r["mu_shift_db"]) < 3.0]
+    carrier_cut = float(
+        doc.get("report_policy", {}).get(
+            "carrier_dominated_level_db", CARRIER_DOMINATED_LEVEL_DB))
+    quiet = [r for r in cal if float(r["mu_shift_db"]) < carrier_cut]
     shifts = sorted(abs(float(r["mu_shift_db"])) for r in quiet)
     sigmas = sorted(float(r["sigma_over_mu"]) for r in quiet)
 
@@ -123,6 +127,7 @@ def main(argv=None):
     cal_rows = []
     for r in sorted(cal, key=lambda r: int(r["ch"])):
         v = r["verdict"]
+        threshold_status = r.get("threshold_status", "legacy_report")
         pill = ('<span class="pill %s">%s</span>'
                 % ("excise" if v == "excise" else "keep", v))
         cal_rows.append([
@@ -136,6 +141,7 @@ def main(argv=None):
             fmt(float(r["occupancy_provisional"]) * 100, "%.1f"),
             fmt(float(r["occ_at_eta_channel"]) * 100, "%.1f"),
             fmt(r["mask_band_suppression_db"], "%.2f"),
+            html.escape(threshold_status.replace("_", " ")),
             pill])
 
     sec = [r for r in tx if r["kind"] == "secondary"]
@@ -176,7 +182,7 @@ def main(argv=None):
         cal_table=table(["ch", "freq_id", "&mu;<sub>0</sub> prov.",
                          "&mu; calibrated", "shift dB", "&sigma;/&mu;",
                          "&eta;", "% masked F&gt;1", "% masked F&gt;&eta;&mu;",
-                         "mask gain dB", "verdict"], cal_rows,
+                         "mask gain dB", "threshold source", "report label"],
                         align=[2, 3, 4, 5, 6, 7, 8, 9]),
         sec_table=table(["channel", "offset from pilot (kHz)",
                          "dB rel. median"], sec_rows, align=[1, 2]),
@@ -205,15 +211,15 @@ def main(argv=None):
                            "Masked fraction at each rung of the ladder",
                            "What calibrating &mu; buys. Hatched bars are the "
                            "excised channels, where &mu; is the carrier "
-                           "itself and the working-rule bar is not an "
-                           "operating point."),
+                           "itself and the report-rule bar is not a "
+                           "report point."),
         fig_eta=img("fig13_eta_per_channel.png",
                     "Per-channel eta and the redshift-bin tolerances",
                     "Each channel&rsquo;s own &eta;, and the two tolerance "
                     "tiers behind it. The growth-rate tier varies by only "
                     "1.3&times; across the whole band, so it is not what "
                     "makes &eta; differ between channels."),
-        fig_bracket_old=img("fig12_bao_bracket.png",
+        fig_residual_bracket=img("fig12_residual_tolerance_bracket.png",
                         "Residual against tolerance at both bracket ends",
                         "The coherence bracket spans four to six orders of "
                         "magnitude. The red end is the adopted basis: every "
@@ -232,15 +238,15 @@ def main(argv=None):
         fig_thr=img("fig06_threshold_ladder.png",
                     "Masked fraction against eta",
                     "Masked fraction against threshold for every channel, "
-                    "with each channel&rsquo;s own operating point marked."),
+                    "with each channel&rsquo;s report point marked."),
         fig_era=img("fig07_era_effect.png",
                     "Era-blind against latest-era masked fraction",
                     "Restricting to the latest era moves only the channels "
                     "that had a transition &mdash; and moves them in the "
                     "direction the physics demands."),
-        fig_disp=img("fig08_dispositions.png", "Per-channel disposition",
-                     "The two pieces of evidence behind every verdict: how "
-                     "much masking the working threshold costs, and whether a "
+        fig_disp=img("fig08_dispositions.png", "Historical report labels",
+                     "The two pieces of evidence behind every report label: how "
+                     "much masking the report threshold costs, and whether a "
                      "null exists in that era at all."),
         fig_wide=img("fig04_wide_spectra.png",
                      "Channel-wide spectra, 23 panels",
@@ -406,8 +412,8 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   <h1>Pilot Detector Calibration</h1>
   <p class="lede">The completed trawl, read back as a calibration: where each
   channel&rsquo;s null actually sits, where the transmitters are relative to
-  the detector&rsquo;s guards, what threshold the BAO tolerance buys, and
-  which allocations survive it.</p>
+  the detector&rsquo;s guards, what a supplied science tolerance implies, and
+  how the historical report classifies each allocation.</p>
   <div class="meta">
     <span>${n_channels} channels</span>
     <span>${n_frames} frames</span>
@@ -416,6 +422,12 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
     <span>products: _per_pilot complete-23</span>
   </div>
   <div class="strip">${strip}</div>
+  <div class="note warn">
+    <span class="h">Report only.</span>
+    <p>These keep/excise labels reproduce the calibration report. They are not
+    operational threshold exports. Missing supplied thresholds use the
+    historical fallback and are labeled as such in the table.</p>
+  </div>
 </header>
 
 <section>
@@ -431,8 +443,8 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   collected under <strong>F&nbsp;&gt;&nbsp;1</strong>: a provisional setting,
   the strictest available, chosen so a threshold could be exercised while the
   archive was still being built.</p>
-  <p>It is not the operating point, and the cost of treating it as one is the
-  single largest number in this report. Across the 17 channels worth keeping,
+  <p>It is not a calibrated report point, and the cost of treating it as one
+  is the single largest number in this report. Across the 17 channels worth keeping,
   it masks a median of <strong>${prov_med}%</strong> of frames.</p>
   </div>
 
@@ -447,9 +459,9 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
       <span class="why">&mu; measured per channel, per era, from the frames
       the survey actually holds. This is the real null centre.</span></li>
     <li><span class="rung">F &gt; &eta;&mu;</span><span class="what">the
-      working rule</span>
-      <span class="why">&eta; priced per channel from the BAO noise
-      tolerance: ${eta_min} to ${eta_max} across the band, median
+      report rule</span>
+      <span class="why">&eta; supplied from the science residual
+      tolerance when available: ${eta_min} to ${eta_max} across the band, median
       ${eta_med}. Masks ${work_med}% at the median.</span></li>
   </ol>
   ${fig_ladder_sum}
@@ -512,10 +524,10 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   as the half-sample mode &mdash; the densest region of the sample. That
   choice does double duty: where a null exists the mode lands on it, and
   where the channel is fully occupied the mode lands on the carrier lobe
-  instead, which is itself the evidence for the disposition. The scale comes
+  instead, which is itself the evidence for the report label. The scale comes
   from frames at or below the centre, which a carrier can only ever add to
   from above, using the released
-  <code>baonoise.residual.NULL_SCALE_PROBES</code> convention.</p>
+  <code>rfisher.residual.NULL_SCALE_PROBES</code> convention.</p>
   <p>On the 17 channels with a recoverable null, the calibrated &mu; agrees
   with the analytic constant to between <strong>${shift_min} dB</strong> and
   <strong>${shift_max} dB</strong> (median ${shift_med} dB), and the null
@@ -584,7 +596,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
     rather than a gap. A residual above tolerance means that tolerance is
     <strong>not certified</strong> on present evidence &mdash; not that it is
     exceeded. A measured &tau; can only move the residual down, so it can only
-    enlarge the feasible set. And no disposition rests on the bound at all:
+    enlarge the feasible set. And no report label rests on the bound at all:
     every excised channel fails on carrier dominance, which is a &tau;-free
     measurement of the latest era. The bound governs what the kept channels
     cost, not which channels are kept.</p>
@@ -593,22 +605,24 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
     already specified. Until it runs these bounds stand, and every number
     downstream of them inherits the same one-sided qualification.</p>
   </div>
-  ${fig_bracket_old}
+  ${fig_residual_bracket}
 </section>
 
 <section>
   <div class="sec-head"><span class="sec-n">05</span>
   <h2>What survives</h2></div>
   <div class="measure">
-  <p>A channel is excised when the densest population in its latest era is
+  <p>The historical report labels a channel excised when the densest
+  population in its latest era is
   the carrier rather than a null &mdash; there is then nothing to threshold
-  against &mdash; or when reaching the operating point costs more than half
+  against &mdash; or when reaching the report point costs more than half
   the band-time. Six channels fail on the first test and none on the second
   alone. The separation is clean rather than marginal: every kept channel
   sits below 1&nbsp;dB of null shift and every excised one above
   5.3&nbsp;dB, with nothing in between.</p>
-  <p>All <strong>${n_agree} of ${n_channels}</strong> dispositions match the
-  published complete-23 policy, reached here from the products alone.</p>
+  <p>All <strong>${n_agree} of ${n_channels}</strong> report labels match
+  the published complete-23 policy. This agreement does not promote them to
+  operational thresholds.</p>
   </div>
   ${fig_disp}
   ${cal_table}
@@ -746,7 +760,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
     <div class="finding">
       <h3>ch17&rsquo;s era split was not in the locked table</h3>
       <p>The segmentation finds a boundary at 2022-10 between a +12.6 dB and
-      a +16.4 dB era. It does not change ch17&rsquo;s disposition, but any
+      a +16.4 dB era. It does not change ch17&rsquo;s report label, but any
       era-blind characterisation of that channel &mdash; including its
       measured carrier offset &mdash; averages two transmitter
       configurations.</p>
@@ -774,7 +788,7 @@ footer{border-top:1px solid var(--rule); margin-top:clamp(56px,7vw,90px);
   <p>Built from the completed <code>_per_pilot</code> complete-23 products
   (23 npz, ${n_frames} frames, ${n_units} units). Geometry, frame health and
   CFAR conventions are taken from WVURAIL/pilot-proxy; residuals, coherence
-  times and tolerances from WVURAIL/bao-noise-tolerance and its completed
+  times and tolerances from WVURAIL/RFIsher and its completed
   forecast run.</p>
 </footer>
 </div>

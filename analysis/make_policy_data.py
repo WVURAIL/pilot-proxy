@@ -1,28 +1,30 @@
 #!/usr/bin/env python3
-"""Build policy_data.json, the data behind the DTV masking-policy page.
+"""Build policy_data.json for the historical DTV masking comparison.
 
 Three stages over the per-pilot survey products (*.npz under $PP_PER_PILOT
-or --products), all through the released ``baonoise`` package
-(bao-noise-tolerance) --- the same cross-repository dependency
+or --products), all through the released RFIsher package --- the same dependency
 ``tools/make_dissertation_tables.py`` and ``plot_channel_histograms.py``
 already carry:
 
 1. per-channel threshold sweeps, coherence times, Fisher-forecast pricing,
-   and the recommendation logic;
-2. the recommended thresholds applied post-hoc to every archived frame
-   (monthly masked fractions under the deployed and recommended rules,
+   and the historical report labels;
+2. the fixed report rule applied post-hoc to every archived frame
+   (monthly masked fractions under the recorded and historical rules,
    kept-frame leakage);
 3. the threshold-ladder fields (the literal F > 1 window fraction and each
    channel's mu0).
 
-Locked methodology --- do not change without a policy revision:
+Locked report methodology --- do not change without an artifact revision:
 
 * Window: since="2025-01" --- every month after the last detected
   transmitter transition (ch19 sign-off, Dec 2024).
 * Coherence bracket: each sweep runs at the measured-or-day-cap tau AND at
-  the thermal floor (tau = one frame, n_coh = 1); verdicts that agree at
-  both ends are decided, the rest are bracketed.
+  the thermal floor (tau = one frame, n_coh = 1); historical labels that
+  agree at both ends are reported, and the rest are bracketed.
 * INCLUSIVE_KEEP / COLLECTION_CEASED overrides and the ETAS grid below.
+
+This artifact is report-only. It does not select or export an operational
+threshold.
 
 Render the page afterwards with ``render_artifacts.py``.
 
@@ -44,17 +46,17 @@ from pilot_proxy.archived_product_keys import (
 from pilot_proxy.archive_health import (
     FRAME_HEALTH_GATE_SCHEMA_VERSION,
     evaluate_frame_health,
-    temporary_baonoise_health_views,
+    temporary_residual_health_views,
 )
-from baonoise import api, channels as chn, residual as res, scenarios
+from rfisher import api, channels as chn, residual as res, scenarios
 
 import _products as P
 
 SINCE = "2025-01"
-# channels kept-and-masked under the inclusive-for-now rule (see the
+# Historical labels kept-and-masked under the inclusive-for-now rule (see the
 # override below). 14 and 15 joined 36 at the complete-23 snapshot:
 # both satisfy the same condition (excise picked only at the coherence
-# cap, bracket disagreement immaterial, working threshold frees ~75%
+# cap, bracket disagreement immaterial, the report rule frees ~75%
 # of current-epoch frames -- an episodic faint carrier, not a pinned
 # occupancy), and excising a ~75%-recoverable allocation would break
 # the excision-only-where-recoverable-rounds-to-zero posture.
@@ -64,7 +66,7 @@ COLLECTION_CEASED = {30: "September 2023"}
 ETAS = [1.0, 1.2, 1.4, 2.0, 5.0]
 FRAME_S = 16384 * 2.56e-6          # 41.94 ms -> thermal end of the bracket
 DAY_CAP = 86164.0
-ETA_RETUNE = 1.4                   # the recommended working threshold
+HISTORICAL_REPORT_ETA = 1.4
 # survey span 2018-12 .. 2026-07 (extend M1 when a newer snapshot adds months)
 M0 = 2018 * 12 + 11
 M1 = 2026 * 12 + 6
@@ -107,8 +109,8 @@ CLASS = {17: "persistent", 22: "persistent", 24: "persistent", 30: "persistent",
          29: "trace"}
 
 
-def recommendations(paths, by_ch):
-    """Stage 1: sweeps, forecast pricing, and the per-channel recommendation."""
+def historical_report(paths, by_ch):
+    """Stage 1: sweeps, forecast pricing, and historical report labels."""
     tables = {}
     for eta in ETAS:
         tables[eta] = chn.mask_table_from_products(paths, since=SINCE, eta=eta)
@@ -132,8 +134,15 @@ def recommendations(paths, by_ch):
     def price_excise(chn_id):
         return req_hours(scenarios.single_channel(chn_id, 1.0, keep=False)) / clean_s
 
-    out = {"since": SINCE, "etas": ETAS, "clean_hours": round(clean_s, 1),
-           "channels": {}, "policy": {}}
+    out = {
+        "since": SINCE,
+        "etas": ETAS,
+        "clean_hours": round(clean_s, 1),
+        "decision_scope": "historical_report_only",
+        "historical_report_eta": HISTORICAL_REPORT_ETA,
+        "channels": {},
+        "policy": {},
+    }
 
     for ch in sorted(by_ch):
         info = by_ch[ch]
@@ -196,7 +205,7 @@ def recommendations(paths, by_ch):
                 at14=row_at(s, 1.4),
             )
 
-        # ---- recommendation ----
+        # Historical report label. The output key is frozen for compatibility.
         f1 = rec["window_frac"]["1.0"]
         f14 = rec["window_frac"]["1.4"]
         prices = {}
@@ -205,7 +214,7 @@ def recommendations(paths, by_ch):
                 raise RuntimeError(
                     f"ch{ch}: both health-filtered residual sweeps are empty "
                     f"despite {health_kept} stored-mask kept frames; refusing "
-                    "to manufacture a policy recommendation"
+                    "to manufacture a historical report label"
                 )
             action = "excise"
             why = (
@@ -222,14 +231,15 @@ def recommendations(paths, by_ch):
         elif not all(sweeps.values()):
             raise RuntimeError(
                 f"ch{ch}: only one coherence-bracket sweep succeeded; refusing "
-                "to manufacture a policy recommendation"
+                "to manufacture a historical report label"
             )
         elif f14 is None:
             if ch in COLLECTION_CEASED:
                 action = "excise"
                 why = ("no current-epoch frames because CHIME ceased baseband "
                        f"collection on this channel in {COLLECTION_CEASED[ch]} due "
-                       "to the contamination itself; the archive record decides — "
+                       "to the contamination itself; the archive record supports "
+                       "the historical label — "
                        "shelf at system noise, the strongest carrier measured, "
                        "transmitter in Penticton — and the operational exclusion "
                        "corroborates excision; revisit only via periodic "
@@ -243,7 +253,8 @@ def recommendations(paths, by_ch):
             agrees = True
         elif f14 < 0.15:
             action = "clean"
-            why = (f"at eta=1.4 only {100*f14:.1f}% of current-epoch frames mask "
+            why = (f"under the historical eta=1.4 report rule, only "
+                   f"{100*f14:.1f}% of current-epoch frames mask "
                    f"(vs {100*f1:.1f}% at the deployed rule); no transmitter to "
                    f"fight — the channel is effectively clean")
             r_fwd = 0.0
@@ -282,38 +293,38 @@ def recommendations(paths, by_ch):
                 b = rec["sweep_cap"]["best"]
                 r_b = row_at(sweeps["cap"], b["eta"])["r"] if b else 0.0
                 chosen = ("kept", f14, r_b)
-            # Inclusive-for-now override: where excision rests on the unverified
-            # coherence cap rather than a live carrier (bracket disagrees AND the
-            # working threshold frees most frames), keep and mask, priced at the
-            # cap, pending the burst-resolved correlation-time measurement.
+            # Historical override where the coherence cap, not a live carrier,
+            # drives the label and the report rule frees most frames.
             if (ch in INCLUSIVE_KEEP and action == "excise"
                     and f14 is not None and f14 < 0.5):
                 r14 = (row_at(sweeps["cap"], 1.4) or {}).get("r", 0.0)
                 action = "keep and mask (coherence unverified)"
                 chosen = ("kept", f14, r14)
-                why = ("inclusive-for-now: the excision case here is the "
-                       "unverified coherence cap, not a live carrier - kept and "
-                       "masked at the working threshold, priced at the cap, "
-                       "pending the burst-resolved tau_c measurement")
+                why = ("historical inclusive-for-now label: the excision case "
+                       "is the unverified coherence cap, not a live carrier; "
+                       "kept and masked under the eta=1.4 report rule, priced at "
+                       "the cap, pending the burst-resolved tau_c measurement")
         rec["recommendation"] = dict(action=action, why=why, agrees=agrees,
-                                     prices=prices)
+                                     prices=prices,
+                                     decision_scope="historical_report_only")
         rec["chosen"] = chosen
         out["channels"][str(ch)] = rec
         print(f"ch{ch:>3} {rec['cls']:<10} f1={f1} f14={f14} -> {action}")
 
-    # ---- whole-survey policy pricing (both bracket ends where applicable) ----
+    # Whole-survey historical pricing at both bracket ends where applicable.
     per_channel = {}
     for ch, rec in ((int(c), r) for c, r in out["channels"].items()):
         kind, f, r = rec["chosen"]
         per_channel[ch] = (1.0, 0.0) if kind == "excised" else (f, r)
     sc_pol = scenarios.at_threshold(per_channel)
     out["policy"] = dict(
+        decision_scope="historical_report_only",
         survey_x=round(req_hours(sc_pol) / clean_s, 4),
         worst_bin_x=round(req_hours(sc_pol, 6) / clean_w, 4),
         n_excised=sum(1 for r in out["channels"].values()
                       if r["chosen"][0] == "excised"),
     )
-    # deployed-policy comparison (windowed, eta=1 fractions, masking only)
+    # Recorded-rule comparison: windowed eta=1 fractions, masking only.
     dep = {ch: (tables[1.0].fractions[ch], 0.0)
            for ch in per_channel if ch in tables[1.0].n_frames}
     sc_dep = scenarios.at_threshold(dep)
@@ -325,18 +336,17 @@ def recommendations(paths, by_ch):
 
 
 def apply_to_archive(pd, paths):
-    """Stage 2: the recommended thresholds recomputed over every archived frame.
+    """Stage 2: apply the historical report rule to every archived frame.
 
     The archived products store the raw coarse power ratio per frame, so the
-    retuned masks are exact post-hoc recomputations, not approximations. Every
+    report masks are exact post-hoc recomputations, not approximations. Every
     denominator and distribution is restricted by the v1 frame-health gate.
-    Adds monthly masked fractions under the deployed rule and under the
-    recommended policy, plus kept-frame leakage statistics.
+    The frozen output field names retain the earlier artifact schema.
     """
     pd["month_labels"] = [f"{(M0+i)//12}-{(M0+i)%12+1:02d}"
                           for i in range(NMONTHS)]
 
-    tot_dep_kept = tot_new_kept = tot_valid = 0
+    tot_dep_kept = tot_report_kept = tot_valid = 0
     for p in sorted(paths):
         with np.load(p, allow_pickle=False) as z:
             ch = str(int(z["physical_channel"][0]))
@@ -353,9 +363,15 @@ def apply_to_archive(pd, paths):
                 for t in t0])[z["frame_unit_index"]] - M0
 
         dep = valid & (F > mu0)
-        retuned = (action.startswith("clean") or action.startswith("retune")
-                   or action.startswith("keep and mask"))
-        new = valid & (F > ETA_RETUNE * mu0) if retuned else None  # excised: n/a
+        report_rule_applies = (
+            action.startswith("clean")
+            or action.startswith("retune")
+            or action.startswith("keep and mask")
+        )
+        report_mask = (
+            valid & (F > HISTORICAL_REPORT_ETA * mu0)
+            if report_rule_applies else None
+        )
 
         def monthly(mask_arr):
             out = []
@@ -367,15 +383,16 @@ def apply_to_archive(pd, paths):
 
         rec["applied"] = dict(
             monthly_deployed=monthly(dep),
-            monthly_policy=(monthly(new) if retuned else None),
-            excised=not retuned,
+            monthly_policy=(monthly(report_mask)
+                            if report_rule_applies else None),
+            excised=not report_rule_applies,
             health_included_frames=int(valid.sum()),
             health_excluded_frames=int(health.excluded.sum()),
         )
-        # leakage: excess distribution of frames the retuned rule KEEPS (window)
-        if retuned:
+        # Kept-frame excess under the historical report rule.
+        if report_rule_applies:
             win = valid & (months >= (2025 * 12 + 0 - M0))
-            kept = win & ~new
+            kept = win & ~report_mask
             if kept.sum():
                 exc = 10 * np.log10(np.maximum(F[kept], 1e-9) / mu0)
                 rec["applied"]["kept_excess_db"] = dict(
@@ -384,22 +401,23 @@ def apply_to_archive(pd, paths):
                     max=round(float(exc.max()), 3),
                     n=int(kept.sum()))
             tot_dep_kept += int((win & ~dep).sum())
-            tot_new_kept += int(kept.sum())
+            tot_report_kept += int(kept.sum())
             tot_valid += int(win.sum())
 
     pd["applied_summary"] = dict(
         window=SINCE,
         retuned_valid_frames=tot_valid,
         kept_deployed=tot_dep_kept,
-        kept_policy=tot_new_kept,
+        kept_policy=tot_report_kept,
         kept_deployed_frac=round(tot_dep_kept / tot_valid, 4),
-        kept_policy_frac=round(tot_new_kept / tot_valid, 4),
+        kept_policy_frac=round(tot_report_kept / tot_valid, 4),
+        decision_scope="historical_report_only",
     )
     s = pd["applied_summary"]
-    print(f"retuned channels, window {SINCE}->: "
+    print(f"historical report channels, window {SINCE}->: "
           f"{s['retuned_valid_frames']} valid frames")
     print(f"  deployed rule keeps {100*s['kept_deployed_frac']:.1f}%")
-    print(f"  recommended policy keeps {100*s['kept_policy_frac']:.1f}%")
+    print(f"  historical report rule keeps {100*s['kept_policy_frac']:.1f}%")
 
 
 def add_ladder(pd, by_ch):
@@ -468,11 +486,10 @@ def main(argv=None):
                 mu0=round(float(z["mu0"][0]), 5),
             )
 
-    # baonoise owns the residual/forecast machinery but its public APIs accept
-    # paths and load frame arrays internally. Transient minimal views make the
-    # v1 inclusion explicit at that boundary; no dissertation-facing policy
-    # number is computed from the unfiltered originals.
-    with temporary_baonoise_health_views([Path(path) for path in paths]) as views:
+    # RFIsher owns the residual and forecast machinery, but its public APIs
+    # accept paths and load frame arrays internally. Transient minimal views
+    # make the v1 inclusion explicit at that boundary.
+    with temporary_residual_health_views([Path(path) for path in paths]) as views:
         view_by_name = {view.name: str(view) for view in views}
         by_ch = {
             ch: {
@@ -481,14 +498,15 @@ def main(argv=None):
             }
             for ch, metadata in source_by_ch.items()
         }
-        pd = recommendations([str(view) for view in views], by_ch)
-        print("\npolicy:", pd["policy"])
+        pd = historical_report([str(view) for view in views], by_ch)
+        print("\nhistorical report:", pd["policy"])
         apply_to_archive(pd, paths)
         add_ladder(pd, by_ch)
 
     pd["health_gate"] = dict(
         schema_version=FRAME_HEALTH_GATE_SCHEMA_VERSION,
         policy="fail_closed",
+        applied_to_all_residual_inputs=True,
         applied_to_all_baonoise_inputs=True,
         stored_frames=total_frames,
         included_frames=total_health_included,

@@ -1,7 +1,7 @@
 # coding=utf-8
 """Temporary single-era views of a survey product.
 
-``baonoise.residual.threshold_sweep`` characterises a transmitter-*on* epoch
+``rfisher.residual.threshold_sweep`` characterises a transmitter-*on* epoch
 and takes its sensitivity floor from the *off* epoch.  That is the right
 shape for a sign-on channel, whose latest era is the loud one, and the wrong
 shape for a sign-off channel, whose latest era is the quiet one: naming the
@@ -18,12 +18,17 @@ is the only population that can bound a transmitter-off level.
 from __future__ import annotations
 
 import contextlib
+import operator
 import os
 import tempfile
 
 import numpy as np
 
 from pilot_proxy.archived_product_keys import ARCHIVED_DATA_SHELF_SNR_DB
+
+QUIET_ERA_MAX_LEVEL_DB = 1.0
+QUIET_FLOOR_PERCENTILE = 90.0
+MIN_QUIET_FLOOR_FRAMES = 30
 
 
 @contextlib.contextmanager
@@ -58,8 +63,12 @@ def era_product_view(channel, frame_mask, tmpdir=None):
             os.remove(path)
 
 
-def quiet_era_floor_db(channel, eras, level_threshold_db=1.0,
-                       percentile=90.0):
+def quiet_era_floor_db(
+        channel,
+        eras,
+        level_threshold_db=QUIET_ERA_MAX_LEVEL_DB,
+        percentile=QUIET_FLOOR_PERCENTILE,
+        minimum_frames=MIN_QUIET_FLOOR_FRAMES):
     """(floor dB, era label, n frames) from the quietest era with a level.
 
     A transmitter-off level can only be bounded by frames the transmitter was
@@ -67,6 +76,11 @@ def quiet_era_floor_db(channel, eras, level_threshold_db=1.0,
     which is the case for every always-on carrier and is where the caller has
     to fall back on the sigma-implied substitute.
     """
+    minimum_frames = operator.index(minimum_frames)
+    if minimum_frames <= 0:
+        raise ValueError("minimum_frames must be positive")
+    if not 0.0 <= percentile <= 100.0:
+        raise ValueError("percentile must be in [0, 100]")
     z = channel._z
     shelf = z[ARCHIVED_DATA_SHELF_SNR_DB][:, 0][channel.health_include]
     fm = channel.frame_month
@@ -77,7 +91,7 @@ def quiet_era_floor_db(channel, eras, level_threshold_db=1.0,
         sel = (fm >= era.month_start) & (fm <= era.month_end)
         vals = shelf[sel]
         vals = vals[np.isfinite(vals)]
-        if vals.size < 30:
+        if vals.size < minimum_frames:
             continue
         db = float(np.percentile(vals, percentile))
         if best is None or era.level_median_db < best[2]:

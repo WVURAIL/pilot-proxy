@@ -1,7 +1,7 @@
 """Shared figure style for the survey-plate scripts.
 
-The palette and quiet-chart specs match the bao-noise-tolerance manuscript
-figures (this module began as a subset of ``baonoise.plots``), so plates
+The palette and quiet-chart specs match the RFIsher manuscript figures (this
+module began as a subset of ``rfisher.plots``), so plates
 generated from either repository sit together without restyling: 2px lines,
 hairline solid gridlines, recessive axes, no dual axes.
 """

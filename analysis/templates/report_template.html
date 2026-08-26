@@ -243,23 +243,24 @@
 </section>
 
 <section class="sec">
-  <p class="eyebrow">Operating point</p>
-  <h2>Where the mask threshold should actually sit</h2>
+  <p class="eyebrow">Historical threshold scan</p>
+  <h2>How the report scanned the mask threshold</h2>
   <p class="cap">
     The deployed mask (F&nbsp;&gt;&nbsp;&mu;<sub>0</sub>, &eta;&nbsp;=&nbsp;1) is the most conservative
     choice. Sweeping the threshold F&nbsp;&gt;&nbsp;&eta;&mu;<sub>0</sub> upward and folding in the residual
-    contamination of the kept frames (<span class="mono">baonoise.residual.threshold_sweep</span>) gives the
+    contamination of the kept frames (<span class="mono">rfisher.residual.threshold_sweep</span>) gives the
     net effective-sensitivity multiplier net&nbsp;=&nbsp;(1+r<sub>unmasked</sub>)/(1+r<sub>masked</sub>)&thinsp;&times;&thinsp;(1&minus;f):
-    above 1 the threshold pays, below 1 it discards more signal than contamination. The best point is
-    marked; sweeps start where enough frames survive. &tau;<sub>c</sub> is measured where the estimator&rsquo;s
+    above 1 the historical scan retains more effective sensitivity; below 1 it discards more signal than
+    contamination. The highest report point is marked, but it is not an operational selection. Sweeps
+    start where enough frames survive. &tau;<sub>c</sub> is measured where the estimator&rsquo;s
     gates pass (ch&nbsp;35: 46&nbsp;min and ch&nbsp;31: 34&nbsp;min) and held at the
     sidereal-day bound elsewhere &mdash; the bound maximizes the apparent benefit of masking, so
     bound-based nets are upper limits. Channels with a health-included null population but no
     measurable off-epoch floor use the <span class="mono">floor_provenance</span> &sigma;-implied
     substitute. Channels 22 and 24 have no health-included stored-mask kept frames, so their
     residual floors and threshold sweeps are unavailable rather than substituted. The sign-off channels are
-    calibrated per-epoch (<span class="mono">off_from</span> support is in baonoise master); their
-    operating points live in the companion policy brief.
+    calibrated per-epoch (<span class="mono">off_from</span> support is in RFIsher); their historical
+    comparisons live in the companion masking brief.
   </p>
   <div class="card">
     <div class="grid3" id="sweeps"></div>
@@ -818,11 +819,11 @@ function drawMask() {
   hit.addEventListener("mouseleave", hideTip);
 }
 
-// ---------- threshold sweeps (operating point) ----------
-function sweepVerdict(s) {
-  if (s.best.net <= 1.01) return "no threshold pays — keep or excise";
-  if (s.best.f > 0.5) return "mask nearly all ≈ excision";
-  return `mask tail at η ≈ ${s.best.eta.toFixed(1)}`;
+// ---------- historical threshold sweeps ----------
+function sweepLabel(s) {
+  if (s.best.net <= 1.01) return "no favorable report point";
+  if (s.best.f > 0.5) return "report point masks nearly all";
+  return `historical scan point at η ≈ ${s.best.eta.toFixed(1)}`;
 }
 function drawSweeps() {
   const host = document.getElementById("sweeps");
@@ -885,13 +886,13 @@ function drawSweeps() {
       <td>${s.best.net > 1.01 ? s.best.eta.toFixed(2) : "—"}</td>
       <td>${s.best.net > 1.01 ? pct(s.best.f, 1) : "—"}</td>
       <td>${s.best.net.toFixed(2)}</td>
-      <td class="cls">${sweepVerdict(s)}</td>
+      <td class="cls">${sweepLabel(s)}</td>
     </tr>`;
   }).join("");
   document.getElementById("sweeptable").innerHTML =
     `<table class="data"><thead><tr>
       <th>DTV ch</th><th>pilot MHz</th><th>τ<sub>c</sub></th><th>r unmasked</th><th>net at η=1</th>
-      <th>best η</th><th>masked at best</th><th>best net</th><th>verdict</th>
+      <th>scan η</th><th>masked at scan point</th><th>maximum report net</th><th>historical label</th>
     </tr></thead><tbody>${trs}</tbody></table>`;
 }
 

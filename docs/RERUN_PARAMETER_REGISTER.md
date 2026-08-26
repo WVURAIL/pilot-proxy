@@ -113,6 +113,7 @@ pins, not claims that a scientific choice is optimal.
 | Implemented pilot offset | 309441 Hz above the lower channel edge | [`atsc_channels.py`](../src/pilot_proxy/atsc_channels.py) |
 | Fine transform input | 128 complex row sums, padded to 256 | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
 | Fine transform arithmetic | radix-2 DIT, signed Q15 twiddles, natural-order output | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
+| Fine multiplier encoding | Q16 uint64, deployable values 1 through `2^64 - 1`; `2^64` is an internal non-deployable boundary marker | [`fine_decision.py`](../src/pilot_proxy/fine_decision.py) |
 | Butterfly rounding | add 16384, then arithmetic shift by 15 | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
 | Stage scaling | none | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
 | Input component bound | absolute value at most `2^20` | [`fxfft.py`](../src/pilot_proxy/fxfft.py) |
@@ -200,11 +201,77 @@ Source: [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md).
 | Parameter or decision | Current state | Required evidence or decision |
 |---|---|---|
 | Fine decision anchor and width | Implemented as runtime data but not calibrated for activation | Measure per-channel and per-era pilot locations |
-| Fine decision testbench rank, `rho` | 64 is the recorded candidate; the runtime-bundle exporter's pending block remains unset | Check in the supporting measurement and recalibrate before activation |
+| Fine decision testbench rank, `rho` | 64 is the recorded candidate, corresponding to zero-based `cfar_rank = 63`; the runtime-bundle exporter's pending block remains unset | Check in the supporting measurement and recalibrate before activation |
 | Fine decision rank and multiplier | No active production values | Calibrate on verified null epochs and record product hashes and quantiles |
 
 These decisions do not block archive acquisition. The scan records the exact
 fine terms while the fine decision remains inactive.
+
+## Downstream threshold preparation
+
+RFIsher owns the downstream decision register and evidence gate. The detector
+archive remains a threshold-independent input and does not choose these values.
+The current station-era defaults are passed explicitly by the RFIsher
+calibration path so one recorded policy snapshot controls the cross-project
+run.
+
+| Decision | Current value | State | Basis |
+|---|---:|---|---|
+| Era summary | monthly median per-acquisition level | Provisional | Robust reduction before station-state segmentation |
+| Minimum era support | 6 observed months and a 270-day elapsed span per side | Provisional | Archive guardrail; first and last retained timestamps determine the span and gaps remain visible separately |
+| Minimum station step | 2 dB | Provisional | Separates large state changes from ordinary propagation scatter |
+| Rank threshold | `abs(z) >= 4` | Provisional | Conservative single-comparison threshold; the date scan is not globally calibrated |
+| Maximum eras | 5 | Provisional | Over-segmentation cap rather than a formal penalty |
+| Thresholding era | latest | Locked | Only the current station state is relevant to a new operating point |
+| Quiet-era eligibility | median level at most 1 dB | Provisional | Archive-specific boundary for a transmitter-off floor |
+| Quiet-floor summary | p90 of at least 30 finite frames | Provisional | One-sided screening bound; exact coverage is not calibrated |
+| Within-era split | calendar midpoint of the latest era | Locked method | Avoids an equal-frame split when cadence changes |
+| Cost drift margin | unset | Open | Must follow downstream science materiality |
+| Systematic-residual drift margin | unset | Open | Must follow transfer uncertainty or a residual-budget allocation |
+| Per-half retained-frame floor | unset | Open | Must come from estimator precision rather than reuse the pooled selector floor |
+| Stability uncertainty | unset | Open | Point-estimate ratios need an acquisition- or day-blocked interval before an operational stability claim |
+| Shelf-to-science systematic and variance gains | unity | Conditional only | Screening closure; no visibility-domain transfer measurement exists |
+| Candidate rank family | every one-based `rho` supported by every accepted frame | Derived | Exhausts valid implemented order statistics |
+| Rank index mapping | `rho = cfar_rank + 1` | Derived | The detector field is a zero-based array index; downstream `rho` is the corresponding one-based order-statistic rank |
+| Candidate multiplier family | integer Q16 value 1 and every unique deployable required Q16 change point | Derived | Exact deployable empirical staircase; Q16 value 1 is eta = 1 / 65536, not eta = 1 |
+| Designated-set anchor and width | unset | Open | Requires a held-out latest-era calibration |
+
+The downstream selector must refuse an operational label while required
+choices remain provisional, open, or conditional. A unity transfer may be
+used only for an explicitly labeled screening calculation. See RFIsher's
+`docs/threshold-decision-register.md` for the stable identifiers, literature,
+sensitivity values, and refusal behavior.
+
+The local calibration suite below is a historical report. Its keep/excise
+labels and fallback threshold are never operational exports. The neutral
+`--thresholds` option and `PP_THRESHOLD_TABLE` environment variable are
+current; `--bao`, `PP_ETA_BAO`, `bao_csv`, and the default
+`eta_bao.csv` filename remain compatibility aliases only.
+
+## Existing report-only choices
+
+These values reproduce the calibration report. They do not define the new
+prepared threshold family.
+
+| Decision | Current value | State | Basis |
+|---|---:|---|---|
+| Report multiplier ladder | 1.0, 1.1, 1.2, 1.4, 2.0, 5.0 | Historical | Sparse display and comparison grid |
+| Null scale probes | lower-half p32, p5, and p0.3 with normal deviates 1, 1.96, and 2.9677 | Historical | Robust report diagnostic inherited from the released residual calculation |
+| Null-centre agreement | 0.20 dB | Provisional | Archive-specific diagnostic band |
+| Lower-tail support | 20 frames | Provisional | Minimal report guard, not a precision calculation |
+| Detection-floor marker | one-sided Gaussian probability 0.001 | Historical | Produces the derived normal deviate 3.090232 |
+| Kept-tail summary | p99 | Historical | Report diagnostic only |
+| Excision label | 50% masked | Historical | Replaced by continuous masking cost in threshold selection |
+| Light-masking label | 10% masked | Historical | Report label only |
+| Carrier-dominated split | 3 dB | Provisional | Lies in the archive's empty 1.0--5.3 dB population gap |
+| Missing-threshold fallback | eta = 1.4 | Historical | Reproduces report rows and cannot support an operational disposition |
+| Threshold-bracket identification | ratio below 1.10 | Provisional | Ten-percent materiality choice |
+| Era upper-level summary | p90 | Historical | Report summary only |
+| Wide-spectrum centre exclusion | 60 Hz half-width | Historical | Labels the channel-centre instrumental feature rather than a transmitter |
+| Wide-spectrum pilot search | 5 kHz half-width | Historical | Report refinement window around the synthesized pilot |
+| Wide-spectrum peak census | at least 3 dB, at least 3 kHz separation, at most 8 peaks | Historical | Sparse report census rather than a detection policy |
+| Fine-spectrum upper summary | p90 | Historical | Shows intermittent power beside the median trace |
+| Fine-line census | at least 1.5 dB level and prominence, at least 48 Hz separation, at most 6 lines | Historical | Four padded-bin separation avoids counting correlated neighbours twice |
 
 ## Operational setup before archive launch
 
@@ -216,8 +283,8 @@ fine terms while the fine decision remains inactive.
 | Production-profile resume | Final-source gate passed with eight unique units, 22 unique frames, and empty staging | Complete; interruption and resume evidence are in the external ledger |
 
 Do not promote the recorded testbench rank to deployed runtime data. An exported
-pending bundle leaves anchor, rank, and multiplier unset while calibration is
-pending.
+pending bundle leaves anchor, zero-based `cfar_rank`, and multiplier unset while
+calibration is pending.
 
 ## Separate radio transfer study
 

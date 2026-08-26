@@ -6,12 +6,11 @@ One pass over the per-pilot survey products (*.npz under $PP_PER_PILOT or
 level/occupancy statistics, monthly aggregates, month-of-year and
 hour-of-day profiles, the averaged fine spectrum, the off-nominal carrier
 envelope measurement, level histograms, and the max-pooled integrated
-spectra. A second stage runs the residual threshold sweeps for the eight
-featured channels through the released ``baonoise`` package
-(bao-noise-tolerance) --- the same cross-repository dependency
+spectra. A second, historical report-only stage runs residual threshold sweeps
+for the eight featured channels through the released RFIsher package --- the same dependency
 ``tools/make_dissertation_tables.py`` and ``plot_channel_histograms.py``
 already carry --- and merges them in, also writing threshold_sweeps.json
-(kept as its own output: the bao two-walls figure regeneration reads it).
+(kept as its own output: the residual two-walls figure regeneration reads it).
 
 Render the page afterwards with ``render_artifacts.py``.
 
@@ -38,9 +37,9 @@ from pilot_proxy.archive_health import (
     evaluate_frame_health,
     health_correct_integrated_spectra,
     recompute_corrected_fine_diagnostics,
-    temporary_baonoise_health_views,
+    temporary_residual_health_views,
 )
-from baonoise import residual as res
+from rfisher import residual as res
 
 import _products as P
 
@@ -430,16 +429,18 @@ def main(argv=None):
     report["spec598"] = spec_demo(by_fid[SPEC_DEMO_FID])
     report["events_union_usable"] = len(usable_events)
 
-    # The baonoise path-only APIs otherwise reload the unfiltered originals.
+    # The RFIsher path-only APIs otherwise reload the unfiltered originals.
     # Transient minimal views enforce the same v1 gate used above for every
     # threshold sweep, floor estimate, and correlation-time calculation.
-    with temporary_baonoise_health_views([Path(path) for path in files]) as views:
+    with temporary_residual_health_views([Path(path) for path in files]) as views:
         health_by_fid = {int(Path(path).stem): str(path) for path in views}
         results, sweep_unavailable = run_sweeps(health_by_fid)
         with open(args.out / "threshold_sweeps.json", "w", encoding="utf-8") as fh:
             json.dump(results, fh, indent=1)
         report["sweeps"] = merged_sweeps(results, health_by_fid)
         report["sweep_unavailable"] = sweep_unavailable
+        report["threshold_sweep_scope"] = "historical_report_only"
+        report["health_gate"]["applied_to_all_residual_inputs"] = True
         report["health_gate"]["applied_to_all_baonoise_inputs"] = True
     report["hist_edges"] = [round(float(x), 2) for x in HIST_EDGES.tolist()]
 

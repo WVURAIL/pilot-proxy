@@ -21,7 +21,9 @@ sys.path.insert(0, str(ANALYSIS))
 
 from ppcal.calib import (  # noqa: E402
     NULL_SCALE_PROBES, half_sample_mode, null_scale_about)
-from ppcal.eras import Era, _mann_whitney_z  # noqa: E402
+from ppcal.eras import Era, _mann_whitney_z, segment  # noqa: E402
+from ppcal.era_view import quiet_era_floor_db  # noqa: E402
+from ppcal import state as calibration_state  # noqa: E402
 from ppcal.products import (  # noqa: E402
     COARSE_HZ, FINE_HZ, month_index, month_label)
 from ppcal.spectra import wide_pair_is_era_resolved  # noqa: E402
@@ -97,7 +99,7 @@ def test_null_scale_refuses_a_starved_sample():
 
 
 def test_null_scale_probes_match_the_released_convention():
-    """Guard against the probe table drifting from baonoise's."""
+    """Guard against the probe table drifting from RFIsher's."""
     assert NULL_SCALE_PROBES == ((32.0, 1.0000), (5.0, 1.9600),
                                  (0.3, 2.9677))
 
@@ -124,6 +126,110 @@ def test_mann_whitney_z_survives_ties():
 
 def test_mann_whitney_z_handles_an_empty_side():
     assert _mann_whitney_z(np.array([]), np.ones(5)) == 0.0
+
+
+class _SegmentChannel:
+    def __init__(self, levels, spacing_days=31.0, within_month_days=None):
+        self._levels = np.asarray(levels, dtype=float)
+        months = np.arange(self._levels.size)
+        offsets = ((0.0,) if within_month_days is None
+                   else tuple(within_month_days))
+        self.unit_month = np.repeat(months, len(offsets))
+        self.unit_level_db = np.repeat(self._levels, len(offsets))
+        times = np.concatenate([
+            (month * spacing_days + np.asarray(offsets)) * 86400.0
+            for month in months
+        ])
+        self.units = (times, np.ones(times.size), np.ones(times.size),
+                      np.ones(times.size, dtype=int))
+
+    def monthly_level_db(self):
+        count = np.ones(self._levels.size, dtype=int)
+        return np.arange(self._levels.size), self._levels.copy(), count
+
+
+def test_segment_accepts_a_supported_station_step():
+    channel = _SegmentChannel([0.0] * 10 + [3.0] * 10)
+    eras = segment(channel)
+    assert [(era.month_start, era.month_end) for era in eras] == [(0, 9),
+                                                                  (10, 19)]
+
+
+def test_segment_uses_observed_time_span_not_month_approximation():
+    channel = _SegmentChannel([0.0] * 10 + [3.0] * 10, spacing_days=20.0)
+    assert len(segment(channel)) == 1
+
+
+def test_segment_includes_first_and_last_acquisition_within_each_month():
+    channel = _SegmentChannel(
+        [0.0] * 10 + [3.0] * 10,
+        spacing_days=29.0,
+        within_month_days=(0.0, 10.0),
+    )
+    assert len(segment(channel)) == 2
+
+
+def test_segment_accepts_the_exact_elapsed_span_boundary():
+    channel = _SegmentChannel([0.0] * 10 + [3.0] * 10, spacing_days=30.0)
+    assert len(segment(channel, min_days=270.0)) == 2
+    assert len(segment(channel, min_days=270.01)) == 1
+
+
+def test_segment_step_margin_is_explicit():
+    channel = _SegmentChannel([0.0] * 10 + [1.9] * 10)
+    assert len(segment(channel)) == 1
+    assert len(segment(channel, min_step_db=1.5)) == 2
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("min_months", 0),
+        ("min_days", -1.0),
+        ("min_step_db", float("nan")),
+        ("z_crit", -1.0),
+        ("max_eras", 0),
+    ],
+)
+def test_segment_validates_policy_parameters(field, value):
+    channel = _SegmentChannel([0.0] * 10 + [3.0] * 10)
+    with pytest.raises(ValueError, match=field):
+        segment(channel, **{field: value})
+
+
+def test_quiet_floor_validates_its_explicit_parameters():
+    with pytest.raises(ValueError, match="minimum_frames"):
+        quiet_era_floor_db(object(), [], minimum_frames=0)
+    with pytest.raises(ValueError, match="percentile"):
+        quiet_era_floor_db(object(), [], percentile=101.0)
+    with pytest.raises(TypeError, match="integer"):
+        quiet_era_floor_db(object(), [], minimum_frames=1.5)
+
+
+def test_threshold_table_rejects_an_invalid_supplied_eta(tmp_path):
+    path = tmp_path / "thresholds.csv"
+    path.write_text("ch,eta_cost_cap\n14,nan\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="channel 14.*eta_cost_cap"):
+        calibration_state._read_thresholds(path)
+
+
+def test_threshold_table_reads_positive_supplied_etas(tmp_path):
+    path = tmp_path / "thresholds.csv"
+    path.write_text(
+        "ch,eta_cost_cap,eta_cost_thermal,tau_measured\n"
+        "14,1.25,1.1,True\n",
+        encoding="utf-8",
+    )
+    rows = calibration_state._read_thresholds(path)
+    assert rows[14]["eta_cost_cap"] == pytest.approx(1.25)
+    assert rows[14]["eta_cost_thermal"] == pytest.approx(1.1)
+    assert rows[14]["tau_measured"] is True
+
+
+def test_threshold_build_aliases_are_mutually_exclusive():
+    with pytest.raises(ValueError, match="legacy bao_csv alias"):
+        calibration_state.build(
+            "unused", threshold_csv="thresholds.csv", bao_csv="legacy.csv")
 
 
 # --------------------------------------------------------------------------

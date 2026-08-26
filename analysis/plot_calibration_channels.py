@@ -218,9 +218,10 @@ def card(s, out):
                 label="$F > 1$ (provisional, as collected)")
     axg.axvline(cal.mu / c.mu0, color=SERIES[0], lw=1.4, ls=(0, (1, 2)),
                 label="$\\mu = %.4g$ (calibrated)" % cal.mu)
+    eta_basis = ("supplied science-priced" if s.eta_is_per_channel
+                 else "historical report fallback")
     axg.axvline(eta * cal.mu / c.mu0, color=KEEP_COLOR, lw=1.4, ls=(0, (4, 3)),
-                label="$F > %.3f\\,\\mu$ (this channel's BAO-priced $\\eta$)"
-                      % eta)
+                label="$F > %.3f\\,\\mu$ (%s $\\eta$)" % (eta, eta_basis))
     axg.set_xlabel("$F/\\mu_0$   (the collection-time scale)")
     axg.set_ylabel("frames")
     axg.legend(loc="best", fontsize=8.5)
@@ -233,15 +234,15 @@ def card(s, out):
     head = ("ch %d      freq id %d      pilot %.5f MHz      %+.1f kHz from "
             "channel centre" % (c.ch, c.fid, c.pilot_hz / 1e6,
                                 c.pilot_offset_hz / 1e3))
-    bao = ""
-    if s.bao and s.bao.get("r_tol_dilation"):
-        rt = s.bao["r_tol_dilation"]
-        cap = s.bao.get("r_cost_cap")
-        th = s.bao.get("r_cost_thermal")
-        bao = ("     $z$ %.2f-%.2f, $r/r_{\\rm tol}$ = %s (cap) .. %s "
+    science = ""
+    if s.thresholds and s.thresholds.get("r_tol_dilation"):
+        rt = s.thresholds["r_tol_dilation"]
+        cap = s.thresholds.get("r_cost_cap")
+        th = s.thresholds.get("r_cost_thermal")
+        science = ("     $z$ %.2f-%.2f, $r/r_{\\rm tol}$ = %s (cap) .. %s "
                "(thermal)"
-               % (s.bao.get("z_low", float("nan")),
-                  s.bao.get("z_high", float("nan")),
+               % (s.thresholds.get("z_low", float("nan")),
+                  s.thresholds.get("z_high", float("nan")),
                   "%.3g" % (cap / rt) if cap else "n/a",
                   "%.3g" % (th / rt) if th else "n/a"))
     sub = ("$\\mu_0$ provisional = %.6f     $\\mu$ calibrated = %.5g  "
@@ -253,7 +254,7 @@ def card(s, out):
               100 * cal.occupancy_provisional, 100 * s.occ_working, eta,
               len(segs), "" if len(segs) == 1 else "s", segs[-1].label,
               "{:,}".format(int(fmask.sum())), d_pilot / 1e3, db_pilot,
-              nsec, "" if nsec == 1 else "s", bao, s.reason))
+              nsec, "" if nsec == 1 else "s", science, s.reason))
     fig.text(0.008, 0.995, head, fontsize=15, color=INK, ha="left", va="top")
     fig.text(0.008, 0.978, sub, fontsize=9.4, color=INK2, ha="left",
              va="top", linespacing=1.6)
@@ -266,16 +267,17 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--products", default=None)
     ap.add_argument("--out", default=None)
-    ap.add_argument("--bao", default=None)
+    ap.add_argument("--thresholds", default=None)
+    ap.add_argument("--bao", dest="thresholds", help=argparse.SUPPRESS)
     ap.add_argument("--only", default=None,
                     help="comma-separated physical channels")
     args = ap.parse_args(argv)
     args.products = args.products or str(P.PER_PILOT)
     args.out = args.out or str(P.OUT / "figures" / "channels")
-    args.bao = args.bao or str(P.ETA_BAO)
+    args.thresholds = args.thresholds or str(P.THRESHOLD_TABLE)
     setup_style()
     only = ({int(x) for x in args.only.split(",")} if args.only else None)
-    for s in ST.build(args.products, bao_csv=args.bao):
+    for s in ST.build(args.products, threshold_csv=args.thresholds):
         if only and s.ch not in only:
             continue
         print("wrote", card(s, args.out))

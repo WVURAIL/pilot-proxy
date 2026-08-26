@@ -58,8 +58,8 @@ Run order — (1) first, the rest in any order:
 * Scripts import `pilot_proxy` from `$PP_REPO/src` via `_paths.py`; an
   editable install works too.
 * Untrusted zero points (ch24, ch30) are handled inside the scripts —
-  analytic constants, one-sided ceiling — matching the adopted operating
-  point everywhere.
+  analytic constants, one-sided ceiling — matching the recorded report
+  setting everywhere.
 * Regeneration is deterministic: same dumps + bundle -> byte-identical CSVs.
 
 ## Where things go (path conventions, recorded 2026-07-20)
@@ -90,31 +90,33 @@ These read the per-pilot survey products (`*.npz`) directly rather than the
 | script | writes | notes |
 |---|---|---|
 | plot_census_psd.py | fig_census_psd | archive-averaged spectrum around every pilot |
-| plot_channel_histograms.py | fig5_channel_histograms | needs the released `baonoise` package for its floor-provenance checks |
+| plot_channel_histograms.py | fig5_channel_histograms | needs the released RFIsher package for its floor-provenance checks |
 | plot_worked_example.py | fig_worked_example | reads `data/worked_example_ch506.csv` (committed, provenance in its header) |
 | plot_coherence_aids.py | fig_phasor_walk, fig_hypothesis_bank | no data: seeded simulation of the real geometry |
 
-These moved here from bao-noise-tolerance's `scripts/`, which keeps the
+These moved here from RFIsher's `scripts/`, which keeps the
 tolerance-side figures: a figure computed from survey products is a
 pilot-proxy deliverable regardless of which package first drew it.
 
-## Artifact pages (need per-pilot survey products + baonoise)
+## Historical artifact pages (need per-pilot survey products + RFIsher)
 
-The published trawl-report and masking-policy pages are data-inlined HTML.
+The trawl-report and masking comparison pages are data-inlined HTML. Their
+threshold labels and the fixed eta=1.4 rule are historical report outputs, not
+operational selections.
 The make_* scripts read `$PP_PER_PILOT` (or `--products`) and both need the
-released `baonoise` package; `render_artifacts.py` inlines their JSON into
+released RFIsher package; `render_artifacts.py` inlines their JSON into
 the committed page templates under `templates/`. The JSON behind the
 currently published pages is committed under `exports/artifacts/`.
 
 | script | writes | notes |
 |---|---|---|
-| make_report_data.py | report_data.json, threshold_sweeps.json | threshold_sweeps.json also feeds the bao two-walls figure regeneration |
-| make_policy_data.py | policy_data.json | the locked policy-methodology constants live here |
+| make_report_data.py | report_data.json, threshold_sweeps.json | threshold_sweeps.json also feeds the residual two-walls figure regeneration |
+| make_policy_data.py | policy_data.json | the locked historical-report constants live here |
 | render_artifacts.py | pilot_proxy_trawl.html, dtv_masking_policy.html | templates + placeholders in `templates/` |
 
 ## Channel dispositions and drafting tables
 
 | script | writes | notes |
 |---|---|---|
-| channel_dispositions.py | chime_dtv_channel_dispositions.csv, chime_dtv_bad_channels.wiki | keep/discard per CHIME channel over 470-608 MHz; the excised set derives from `exports/artifacts/policy_data.json`, so regenerate after a policy revision |
+| channel_dispositions.py | chime_dtv_channel_dispositions.csv, chime_dtv_bad_channels.wiki | historical keep/discard report over 470-608 MHz; its excised set derives from `exports/artifacts/policy_data.json` |
 | latex_channel_table.py | (stdout) | the dissertation's unified channel-table rows from the committed artifact JSONs; era/status columns are editorial and live in the script |
