@@ -167,7 +167,7 @@ digest in the run ledger, then check the resolved first product against it.
 | Output directory | fresh path outside the source checkout | Fill at launch |
 | Receiver profile path and SHA-256 | Checked-in CHIME profile and locked digest above | Verify at launch |
 | Weight bank and manifest SHA-256 | Checked-in bank, manifest, and locked digests above | Verify at launch |
-| Detector library path, version, and SHA-256 | `cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`; core 2.3.0; `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b` | Preserved digest verified; final-source CUDA, kernel, and real-file gates pending |
+| Detector library path, version, and SHA-256 | `cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`; core 2.3.0; `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b` | Preserved digest and final-source CUDA, kernel, and real-file gates verified |
 | Terminal product | all 23 per-pilot v5 products; channel subsets are derived only | Locked |
 
 The 23 pilot identifiers are the ATSC 14--36 pilot locations mapped onto the
@@ -211,9 +211,9 @@ fine terms while the fine decision remains inactive.
 | Item | Current state | Required action |
 |---|---|---|
 | Archive certificate | Present locally, owner-only, expires 2026-09-03 | Renew before launch; at least 72 hours before each expiry, stop after a checkpoint, renew, and resume with the identical command |
-| Local archive environment and client | Earlier-source environment built 2026-08-25; isolated archive suite passed | Rebuild or refresh on the final frozen revision and never record secrets in the ledger |
-| Real-data GPU capacity | Earlier gate passed with 2,904 MiB peak and zero validation errors | Repeat on the final frozen source and record the new evidence path and embedded digests |
-| Production-profile resume | Earlier gate passed with eight unique units and empty staging | Repeat on the final frozen source and record the new evidence path and embedded digests |
+| Local archive environment and client | Final-source environment refreshed; full suite passed | Preserve the environment and never record secrets in the ledger |
+| Real-data GPU capacity | Final-source gate passed with 2,445 MiB peak and zero validation errors | Complete; evidence path and embedded digests are in the external ledger |
+| Production-profile resume | Final-source gate passed with eight unique units, 22 unique frames, and empty staging | Complete; interruption and resume evidence are in the external ledger |
 
 Do not promote the recorded testbench rank to deployed runtime data. An exported
 pending bundle leaves anchor, rank, and multiplier unset while calibration is
