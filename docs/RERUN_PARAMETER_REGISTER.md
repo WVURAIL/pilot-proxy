@@ -161,8 +161,8 @@ digest in the run ledger, then check the resolved first product against it.
 | Partial-run acknowledgement | off | Locked; any new quarantine or failure stops acceptance |
 | Fine products | on | Locked; retains exact fine powers and does not enable fine detection |
 | Checkpoint interval | 250 units | Reduces cumulative product rewrites; a stop can repeat 249 analyzed files plus uncheckpointed prefetched downloads |
-| Real-data GPU gate | One 2048-stream file, one full chunk, peak VRAM below 13,900 MiB, product validation passes | Must repeat on the final frozen source; the 2026-08-25 result used an earlier package digest |
-| Production-profile rehearsal | Archive source, four workers, eight slots, full chunks, forced checkpoint and identical-command resume in a separate capped output | Must repeat on the final frozen source; the 2026-08-25 result used an earlier package digest |
+| Real-data GPU gate | One 2048-stream file, one full chunk, peak VRAM below 13,900 MiB, product validation passes | Complete for the frozen revision recorded in the external ledger |
+| Production-profile rehearsal | Archive source, four workers, eight slots, full chunks, forced checkpoint and identical-command resume in a separate capped output | Complete for the frozen revision recorded in the external ledger |
 | Resume invariant | Same source revision, inventory, output, staging, selection, execution settings, and preserved library | Locked |
 | Output directory | fresh path outside the source checkout | Fill at launch |
 | Receiver profile path and SHA-256 | Checked-in CHIME profile and locked digest above | Verify at launch |
