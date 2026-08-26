@@ -65,10 +65,13 @@ real-file gates exercise that exact artifact. The later build and kernel-test
 commands exercise a disposable SM89 build from the same frozen CUDA source.
 
 ```bash
-KERNEL_LIB=/home/djg/rail/pilot-proxy/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so
+KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so
+KERNEL_MANIFEST=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.manifest.json
 printf '%s  %s\n' \
-  e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b \
-  "$KERNEL_LIB" | sha256sum --check --strict
+  f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2 \
+  "$KERNEL_LIB" \
+  d781d3d4dfbe15dd336b1c89e412a91522376f69a30cfc9543fd52ff6a954cf0 \
+  "$KERNEL_MANIFEST" | sha256sum --check --strict
 
 PYTHONPATH=src python - "$KERNEL_LIB" <<'PY'
 import sys

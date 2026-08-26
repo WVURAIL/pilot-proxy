@@ -172,7 +172,7 @@ digest in the run ledger, then check the resolved first product against it.
 | Output directory | fresh path outside the source checkout | Fill at launch |
 | Receiver profile path and SHA-256 | Checked-in CHIME profile and locked digest above | Verify at launch |
 | Weight bank and manifest SHA-256 | Checked-in bank, manifest, and locked digests above | Verify at launch |
-| Detector library path, version, and SHA-256 | `cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`; core 2.3.0; `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b` | Preserved digest; repeat final-source gates after the source change |
+| Detector library path, version, and SHA-256 | `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so`; core 2.3.0; `f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2` | Preserved digest; repeat final-source gates after the source change |
 | Terminal product | all 23 per-pilot v5 products; channel subsets are derived only | Locked |
 
 The 23 pilot identifiers are the ATSC 14--36 pilot locations mapped onto the

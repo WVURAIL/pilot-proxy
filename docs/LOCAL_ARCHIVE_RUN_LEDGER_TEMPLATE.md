@@ -37,6 +37,15 @@ progresses. Do not record credentials or other secrets.
 - CuPy version:
 - Driver version:
 - Toolkit version:
+- Runtime bundle path:
+- Runtime `SHA256SUMS` SHA-256:
+- Runtime source revision:
+- Runtime package-source SHA-256:
+- Runtime Python version:
+- Runtime package count:
+- Offline restore environment:
+- Offline restore `pip check`: pass / fail
+- Offline restore bundle verification: pass / fail
 
 ## Before launch: final-source gates
 
@@ -98,8 +107,10 @@ progresses. Do not record credentials or other secrets.
 
 - Kernel core: 2.3.0
 - Kernel architecture: SM89
-- Preserved kernel path: `/home/djg/rail/pilot-proxy/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so`
-- Preserved kernel SHA-256: `e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b`
+- Preserved kernel path: `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so`
+- Preserved kernel SHA-256: `f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2`
+- Preserved kernel manifest: `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.manifest.json`
+- Preserved kernel manifest SHA-256: `d781d3d4dfbe15dd336b1c89e412a91522376f69a30cfc9543fd52ff6a954cf0`
 - Receiver profile path: `configs/receiver_profiles/chime_dtv_fengine.json`
 - Receiver profile file SHA-256: `bc59e77442a4c15f74c716d14eaeea4f10a69517d3bfb8c88ce10a7a42ea1e15`
 - Receiver profile canonical SHA-256: `da047cdf453764e4b8c01514602034456e32a39256e8c5980f2c052554500e45`

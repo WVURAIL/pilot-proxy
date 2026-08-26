@@ -65,6 +65,49 @@ umask 077
 Set `umask 077` in every launch and resume shell so staged data and products
 remain owner-only.
 
+Freeze the complete installed runtime before the final gates. This downloads or
+builds one wheel for every installed distribution, rebuilds direct Git sources
+from their exact commits, builds PilotProxy from a Git archive of the clean
+revision, and writes a hash-locked offline bundle:
+
+```bash
+set -euo pipefail
+SOURCE_SHORT=$(git rev-parse --short=12 HEAD)
+RUNTIME_BUNDLE="/home/djg/rail/runtime_freezes/archive-local-${SOURCE_SHORT}"
+test ! -e "$RUNTIME_BUNDLE"
+python scripts/freeze_archive_runtime.py create \
+  --output-dir "$RUNTIME_BUNDLE"
+python scripts/freeze_archive_runtime.py verify \
+  --bundle-dir "$RUNTIME_BUNDLE"
+sha256sum "$RUNTIME_BUNDLE/SHA256SUMS"
+```
+
+Record the bundle path, `SHA256SUMS` hash, source revision, package-source hash,
+Python version, and package count. The bundle contains `requirements.lock`, the
+wheelhouse, the exact source archive, direct-source commits, and hashes for
+every payload. It deliberately does not contain the preserved detector library;
+verify that separate binary with the pinned command below.
+
+Test an offline restore before launch, using a fresh path outside the checkout:
+
+```bash
+RESTORE_VENV=/home/djg/rail/venvs/archive-local-restore
+test ! -e "$RESTORE_VENV"
+python3.12 -m venv "$RESTORE_VENV"
+"$RESTORE_VENV/bin/python" -m pip install \
+  --no-index \
+  --only-binary=:all: \
+  --find-links "$RUNTIME_BUNDLE/wheelhouse" \
+  --require-hashes \
+  -r "$RUNTIME_BUNDLE/requirements.lock"
+"$RESTORE_VENV/bin/python" -m pip check
+"$RESTORE_VENV/bin/python" scripts/freeze_archive_runtime.py verify \
+  --bundle-dir "$RUNTIME_BUNDLE"
+```
+
+Keep the original production environment for the run. The restore proves that
+the sealed runtime can be recreated without a package index or source host.
+
 Renew and inspect the CADC certificate:
 
 ```bash
@@ -83,9 +126,13 @@ rebuild it during this run.
 
 ```bash
 set -euo pipefail
-KERNEL_LIB=/home/djg/rail/pilot-proxy/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so
-KERNEL_SHA256=e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b
-printf '%s  %s\n' "$KERNEL_SHA256" "$KERNEL_LIB" | sha256sum --check --strict
+KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so
+KERNEL_SHA256=f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2
+KERNEL_MANIFEST=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.manifest.json
+KERNEL_MANIFEST_SHA256=d781d3d4dfbe15dd336b1c89e412a91522376f69a30cfc9543fd52ff6a954cf0
+printf '%s  %s\n' \
+  "$KERNEL_SHA256" "$KERNEL_LIB" \
+  "$KERNEL_MANIFEST_SHA256" "$KERNEL_MANIFEST" | sha256sum --check --strict
 export KERNEL_LIB KERNEL_SHA256
 
 python - "$KERNEL_LIB" <<'PY'
@@ -312,6 +359,33 @@ validation, empty-staging check, source digest, and kernel digest in the run
 ledger. Never reuse this capped output for production. Earlier rehearsal
 evidence used a different source digest and is not a final-source gate.
 
+## WSL host controls
+
+Finish Windows and WSL updates, reboot once, and rerun the gates before launch.
+Use AC power and a `tmux` session inside WSL. Do not depend on an open terminal
+window to keep the scan alive.
+
+Inspect and record the active Windows power scheme and plugged-in sleep policy
+from WSL:
+
+```bash
+powershell.exe -NoProfile -Command 'powercfg /getactivescheme'
+powershell.exe -NoProfile -Command 'powercfg /query SCHEME_CURRENT SUB_SLEEP'
+```
+
+If the workstation owner approves disabling plugged-in sleep for the run,
+record the current values first, then use an elevated Windows PowerShell:
+
+```powershell
+powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+```
+
+Restore the recorded values after closeout. Do not change battery policy. Keep
+automatic restart risk, planned maintenance, and the current Windows update
+state in the launch decision; a long scan still needs controlled checkpointed
+stops and resumes.
+
 ## Production command
 
 Set `EXPECTED_SOURCE_REVISION` and `EXPECTED_PACKAGE_SOURCE_SHA256` from the
@@ -332,9 +406,13 @@ BUNDLE_DIR=/home/djg/rail/archive_inputs/chime-pilots-v5
 INVENTORY_PATH="$BUNDLE_DIR/inventory.jsonl"
 OUTPUT_DIR=/home/djg/rail/pilot_proxy_runs/chime_pilots_local_v5
 STAGING_DIR=/home/djg/rail/pilot_proxy_staging/chime_pilots_local_v5
+LOG_DIR=/home/djg/rail/pilot_proxy_logs
+RUN_LOG="$LOG_DIR/chime_pilots_local_v5.log"
 WEIGHTS_PATH="$PWD/weights/chime_dtv_weights_k128.bin"
-KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so"
-KERNEL_SHA256=e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b
+KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so
+KERNEL_SHA256=f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2
+KERNEL_MANIFEST=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.manifest.json
+KERNEL_MANIFEST_SHA256=d781d3d4dfbe15dd336b1c89e412a91522376f69a30cfc9543fd52ff6a954cf0
 
 git fetch origin --prune --tags
 test -z "$(git status --porcelain)"
@@ -358,7 +436,8 @@ printf '%s  %s\n' \
   bc59e77442a4c15f74c716d14eaeea4f10a69517d3bfb8c88ce10a7a42ea1e15 "$PWD/configs/receiver_profiles/chime_dtv_fengine.json" \
   1383c6d0ca521a26b317d008feb6e09eb41427155bda9a320f70bca62e0e6259 "$WEIGHTS_PATH" \
   d0ccc8162a350e9d3266e6acf3b38d2fe5982c474b73ef0715b8b838954e81a7 "$WEIGHTS_PATH.manifest.json" \
-  "$KERNEL_SHA256" "$KERNEL_LIB" | sha256sum --check --strict
+  "$KERNEL_SHA256" "$KERNEL_LIB" \
+  "$KERNEL_MANIFEST_SHA256" "$KERNEL_MANIFEST" | sha256sum --check --strict
 if pgrep -af '[p]ilot-proxy chime-scan'; then
   exit 1
 fi
@@ -388,7 +467,9 @@ ledger beside the output path, fill every before-launch field, then start:
 ```bash
 test ! -e "$OUTPUT_DIR" || exit 1
 test ! -e "$STAGING_DIR" || exit 1
-pilot-proxy "${RUN_ARGS[@]}"
+install -d -m 700 "$LOG_DIR"
+test ! -e "$RUN_LOG" || exit 1
+pilot-proxy "${RUN_ARGS[@]}" 2>&1 | tee "$RUN_LOG"
 ```
 
 Keep `--allow-partial` off. The scan records its resolved worker, staging, and
@@ -400,6 +481,39 @@ units plus downloads that were prefetched but not represented by the last
 checkpoint. Complete the production-profile rehearsal before launch.
 
 `fine_products=on` retains exact fine powers. It does not enable fine detection.
+
+## Live run checks
+
+Run the health check from another `tmux` pane at launch and about every five
+minutes during unattended operation:
+
+```bash
+python scripts/monitor_local_archive.py \
+  --run-dir "$OUTPUT_DIR" \
+  --staging-dir "$STAGING_DIR" \
+  --log "$RUN_LOG" \
+  --expect-running \
+  --min-free-gib 100 \
+  --stale-minutes 120 \
+  --min-gpu-free-mib 2500 \
+  --max-gpu-temperature-c 85 \
+  --certificate /home/djg/.ssl/cadcproxy.pem \
+  --min-certificate-hours 72
+```
+
+The command is read-only and exits nonzero for a missing or duplicate scan,
+less than 100 GiB free, no output/log/staging heartbeat for two hours, low GPU
+headroom, excessive GPU temperature, an unavailable GPU, or a concerning log
+pattern. It also requires the CADC certificate to remain mode `0600` with at
+least 72 hours left. Use `--json` for machine-readable output. `watch -n 300`
+may be placed before the command for a continuously visible pane.
+
+Treat low space, a stale heartbeat, new quarantine activity, a fetch failure,
+an expired certificate, a traceback, or a GPU memory error as a stop condition.
+Wait for a checkpoint when possible, press `Ctrl-C`, and wait for every worker
+to exit. Inspect `df -h`, `nvidia-smi`, the last log lines, the newest
+`_per_pilot/*.npz` timestamp, and staging contents before deciding whether to
+resume. Do not delete staging files while any old worker is alive.
 
 ## First-checkpoint tripwire
 
@@ -499,11 +613,13 @@ printf '%s  %s\n' "$EXPECTED_KERNEL_SHA256" "$KERNEL_LIB" | \
 pgrep -af '[p]ilot-proxy chime-scan' && exit 1
 ```
 
-Recreate `RUN_ARGS` from the production block with the ledger values and rerun
-`pilot-proxy "${RUN_ARGS[@]}"` unchanged. Keep the same output directory,
-staging directory, inventory, selection, worker and slot counts, checkpoint
-interval, weights, coordinate system, library, and fine-product setting. The
-analyzer loads the last checkpoint and skips its recorded unit keys.
+Recreate `RUN_ARGS`, `LOG_DIR`, and `RUN_LOG` from the production block with the
+ledger values and rerun `pilot-proxy "${RUN_ARGS[@]}" 2>&1 | tee -a "$RUN_LOG"`.
+Keep the same output directory, staging directory, inventory, selection, worker
+and slot counts, checkpoint interval, weights, coordinate system, library, and
+fine-product setting. The analyzer loads the last checkpoint and skips its
+recorded unit keys. Keep `pipefail` active so a scan failure is not hidden by
+`tee`.
 
 ## Certificate renewal during production
 
@@ -559,7 +675,8 @@ OUTPUT_DIR=/home/djg/rail/pilot_proxy_runs/chime_pilots_local_v5
 STAGING_DIR=/home/djg/rail/pilot_proxy_staging/chime_pilots_local_v5
 WEIGHTS_PATH="$PWD/weights/chime_dtv_weights_k128.bin"
 PROFILE_PATH="$PWD/configs/receiver_profiles/chime_dtv_fengine.json"
-KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so"
+KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so
+KERNEL_MANIFEST=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.manifest.json
 
 test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
@@ -569,7 +686,7 @@ print(package_source_sha256())
 PY
 )" = "$EXPECTED_PACKAGE_SOURCE_SHA256"
 test "$EXPECTED_KERNEL_SHA256" = \
-  e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b
+  f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2
 printf '%s  %s\n' \
   b2cfef752a6f2cf88317141a974161439299668a37a5464d710b3800b9a872d8 "$INVENTORY_PATH" \
   d0ab78db9dec847fb5270fb94e3fc45efd6bbbc71adc376830fb71467693079a "$BUNDLE_DIR/exclusions.jsonl" \
@@ -578,7 +695,9 @@ printf '%s  %s\n' \
   bc59e77442a4c15f74c716d14eaeea4f10a69517d3bfb8c88ce10a7a42ea1e15 "$PROFILE_PATH" \
   1383c6d0ca521a26b317d008feb6e09eb41427155bda9a320f70bca62e0e6259 "$WEIGHTS_PATH" \
   d0ccc8162a350e9d3266e6acf3b38d2fe5982c474b73ef0715b8b838954e81a7 "$WEIGHTS_PATH.manifest.json" \
-  "$EXPECTED_KERNEL_SHA256" "$KERNEL_LIB" | sha256sum --check --strict
+  "$EXPECTED_KERNEL_SHA256" "$KERNEL_LIB" \
+  d781d3d4dfbe15dd336b1c89e412a91522376f69a30cfc9543fd52ff6a954cf0 "$KERNEL_MANIFEST" | \
+  sha256sum --check --strict
 if pgrep -af '[p]ilot-proxy chime-scan'; then
   exit 1
 fi
@@ -588,173 +707,26 @@ test -z "$(find "$STAGING_DIR" -type f -print -quit)"
 python tools/audit_per_pilot.py "$OUTPUT_DIR/_per_pilot" | \
   tee "$OUTPUT_DIR/per_pilot_audit.txt"
 
-python - "$INVENTORY_PATH" "$OUTPUT_DIR" \
-  "$EXPECTED_PACKAGE_SOURCE_SHA256" "$EXPECTED_KERNEL_SHA256" \
-  "$STAGING_DIR" <<'PY'
-from collections import defaultdict
-import hashlib
-import json
-from pathlib import Path
-import sys
-
-import numpy as np
-
-from pilot_proxy.archive.sources.cadc_inventory import logical_unit_key
-from pilot_proxy.atomic_io import atomic_write_json
-from pilot_proxy.product_contract import (
-    PER_PILOT_PRODUCT_SCHEMA_TOKEN,
-    validate_current_product_identity,
-)
-
-inventory_path = Path(sys.argv[1]).resolve()
-output_dir = Path(sys.argv[2]).resolve()
-package_sha256 = sys.argv[3]
-kernel_sha256 = sys.argv[4]
-staging_dir = str(Path(sys.argv[5]).resolve())
-freq_ids = [
-    506, 521, 537, 552, 568, 583, 598, 614, 629, 644, 660, 675,
-    690, 706, 721, 736, 752, 767, 783, 798, 813, 829, 844,
-]
-
-digest = hashlib.sha256()
-expected = defaultdict(list)
-with inventory_path.open("rb") as stream:
-    for raw in stream:
-        digest.update(raw)
-        row = json.loads(raw)
-        freq_id = int(row["freq_id"])
-        assert freq_id in freq_ids
-        expected[freq_id].append(
-            logical_unit_key(row["scope"], row["event"], row["name"])
-        )
-inventory_sha256 = digest.hexdigest()
-assert inventory_sha256 == (
-    "b2cfef752a6f2cf88317141a974161439299668a37a5464d710b3800b9a872d8"
-)
-assert sum(len(values) for values in expected.values()) == 165682
-assert sorted(expected) == freq_ids
-
-scope_path = output_dir / "scan_scope.json"
-scope = json.loads(scope_path.read_text(encoding="utf-8"))
-assert scope["schema_version"] == "pilotproxy_chime_scan_scope_v1"
-assert scope["complete"] is True
-assert scope["source"] == "cadc-datatrail"
-assert scope["input"]["inventory_path"] == str(inventory_path)
-assert scope["input"]["inventory_sha256"] == inventory_sha256
-assert scope["requested_selections"] == [[freq_id] for freq_id in freq_ids]
-assert scope["allow_partial"] is False
-assert scope["max_files"] is None
-assert scope["max_chunks_per_file"] is None
-assert scope["fine_retention"] == {"requested": "on", "resolved": "enabled"}
-execution = scope["execution"]
-assert execution == {
-    "preserve_source_order": True,
-    "download_workers": 4,
-    "max_staged_files": 8,
-    "checkpoint_every": 250,
-    "staging_dir": staging_dir,
-}
-assert scope["execution_attempts"]
-assert all(attempt == execution for attempt in scope["execution_attempts"])
-totals = scope["totals"]
-assert totals["pilots_requested"] == len(freq_ids)
-assert totals["requested"] == totals["enumerated"] == 165682
-assert totals["completed"] == 165682
-for field in ("capped", "failed", "quarantined", "unprocessed", "extra_completed"):
-    assert totals[field] == 0
-for entry, freq_id in zip(scope["pilots"], freq_ids):
-    assert entry["selection"] == [freq_id]
-    assert entry["status"] == "complete"
-    assert entry["enumerated"] == entry["completed"] == len(expected[freq_id])
-    for field in ("capped", "failed", "quarantined", "unprocessed", "extra_completed"):
-        assert entry[field] == 0
-
-terminal = scope.get("terminal_combine", {})
-assert terminal.get("status") in {"combined", "skipped"}
-if terminal["status"] == "skipped":
-    assert terminal.get("error") == "CombineEmptyIntersectionError"
-
-quarantine = output_dir / "_per_pilot" / "quarantine.jsonl"
-if quarantine.exists():
-    assert not any(line.strip() for line in quarantine.read_text().splitlines())
-
-products = sorted(
-    (output_dir / "_per_pilot").glob("*.npz"),
-    key=lambda path: int(path.stem),
-)
-assert [int(path.stem) for path in products] == freq_ids
-product_units = 0
-product_frames = 0
-per_freq_units = {}
-receiver_configurations = {}
-source_scopes = {}
-for path, freq_id in zip(products, freq_ids):
-    with np.load(path, allow_pickle=False) as product:
-        validate_current_product_identity(product)
-        assert str(product["schema_version"]) == PER_PILOT_PRODUCT_SCHEMA_TOKEN
-        assert int(np.asarray(product["freq_id"]).reshape(-1)[0]) == freq_id
-        assert int(product["nfft"]) == 16384
-        assert int(product["detector_window_samples"]) == 128
-        assert int(product["num_input_streams"]) == 2048
-        assert int(product["max_chunks_per_file"]) == -1
-        assert str(product["fine_status"]) == "enabled"
-        fine = product["fine_power_u64"]
-        assert fine.dtype == np.uint64 and fine.shape[1:] == (3, 256)
-        version = str(product["detector_version"])
-        assert f"source={package_sha256}" in version
-        assert f"kernel_sha256={kernel_sha256}" in version
-        unit_order = np.asarray(product["unit_order"]).astype(str).tolist()
-        unit_keys = np.asarray(product["unit_keys"]).astype(str).tolist()
-        scopes = np.asarray(product["unit_scope"]).astype(str).tolist()
-        archive_versions = np.asarray(product["archive_version"]).astype(str).tolist()
-        tags = np.asarray(product["unit_git_version_tag"]).astype(str).tolist()
-        input_hashes = np.asarray(product["unit_input_map_sha256"]).astype(str).tolist()
-        assert len(scopes) == len(tags) == len(input_hashes) == len(unit_order)
-        assert all(scopes) and all(tags) and all(input_hashes)
-        assert all(len(value) == 64 and set(value) <= set("0123456789abcdef")
-                   for value in input_hashes)
-        for scope_name in scopes:
-            source_scopes[scope_name] = source_scopes.get(scope_name, 0) + 1
-        for receiver_state in zip(archive_versions, tags, input_hashes):
-            receiver_configurations[receiver_state] = (
-                receiver_configurations.get(receiver_state, 0) + 1
-            )
-        assert unit_order == expected[freq_id]
-        assert unit_keys == sorted(expected[freq_id])
-        per_freq_units[str(freq_id)] = len(unit_order)
-        product_units += len(unit_order)
-        product_frames += int(np.asarray(product["frame_index"]).size)
-assert product_units == 165682
-
-atomic_write_json(
-    output_dir / "final_inventory_audit.json",
-    {
-        "schema_version": "chime_local_archive_closeout_v1",
-        "inventory_path": str(inventory_path),
-        "inventory_sha256": inventory_sha256,
-        "inventory_units": 165682,
-        "per_pilot_products": len(products),
-        "product_units": product_units,
-        "product_frames": product_frames,
-        "per_freq_units": per_freq_units,
-        "source_scopes": [
-            {"scope": scope_name, "units": count}
-            for scope_name, count in sorted(source_scopes.items())
-        ],
-        "receiver_configurations": [
-            {
-                "archive_version": key[0],
-                "git_version_tag": key[1],
-                "input_map_sha256": key[2],
-                "units": count,
-            }
-            for key, count in sorted(receiver_configurations.items())
-        ],
-        "terminal_combine": terminal,
-    },
-)
-print("final inventory and product accounting passes")
-PY
+# This reads the inventory, scope, products, staging, and quarantine state. It
+# changes no product and writes only the requested audit report.
+python tools/audit_local_archive_run.py \
+  --inventory "$INVENTORY_PATH" \
+  --run-dir "$OUTPUT_DIR" \
+  --staging-dir "$STAGING_DIR" \
+  --package-source-sha256 "$EXPECTED_PACKAGE_SOURCE_SHA256" \
+  --kernel-sha256 "$EXPECTED_KERNEL_SHA256" \
+  --weight-bank-sha256 \
+    1383c6d0ca521a26b317d008feb6e09eb41427155bda9a320f70bca62e0e6259 \
+  --weight-manifest-sha256 \
+    d0ccc8162a350e9d3266e6acf3b38d2fe5982c474b73ef0715b8b838954e81a7 \
+  --expected-inventory-sha256 \
+    b2cfef752a6f2cf88317141a974161439299668a37a5464d710b3800b9a872d8 \
+  --expected-units 165682 \
+  --freq-ids 506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844 \
+  --download-workers 4 \
+  --max-staged-files 8 \
+  --checkpoint-every 250 \
+  --output-json "$OUTPUT_DIR/final_inventory_audit.json"
 
 COMBINE_STATUS=$(python - "$OUTPUT_DIR/scan_scope.json" <<'PY'
 import json
@@ -796,4 +768,4 @@ fi
 
 Record the audit paths, inventory and product totals, combine disposition,
 manifest hash, quarantine result, empty-staging result, and UTC acceptance time
-in the run ledger. Do not accept the run if any command or assertion fails.
+in the run ledger. Do not accept the run if any command or check fails.
