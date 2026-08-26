@@ -30,6 +30,8 @@ record one clean revision and package-source digest:
 
 ```bash
 cd /home/djg/rail/pilot-proxy
+set -euo pipefail
+git fetch origin --prune --tags
 test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 SOURCE_REVISION=$(git rev-parse HEAD)
@@ -66,8 +68,11 @@ remain owner-only.
 Renew and inspect the CADC certificate:
 
 ```bash
-canfar login cadc --force
+set -euo pipefail
+/home/djg/rail/venvs/canfar-client/bin/canfar login cadc --force
 chmod 600 /home/djg/.ssl/cadcproxy.pem
+test "$(stat -c '%a' /home/djg/.ssl/cadcproxy.pem)" = "600"
+openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -checkend 259200
 openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -dates
 ```
 
@@ -77,6 +82,7 @@ The run is pinned to the already preserved SM89 library. Do not replace or
 rebuild it during this run.
 
 ```bash
+set -euo pipefail
 KERNEL_LIB=/home/djg/rail/pilot-proxy/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so
 KERNEL_SHA256=e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b
 printf '%s  %s\n' "$KERNEL_SHA256" "$KERNEL_LIB" | sha256sum --check --strict
@@ -293,10 +299,19 @@ evidence used a different source digest and is not a final-source gate.
 
 ## Production command
 
+Set `EXPECTED_SOURCE_REVISION` and `EXPECTED_PACKAGE_SOURCE_SHA256` from the
+filled external run ledger. Do not derive either value from the current tree.
+
 ```bash
 cd /home/djg/rail/pilot-proxy
 source /home/djg/rail/venvs/archive-local/bin/activate
+set -euo pipefail
 umask 077
+
+: "${EXPECTED_SOURCE_REVISION:?set from the external run ledger}"
+: "${EXPECTED_PACKAGE_SOURCE_SHA256:?set from the external run ledger}"
+test "$(stat -c '%a' /home/djg/.ssl/cadcproxy.pem)" = "600"
+openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -checkend 259200
 
 BUNDLE_DIR=/home/djg/rail/archive_inputs/chime-pilots-v5
 INVENTORY_PATH="$BUNDLE_DIR/inventory.jsonl"
@@ -306,14 +321,17 @@ WEIGHTS_PATH="$PWD/weights/chime_dtv_weights_k128.bin"
 KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm89-e48ffa59bb592be8.so"
 KERNEL_SHA256=e48ffa59bb592be839218dfb6f920c8f9e9653b10abab97e856372cdcfa3bc8b
 
+git fetch origin --prune --tags
 test -z "$(git status --porcelain)"
-test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
+test "$(git rev-parse origin/main)" = "$EXPECTED_SOURCE_REVISION"
 SOURCE_REVISION=$(git rev-parse HEAD)
 PACKAGE_SOURCE_SHA256=$(python - <<'PY'
 from pilot_proxy.provenance import package_source_sha256
 print(package_source_sha256())
 PY
 )
+test "$PACKAGE_SOURCE_SHA256" = "$EXPECTED_PACKAGE_SOURCE_SHA256"
 printf 'source_revision=%s\npackage_source_sha256=%s\n' \
   "$SOURCE_REVISION" "$PACKAGE_SOURCE_SHA256"
 
@@ -326,6 +344,9 @@ printf '%s  %s\n' \
   1383c6d0ca521a26b317d008feb6e09eb41427155bda9a320f70bca62e0e6259 "$WEIGHTS_PATH" \
   d0ccc8162a350e9d3266e6acf3b38d2fe5982c474b73ef0715b8b838954e81a7 "$WEIGHTS_PATH.manifest.json" \
   "$KERNEL_SHA256" "$KERNEL_LIB" | sha256sum --check --strict
+if pgrep -af '[p]ilot-proxy chime-scan'; then
+  exit 1
+fi
 
 RUN_ARGS=(
   chime-scan
@@ -368,11 +389,15 @@ checkpoint. Complete the production-profile rehearsal before launch.
 ## First-checkpoint tripwire
 
 After the first 250-unit product checkpoint appears, stop the scan cleanly and
-inspect it before continuing. Run validation and the deep per-pilot audit, then
-verify the frozen identities and exact terms:
+inspect it before continuing. The terminal combined files do not exist yet, so
+run the deep per-pilot audit and verify the frozen identities and exact terms:
 
 ```bash
+set -euo pipefail
 FIRST_PRODUCT="$OUTPUT_DIR/_per_pilot/506.npz"
+if pgrep -af '[p]ilot-proxy chime-scan'; then
+  exit 1
+fi
 python tools/audit_per_pilot.py "$OUTPUT_DIR/_per_pilot"
 
 python - "$FIRST_PRODUCT" "$OUTPUT_DIR/scan_scope.json" \
@@ -431,12 +456,21 @@ rebuild, change options, or change the inventory. In a new shell:
 ```bash
 cd /home/djg/rail/pilot-proxy
 source /home/djg/rail/venvs/archive-local/bin/activate
+set -euo pipefail
 umask 077
 : "${KERNEL_LIB:?set the path recorded in the run ledger}"
 : "${EXPECTED_SOURCE_REVISION:?set from the run ledger}"
+: "${EXPECTED_PACKAGE_SOURCE_SHA256:?set from the run ledger}"
 : "${EXPECTED_KERNEL_SHA256:?set from the run ledger}"
 test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_REVISION"
+test "$(PYTHONPATH=src python - <<'PY'
+from pilot_proxy.provenance import package_source_sha256
+print(package_source_sha256())
+PY
+)" = "$EXPECTED_PACKAGE_SOURCE_SHA256"
+test "$(stat -c '%a' /home/djg/.ssl/cadcproxy.pem)" = "600"
+openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -checkend 259200
 printf '%s  %s\n' "$EXPECTED_KERNEL_SHA256" "$KERNEL_LIB" | \
   sha256sum --check --strict
 pgrep -af '[p]ilot-proxy chime-scan' && exit 1
@@ -456,8 +490,11 @@ exit. Renew and inspect the certificate:
 
 ```bash
 source /home/djg/rail/venvs/canfar-client/bin/activate
+set -euo pipefail
 canfar login cadc --force
 chmod 600 /home/djg/.ssl/cadcproxy.pem
+test "$(stat -c '%a' /home/djg/.ssl/cadcproxy.pem)" = "600"
+openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -checkend 259200
 openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -dates
 ```
 

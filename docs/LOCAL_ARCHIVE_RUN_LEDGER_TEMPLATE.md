@@ -77,7 +77,7 @@ progresses. Do not record credentials or other secrets.
 - Inventory manifest SHA-256: `5695e1cc9c007cb2c79ad39535cf9ed2fb20848ad00d3cf0215933670d0707e5`
 - Source / excluded / frozen units: 170377 / 4695 / 165682
 - Source / frozen events: 9214 / 8983
-- Sparse coverage: `598: 1543 units through 2023-09-13; 690: 1767 units through 2026-04-16`
+- Sparse source / frozen coverage: `598: 1543 / 1541 units through 2023-09-13; 690: 1767 / 1765 units through 2026-04-16`
 - Selected `freq_id` values: `506,521,537,552,568,583,598,614,629,644,660,675,690,706,721,736,752,767,783,798,813,829,844`
 - File cap: none
 - Chunk cap: none
