@@ -990,6 +990,10 @@ def test_partial_worker_startup_retains_scratch_under_active_writer(
     while any(scratch.iterdir()) and time.monotonic() < deadline:
         time.sleep(0.01)
     assert list(scratch.iterdir()) == []
+    deadline = time.monotonic() + 2
+    while any(scratch.iterdir()) and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert list(scratch.iterdir()) == []
 
 
 @pytest.mark.parametrize("max_frames", [None, 1])
@@ -1128,10 +1132,69 @@ def test_active_fetch_retains_scratch_and_reports_cancellation_timeout(tmp_path)
         source.release_fetch.set()
 
     assert source.blocking_fetch_returned.wait(timeout=2)
-    deadline = time.monotonic() + 2
-    while any(scratch.iterdir()) and time.monotonic() < deadline:
-        time.sleep(0.01)
-    assert list(scratch.iterdir()) == []
+
+
+def test_planned_checkpoint_stop_drains_active_fetch_and_resumes(
+    tmp_path, monkeypatch
+):
+    source = _BlockingSource()
+    analyzer = _OrderedRecordingAnalyzer()
+    units = [
+        Unit(key="unit-1", name="unit-1.dat"),
+        Unit(key="unit-2", name="unit-2.dat"),
+    ]
+    product = tmp_path / "product.out"
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 0.01)
+
+    def release_after_checkpoint():
+        deadline = time.monotonic() + 2
+        while not product.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert product.exists()
+        time.sleep(0.05)
+        source.release_fetch.set()
+
+    release = threading.Thread(target=release_after_checkpoint)
+    release.start()
+    try:
+        result = _run(
+            tmp_path,
+            source=source,
+            reader=_ByteReader(),
+            analyzer=analyzer,
+            units=units,
+            workers=2,
+            staged=2,
+            checkpoint_every=1,
+            stop_after_checkpoint=True,
+        )
+    finally:
+        source.release_fetch.set()
+        release.join(timeout=2)
+
+    assert not release.is_alive()
+    assert source.blocking_fetch_returned.is_set()
+    assert result.stopped_after_checkpoint is True
+    assert result.n_new == result.n_done == 1
+    assert product.read_text() == "unit-1"
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+    resumed = _run(
+        tmp_path,
+        source=_ByteSource(),
+        reader=_ByteReader(),
+        analyzer=_ReloadingOrderedAnalyzer(),
+        units=units,
+        workers=2,
+        staged=2,
+    )
+
+    assert resumed.stopped_after_checkpoint is False
+    assert resumed.resumed is True
+    assert resumed.n_new == 1
+    assert resumed.n_done == 2
+    assert product.read_text().splitlines() == ["unit-1", "unit-2"]
+    assert list((tmp_path / "scratch").iterdir()) == []
 
 
 @pytest.mark.parametrize("invalid_count", [0, -1, None, True, 1.5])

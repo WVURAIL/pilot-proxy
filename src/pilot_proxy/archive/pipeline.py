@@ -296,6 +296,7 @@ class RunResult:
     # Distinguish a no-op resume from a checkpoint/final save in this invocation.
     product_written: bool = False
     resumed: bool = False
+    stopped_after_checkpoint: bool = False
 
 
 @dataclass
@@ -425,6 +426,7 @@ def run(
     max_files: Optional[int] = None,
     max_frames_per_file: Optional[int] = None,
     quarantine_path: Optional[str] = None,
+    stop_after_checkpoint: bool = False,
     verbose: bool = True,
 ) -> RunResult:
     """Run one storage-bounded analysis while exclusively owning its product."""
@@ -443,6 +445,7 @@ def run(
             max_files=max_files,
             max_frames_per_file=max_frames_per_file,
             quarantine_path=quarantine_path,
+            stop_after_checkpoint=stop_after_checkpoint,
             verbose=verbose,
         )
 
@@ -462,6 +465,7 @@ def _run_with_output_lock_held(
     max_files: Optional[int] = None,
     max_frames_per_file: Optional[int] = None,
     quarantine_path: Optional[str] = None,
+    stop_after_checkpoint: bool = False,
     verbose: bool = True,
 ) -> RunResult:
     checkpoint_every = _require_positive_int(
@@ -788,6 +792,7 @@ def _run_with_output_lock_held(
     product_written = False
     t0, got, fail, quar = time.time(), 0, 0, 0
     run_failure: Optional[BaseException] = None
+    planned_stop = False
     try:
         for worker in workers:
             try:
@@ -951,6 +956,10 @@ def _run_with_output_lock_held(
                     if verbose:
                         print(f"  ...checkpoint ({got} new, {len(done_keys)} total)",
                               flush=True)
+                    if stop_after_checkpoint:
+                        planned_stop = True
+                        stop.set()
+                        break
             finally:
                 _rm(dest)               # delete the staged file...
                 stage_slots.release()   # ...then free its slot for the next download
@@ -959,11 +968,25 @@ def _run_with_output_lock_held(
     finally:
         stop.set()
         _discard_ready()
-        join_deadline = time.monotonic() + _WORKER_JOIN_SECONDS
-        for w in started_workers:
-            w.join(timeout=max(0.0, join_deadline - time.monotonic()))
+        if planned_stop:
+            for w in started_workers:
+                w.join()
+        else:
+            join_deadline = time.monotonic() + _WORKER_JOIN_SECONDS
+            for w in started_workers:
+                w.join(timeout=max(0.0, join_deadline - time.monotonic()))
         # A fetch may have completed while the workers were being joined.
         _discard_ready()
+        if planned_stop and run_failure is None:
+            try:
+                failure = worker_failures.get_nowait()
+            except queue.Empty:
+                pass
+            else:
+                try:
+                    _raise_worker_failure(failure)
+                except BaseException as exc:               # noqa: BLE001
+                    run_failure = exc
 
     ordered_prefix_saved = False
     prefix_save_failure: Optional[BaseException] = None
@@ -1018,7 +1041,7 @@ def _run_with_output_lock_held(
     if run_failure is not None:
         raise run_failure
 
-    if started and not ordered_prefix_saved:
+    if started and not ordered_prefix_saved and not planned_stop:
         analyzer.save(out_path)
         if not os.path.exists(out_path):
             raise RuntimeError(
@@ -1027,7 +1050,8 @@ def _run_with_output_lock_held(
         product_written = True
     product_available = resumed or product_written
     quar_note = f", {quar} quarantined" if quar else ""
-    print(f"done: {len(done_keys)}/{n_total} units, {got} new this run, "
+    label = "planned checkpoint stop" if planned_stop else "done"
+    print(f"{label}: {len(done_keys)}/{n_total} units, {got} new this run, "
           f"{fail} failed{quar_note} | {analyzer.summary()}")
     if product_available:
         print(f"product: {out_path}")
@@ -1043,4 +1067,5 @@ def _run_with_output_lock_held(
         product_available=product_available,
         product_written=product_written,
         resumed=resumed,
+        stopped_after_checkpoint=planned_stop,
     )

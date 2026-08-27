@@ -490,6 +490,7 @@ def run_chime_scan(
     download_workers: int = 1,
     max_staged_files: int = 1,
     checkpoint_every: int | None = None,
+    stop_after_checkpoint: bool = False,
     allow_partial: bool = False,
     analyzer_options: Mapping[str, Any] | None = None,
     verbose: bool = True,
@@ -526,6 +527,9 @@ def run_chime_scan(
     way, ``scan_scope.json`` durably records the per-pilot outcome, and its
     ``terminal_combine`` entry records whether the optional terminal combine
     ran or was soft-failed (with the refusing error class and message).
+
+    ``stop_after_checkpoint=True`` stops after the next durable checkpoint. It
+    is an execution control and is not part of the product resume identity.
     """
     from pilot_proxy.archive import pipeline
     from pilot_proxy.archive.instruments import load_instrument
@@ -921,7 +925,9 @@ def run_chime_scan(
                 max_staged_files=max_staged_files,
                 max_files=max_files, max_frames_per_file=max_chunks_per_file,
                 checkpoint_every=checkpoint_every,
-                quarantine_path=quarantine_path, verbose=False,
+                quarantine_path=quarantine_path,
+                stop_after_checkpoint=stop_after_checkpoint,
+                verbose=False,
             )
         except BaseException as exc:
             progress_keys = _analyzer_progress_keys(analyzer_obj, Path(out))
@@ -993,7 +999,9 @@ def run_chime_scan(
             quarantined=quarantined,
             unprocessed=unprocessed,
             status=(
-                "complete"
+                "planned_stop"
+                if result.stopped_after_checkpoint
+                else "complete"
                 if complete
                 else "capped"
                 if capped
@@ -1015,6 +1023,18 @@ def run_chime_scan(
         if not produced:
             continue
         product_paths.append(out)
+        if result.stopped_after_checkpoint:
+            scope["terminal_combine"] = {
+                "status": "not_run",
+                "reason": "planned_stop",
+            }
+            _atomic_write_json(scope_path, scope)
+            if verbose:
+                print(
+                    f"[chime-scan] planned stop after checkpoint: {out}",
+                    flush=True,
+                )
+            return {"per_pilot_work_dir": work, "scan_scope": scope_path}
 
     incomplete = [
         entry for entry in scope["pilots"] if entry.get("status") != "complete"

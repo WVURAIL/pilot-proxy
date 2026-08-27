@@ -593,6 +593,7 @@ def _cmd_chime_scan(args: argparse.Namespace) -> None:
         max_files=args.max_files,
         max_chunks_per_file=args.max_chunks_per_file,
         checkpoint_every=args.checkpoint_every,
+        stop_after_checkpoint=args.stop_after_checkpoint,
         download_workers=args.download_workers,
         max_staged_files=args.max_staged_files,
         inventory=args.inventory,
@@ -1813,6 +1814,14 @@ def build_parser() -> argparse.ArgumentParser:
                             help="Write the per-pilot product every N files "
                                  "(default 50); resume reloads the last checkpoint. "
                                  "Lower = less redo after a kill, more I/O.")
+    chime_scan.add_argument(
+        "--stop-after-checkpoint",
+        action="store_true",
+        help=(
+            "Stop cleanly after the next durable per-pilot checkpoint. "
+            "Resume later without this one-shot control."
+        ),
+    )
     chime_scan.add_argument(
         "--download-workers",
         type=int,
