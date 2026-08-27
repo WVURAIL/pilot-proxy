@@ -70,6 +70,19 @@ def test_verify_bundle_rejects_changed_payload(tmp_path: Path) -> None:
         freeze_archive_runtime.verify_bundle(root, run_resolution=False)
 
 
+def test_wheel_identity_ignores_vendored_metadata(tmp_path: Path) -> None:
+    wheel = tmp_path / "setuptools-84.0.0-py3-none-any.whl"
+    _wheel(wheel, name="setuptools", version="84.0.0")
+    with zipfile.ZipFile(wheel, "a") as archive:
+        archive.writestr(
+            "setuptools/_vendor/example-1.0.dist-info/METADATA",
+            "Metadata-Version: 2.1\nName: example\nVersion: 1.0\n",
+        )
+    assert freeze_archive_runtime.wheel_identity(wheel) == (
+        "setuptools", "84.0.0"
+    )
+
+
 def test_exact_git_direct_source_is_rebuilt_from_commit() -> None:
     requirement, source = freeze_archive_runtime.requirement_for(
         {

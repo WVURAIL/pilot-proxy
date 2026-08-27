@@ -187,7 +187,10 @@ def requirement_for(record: Mapping[str, Any]) -> tuple[str | None, dict[str, An
 def wheel_identity(path: Path) -> tuple[str, str]:
     try:
         with zipfile.ZipFile(path) as archive:
-            members = [name for name in archive.namelist() if name.endswith(".dist-info/METADATA")]
+            members = [
+                name for name in archive.namelist()
+                if name.count("/") == 1 and name.endswith(".dist-info/METADATA")
+            ]
             if len(members) != 1:
                 raise FreezeError(f"{path.name} does not contain one wheel METADATA file")
             metadata = email.parser.BytesParser().parsebytes(archive.read(members[0]))
