@@ -108,11 +108,14 @@ artifact cannot execute there. Build the library on the node from the same
 frozen CUDA source, then pin those bytes by digest for the life of the run.
 
 ```bash
-make -C cuda clean && make -C cuda SM=90
-KERNEL_LIB="$PWD/cuda/libfstatistic.so"
-printf '%s  %s\n' \
-  9b94f493c40f609d7d4613adb16f272b9e998c114871542c8fbaee36ad51a2b8 \
-  "$KERNEL_LIB" | sha256sum --check --strict
+SM=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | tr -d '. ')
+make -C cuda clean && make -C cuda SM="$SM"
+# nvcc is not byte-reproducible: this build IS the artifact. Preserve it
+# outside the checkout, gate that file, and record its digest in the ledger.
+KERNEL_SHA=$(sha256sum cuda/libfstatistic.so | cut -d' ' -f1)
+KERNEL_LIB="$HOME/pp_run/kernel/libfstatistic-2.3.0-sm${SM}-${KERNEL_SHA:0:12}.so"
+mkdir -p "$(dirname "$KERNEL_LIB")" && cp cuda/libfstatistic.so "$KERNEL_LIB"
+echo "record in the ledger: $KERNEL_LIB  $KERNEL_SHA"
 
 PYTHONPATH=src python - "$KERNEL_LIB" <<'PYEOF'
 import sys

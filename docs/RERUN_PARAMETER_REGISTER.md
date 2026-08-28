@@ -181,7 +181,7 @@ digest in the run ledger, then check the resolved first product against it.
 | Weight bank and manifest SHA-256 | Checked-in bank, manifest, and locked digests above | Verify at launch |
 | Detector core version | 2.3.0 | Locked; identical in both paths |
 | Detector library (local) | `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so`; SM89; `f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2` | Preserved digest; repeat final-source gates after the source change |
-| Detector library (CANFAR) | SM90 artifact built on the session node from the same frozen CUDA source; `9b94f493c40f609d7d4613adb16f272b9e998c114871542c8fbaee36ad51a2b8` | The preserved SM89 artifact cannot run on this device; record the digest before launch and reuse that exact artifact for every resume |
+| Detector library (CANFAR) | SM90 artifact built once on the session node from the same frozen CUDA source, then preserved outside the checkout; its SHA-256 is recorded in the run ledger, not pinned here | The preserved SM89 artifact cannot run on this device. `nvcc` is not byte-reproducible, so a rebuild yields a different digest and is a new artifact: preserve the built file, gate that exact file, record its digest, and reuse it for every resume |
 | Terminal product | all 23 per-pilot v5 products; channel subsets are derived only | Locked |
 
 The 23 pilot identifiers are the ATSC 14--36 pilot locations mapped onto the
