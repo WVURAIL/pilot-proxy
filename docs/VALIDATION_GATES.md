@@ -1,16 +1,20 @@
-# Validation gates for the local archive run
+# Validation gates for the archive run
 
-These are the mandatory gates for the approved local historical estimation and
-sufficient-statistic reprocessing run. The coarse positive-excess flag is
+These are the mandatory gates for the approved historical estimation and
+sufficient-statistic reprocessing run, on either qualified path: the local WSL
+host or a CANFAR GPU session. The coarse positive-excess flag is
 retained as a bootstrap diagnostic; the fine rank/eta decision is inactive and
 no calibrated detection policy is applied.
 
 Gate evidence must match one clean source revision, its package-source digest,
-and the preserved SM89 library. A source change after a gate invalidates that
-gate. The scientific and product pins are in
-[`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md), the sole
-production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), and the
-actual values belong in the run ledger.
+and the exact detector library that will run: the preserved SM89 artifact on
+the local path, or the node-built SM90 artifact on the CANFAR path. A source
+change after a gate invalidates that gate, and so does rebuilding the library.
+The scientific and product pins are in
+[`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md), the local
+production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), the
+CANFAR production commands are in [`CANFAR_RUNBOOK.md`](CANFAR_RUNBOOK.md), and
+the actual values belong in the run ledger for the launched path.
 
 ## Ground truth already closed
 
@@ -97,6 +101,45 @@ Pass criteria:
   disposable build; and
 - the preserved bytes pass the explicit capability check and real-file gates.
 
+## Final-source H100/SM90 gates
+
+The qualified alternate host is a CANFAR H100 GPU session. The preserved SM89
+artifact cannot execute there. Build the library on the node from the same
+frozen CUDA source, then pin those bytes by digest for the life of the run.
+
+```bash
+make -C cuda clean && make -C cuda SM=90
+KERNEL_LIB="$PWD/cuda/libfstatistic.so"
+printf '%s  %s\n' \
+  9b94f493c40f609d7d4613adb16f272b9e998c114871542c8fbaee36ad51a2b8 \
+  "$KERNEL_LIB" | sha256sum --check --strict
+
+PYTHONPATH=src python - "$KERNEL_LIB" <<'PYEOF'
+import sys
+from pilot_proxy.kernel import FStatKernel
+
+kernel = FStatKernel(sys.argv[1])
+assert kernel.version.as_string() == "2.3.0"
+assert kernel.supports_fine_powers()
+assert kernel.supports_fused_fine()
+print("kernel", kernel.version.as_string(), kernel.get_fine_specs())
+PYEOF
+
+make -C cuda test_cuda SM=90
+PYTHONPATH=src python -m pytest tests/kernel -q
+```
+
+Pass criteria:
+
+- the build used the frozen CUDA source and the default detector configuration;
+- the library reports core 2.3.0 and the required exact fine capabilities;
+- the SM90 CUDA reference and fixed-point parity tests exit zero;
+- the kernel test directory has zero failures and zero skips against that
+  build;
+- the built digest is recorded in the ledger and rechecked at every resume; and
+- rebuilding the library ends this chain: repeat every gate above and record the
+  new digest before resuming.
+
 ## Real-file and resume gates
 
 Repeat both gates after the source revision is frozen:
@@ -108,6 +151,13 @@ Repeat both gates after the source revision is frozen:
    slots, and a two-unit rehearsal checkpoint. Interrupt after a durable
    checkpoint, rerun the identical command, and require eight unique unit keys,
    no duplicate frames, valid v5 products, and empty staging.
+3. On a path that runs concurrent shards, run the production shard count at
+   once, one distinct `freq_id` per shard, each with its own output and staging
+   directory. Require every shard's products to validate, each shard to hold
+   exactly one distinct physical channel, no unit key or frame duplicated
+   across shards, no shard reading or writing another shard's output or
+   staging, and the summed peak device memory to stay inside the gate 1
+   headroom bound. This gate does not apply to a single-process path.
 
 The exact commands and evidence paths are in `LOCAL_PROCESSING.md`. These gates
 must embed the final package-source digest and preserved kernel digest. A capped
@@ -141,6 +191,21 @@ The approved local command uses:
   detection;
 - no file cap, no chunk cap, and no partial-run acknowledgement; and
 - a fresh output directory outside the checkout.
+
+The approved CANFAR command uses, per shard:
+
+- the same frozen 165,682-unit inventory, one `freq_id` per shard, with the
+  union over shards covering all 23 selected values;
+- five concurrent shards, the VRAM-bound maximum for the session budget;
+- four download workers and sixteen staged-file slots;
+- a 50-unit production checkpoint interval;
+- the node-built SM90 library pinned by digest above;
+- `fine_products=on`; this retains exact fine powers and does not enable fine
+  detection;
+- staging on `/scratch`, not `/arc`;
+- no file cap, no chunk cap, and no partial-run acknowledgement; and
+- a fresh output directory and a fresh staging directory per shard, outside the
+  checkout.
 
 The full synthetic detection frontier, residual-contamination calibration,
 rho/eta selection, and final detection policy are later work. They are not

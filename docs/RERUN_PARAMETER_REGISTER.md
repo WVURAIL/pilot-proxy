@@ -1,10 +1,14 @@
 # Archive re-run parameter register
 
-This is the scientific and product authority for the CHIME archive re-run. The
-pass/fail gates are in [`VALIDATION_GATES.md`](VALIDATION_GATES.md), the sole
-production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), and the
-actual launch values belong in the local run ledger. The CANFAR guide is an
-alternate bounded remote workflow and cannot override this chain.
+This is the scientific and product authority for the CHIME archive re-run. It
+governs two qualified execution paths: the approved local WSL run and the
+qualified CANFAR sharded session. The operator launches exactly one of them.
+The pass/fail gates are in [`VALIDATION_GATES.md`](VALIDATION_GATES.md), the
+local production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), the
+CANFAR production commands are in [`CANFAR_RUNBOOK.md`](CANFAR_RUNBOOK.md), and
+the actual launch values belong in the run ledger for the launched path. Neither
+venue guide can override this chain. Rows below marked local or CANFAR are
+venue-specific; every unmarked row applies identically to both paths.
 
 The run is historical estimation and sufficient-statistic reprocessing. The
 coarse positive-excess flag is retained as a bootstrap diagnostic; the fine
@@ -154,7 +158,10 @@ digest in the run ledger, then check the resolved first product against it.
 | Pending-event resolution SHA-256 | `077915779d234ad9cca1e9b52171e28025a60474f20fad7aff5684f55ce0c4c7` | Locked |
 | Inventory manifest SHA-256 | `5695e1cc9c007cb2c79ad39535cf9ed2fb20848ad00d3cf0215933670d0707e5` | Locked |
 | Resolved `nfft` | 16384 | Must pass pre-flight |
-| Execution host | Local WSL workstation: 24-core host, 32 WSL virtual CPUs, 62 GiB WSL memory, one 16 GiB RTX 5000 Ada | Locked; verify current free space at launch |
+| Execution host (local) | Local WSL workstation: 24-core host, 32 WSL virtual CPUs, 62 GiB WSL memory, one 16 GiB RTX 5000 Ada | Locked for the local path; verify current free space at launch |
+| Execution host (CANFAR) | CANFAR H100 session: cgroup caps of 16 CPUs and 96 GiB RAM, 11,008 MiB visible device memory; stage on `/scratch` at 1.2 GB/s and never on `/arc` at 241 MB/s | Locked for the CANFAR path; verify free space and the staging filesystem at launch |
+| Topology (local) | One detector process; no other detector process against the single GPU | Locked |
+| Topology (CANFAR) | 5 concurrent single-channel shards, each holding exactly one distinct physical channel; the shard count is VRAM-bound at 5, since 6 shards leaves 4 of 6 running and 8 exhausts device memory; repeat shard waves until all 23 channels are complete | Locked; qualified by the concurrent sharded-topology gate |
 | Source revision | Exact pushed commit recorded in the run ledger | Freeze after all code and documentation changes |
 | Source state | Clean and equal to the pushed revision | Mandatory at every launch and resume |
 | Package-source SHA-256 | Exact digest recorded in the run ledger and embedded products | Freeze with the final source |
@@ -172,18 +179,25 @@ digest in the run ledger, then check the resolved first product against it.
 | Output directory | fresh path outside the source checkout | Fill at launch |
 | Receiver profile path and SHA-256 | Checked-in CHIME profile and locked digest above | Verify at launch |
 | Weight bank and manifest SHA-256 | Checked-in bank, manifest, and locked digests above | Verify at launch |
-| Detector library path, version, and SHA-256 | `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so`; core 2.3.0; `f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2` | Preserved digest; repeat final-source gates after the source change |
+| Detector core version | 2.3.0 | Locked; identical in both paths |
+| Detector library (local) | `/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so`; SM89; `f6cd8529ca4b4581aaa37a6007a372d5afb4afa8c730d8a4372a8eaf25e807f2` | Preserved digest; repeat final-source gates after the source change |
+| Detector library (CANFAR) | SM90 artifact built on the session node from the same frozen CUDA source; `9b94f493c40f609d7d4613adb16f272b9e998c114871542c8fbaee36ad51a2b8` | The preserved SM89 artifact cannot run on this device; record the digest before launch and reuse that exact artifact for every resume |
 | Terminal product | all 23 per-pilot v5 products; channel subsets are derived only | Locked |
 
 The 23 pilot identifiers are the ATSC 14--36 pilot locations mapped onto the
 verified CHIME grid. No production file or chunk cap is allowed.
 
-Kernel core 2.3.0 is selected for the fresh re-run. Use the preserved SM89
-artifact named above, complete the source-build GPU and parity gates, and
-complete the preserved-artifact capability and real-file gates. Use its
-recorded digest for every restart. Rebuilding changes the pinned byte identity
-and requires a new approval. The preserved 2.1.0 binary remains historical
-cohort evidence and is not the production selection.
+Kernel core 2.3.0 is selected for the fresh re-run in both paths. On the local
+path, use the preserved SM89 artifact named above. On the CANFAR path, build the
+SM90 artifact on the session node from the same frozen CUDA source, because the
+preserved SM89 artifact cannot run on that device. In either case complete the
+source-build GPU and parity gates and the capability and real-file gates against
+the exact artifact that will run, record its digest before launch, and use that
+recorded digest for every restart. Rebuilding within an approved run changes the
+pinned byte identity and requires a new approval; a CANFAR rebuild in a later
+session requires re-running the SM90 gates and recording the new digest in the
+run ledger before the run continues. The preserved 2.1.0 binary remains
+historical cohort evidence and is not the production selection.
 
 Source: [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md).
 

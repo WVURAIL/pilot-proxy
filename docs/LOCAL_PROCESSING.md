@@ -6,7 +6,9 @@ product pins are in [`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md)
 mandatory gates are in [`VALIDATION_GATES.md`](VALIDATION_GATES.md), and actual
 launch values go in a copy of
 [`LOCAL_ARCHIVE_RUN_LEDGER_TEMPLATE.md`](LOCAL_ARCHIVE_RUN_LEDGER_TEMPLATE.md).
-The CANFAR guide is an alternate remote workflow and cannot override this file.
+[`CANFAR_RUNBOOK.md`](CANFAR_RUNBOOK.md) documents the separately qualified
+CANFAR path and cannot override this file; neither file overrides the other,
+and the operator launches exactly one path.
 
 The run is historical estimation and sufficient-statistic reprocessing. The
 coarse positive-excess flag is retained as a bootstrap diagnostic; the fine

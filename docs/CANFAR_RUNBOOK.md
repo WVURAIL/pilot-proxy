@@ -1,7 +1,8 @@
 # CANFAR bounded-run guide
 
-This is the alternate remote A100 workflow for bounded CHIME DTV pilot runs.
-It is not the authority for the approved local archive run. The local parameter
+This is the remote CANFAR GPU-session workflow for CHIME DTV pilot runs. It is
+a separately qualified path for the archive run in its own right. It is not the
+authority for the approved local archive run and changes no local setting. The local parameter
 register, gates, production command, and run record are in
 [`RERUN_PARAMETER_REGISTER.md`](RERUN_PARAMETER_REGISTER.md),
 [`VALIDATION_GATES.md`](VALIDATION_GATES.md),
@@ -16,8 +17,9 @@ For bounded remote archive-scale work, the entry point is
 `pilot-proxy chime-scan`.
 
 For the measured local workstation profile, use
-[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md). The SM80 instructions below apply
-only to an A100 session and cannot override the approved local settings.
+[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md). The build instructions below
+target whatever GPU architecture the remote session provides and cannot
+override the approved local settings.
 
 The older `pilot-proxy chime-run` command reads an already-staged HDF5
 directory in one process. We retain it for local calibration and regression
@@ -130,15 +132,20 @@ staged `libfstatistic.so`.
 
 ---
 
-## Remote A100 validation example
+## Remote session validation example
 
 This is the on-node sequence for the alternate remote workflow. Run it after
 environment setup and stop at the first failure. It does not replace the SM89
 gates required for the approved local run.
 
 ```bash
-# S2.1 - A100 library built from the current sources and reporting core 2.3.0
-make -C cuda clean && make -C cuda SM=80
+# S2.0 - architecture of the GPU this session actually got (no architecture is
+#        requestable through launch_gpu_session.py); record it in the ledger
+SM=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -n1 | tr -d '. ')
+echo "session arch sm_${SM}"
+
+# S2.1 - on-node library built from the current sources and reporting core 2.3.0
+make -C cuda clean && make -C cuda SM="$SM"
 python - <<'PY'
 from pilot_proxy.kernel import FStatKernel
 v = FStatKernel().version.as_string()
@@ -147,7 +154,7 @@ print("kernel core", v)
 PY
 
 # S2.2 - CUDA regression + exact row-sum parity (integers, no tolerance)
-make -C cuda test_cuda SM=80
+make -C cuda test_cuda SM="$SM"
 
 # S2.3 - GPU pytest gates: numpy-reference equality, bit-exact coarse marginal
 #        identity, and the pre-registered ULP gate on the cupy fine FFT.
@@ -430,8 +437,9 @@ instrument and archive path that the synthetic regression cannot cover.
 ## Remote long-run checklist
 
 Use this checklist only for a separately approved remote run. It records the
-failure modes that still apply on an A100, but its SM80 binary, session cadence,
-and checkpoint examples are not local production settings.
+failure modes that apply to any remote GPU session; its on-node binary, session
+cadence, and checkpoint settings belong to the remote path and are not local
+production settings.
 
 1. **All remote gates, in full.** Run the remote build, GPU, smoke, and
    interrupt/resume checks with no shortcuts, since a multi-day run will
@@ -445,7 +453,7 @@ and checkpoint examples are not local production settings.
 
    ```bash
    kernel_sha=$(sha256sum cuda/libfstatistic.so | awk '{print $1}')
-   KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm80-${kernel_sha:0:16}.so"
+   KERNEL_LIB="$PWD/cuda/libfstatistic-2.3.0-sm${SM}-${kernel_sha:0:16}.so"
    cp --no-clobber --preserve=mode,timestamps cuda/libfstatistic.so "$KERNEL_LIB"
    cmp -s cuda/libfstatistic.so "$KERNEL_LIB" || exit 1
    export KERNEL_LIB
@@ -507,8 +515,8 @@ and checkpoint examples are not local production settings.
    unit is also below the inventory's one-frame size estimate. A frozen
    inventory that excludes all 4,695 unusable units therefore has 165,682
    units across 8,983 events. Preserve the full inventory and an exclusion
-   ledger beside it. The approved local run uses the frozen inventory. Using
-   the full inventory instead would require a new approval for
+   ledger beside it. The approved archive run uses the frozen inventory on either
+   path. Using the full inventory instead would require a new approval for
    `--allow-partial` and an exact final-quarantine audit.
 10. **Expect the terminal combine over all channels to be empty.** The
    stack keeps only `(event, frame)` identities common to *every* selected
@@ -522,11 +530,17 @@ and checkpoint examples are not local production settings.
 
 ## Approved full archive run
 
-The approved archive run is local. Its only production command is in
-[`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md). The A100 examples in this file
-are alternate bounded workflows and do not override the local parameter
-register, SM89 gates, four-worker/eight-slot controls, 250-unit checkpoint, or
-output paths.
+The approved archive run has two qualified paths, and the operator picks
+exactly one for the whole run. The local path is authoritative as written: its
+production command is in [`LOCAL_PROCESSING.md`](LOCAL_PROCESSING.md), and
+nothing in this file overrides the local parameter register, SM89 gates,
+four-worker/eight-slot controls, 250-unit checkpoint, or output paths. The
+remote path is qualified separately on the session's own GPU architecture, with
+its own on-node kernel build and digest, its own gate evidence, and its own
+topology; those are likewise not local settings. Both paths share the frozen
+source revision, package-source digest, weight bank, and frozen inventory.
+Products from the two paths pin different kernel digests, so never combine them
+in one cohort or output directory (checklist item 7).
 
 The authoritative results are all 23 per-pilot v5 products. A combined
 common-frame stack is a derived projection and may be empty when archive
