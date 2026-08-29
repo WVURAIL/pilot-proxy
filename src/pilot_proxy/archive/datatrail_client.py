@@ -144,6 +144,28 @@ class DatatrailContractError(RuntimeError):
 # so the decision is made on evidence, not on silence.
 _MINOC_COLLECTIONS = ("cadc:CHIMEFRB/",)
 
+# Datatrail stopped emitting the collection prefix on some minoc replicas after
+# 2026-08-03: a 2025 event returns all 736 replicas as bare "data/..." paths,
+# and a 2020 event can return both forms from the same directory. The bare
+# paths name the same artifacts -- cadcinfo resolves them once the prefix is
+# restored -- so restore it for paths that match the archive layout rather than
+# widening _MINOC_COLLECTIONS, which would accept an arbitrary URI.
+_MINOC_DEFAULT_COLLECTION = "cadc:CHIMEFRB/"
+_BARE_REPLICA_ROOTS = ("data/",)
+
+
+def _restore_collection(uri: str) -> str:
+    """Restore the collection prefix on a bare archive-relative replica path.
+
+    A URI that already names a known collection is returned unchanged, and one
+    that matches neither is returned unchanged so the caller still refuses it.
+    """
+    if uri.startswith(_MINOC_COLLECTIONS):
+        return uri
+    if uri.startswith(_BARE_REPLICA_ROOTS):
+        return _MINOC_DEFAULT_COLLECTION + uri
+    return uri
+
 
 class Datatrail:
     """Typed adapter over datatrail's machine-readable CLI (`--json`).
@@ -381,7 +403,8 @@ class Datatrail:
                 raise DatatrailContractError(
                     f"[datatrail ps {scope} {dataset}] malformed 'minoc' "
                     "replica locations")
-            normalized = [uri.replace("//", "/") for uri in uris]
+            normalized = [_restore_collection(uri.replace("//", "/"))
+                          for uri in uris]
             stray = [u for u in normalized
                      if not u.startswith(_MINOC_COLLECTIONS)]
             if stray:

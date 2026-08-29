@@ -360,3 +360,53 @@ def test_common_path_shares_ps_contract(monkeypatch):
     _install_fake_cli(monkeypatch, lambda a: (1, json.dumps(
         {"error": "down"}), ""))
     assert src.DATATRAIL.common_path("s", "e", retries=0) == (None, False)
+
+
+# ==========================================================================
+# Datatrail stopped emitting the collection prefix on some minoc replicas
+# after 2026-08-03. The bare paths name the same artifacts, so the adapter
+# restores the prefix instead of refusing the event.
+# ==========================================================================
+def test_bare_replica_paths_get_collection_restored(monkeypatch):
+    # a 2025 event: every replica comes back without "cadc:CHIMEFRB/"
+    uris = ["data/chime/baseband/raw/2025/03/31/astro_1111116060/"
+            "baseband_1111116060_832.h5",
+            "data/chime/baseband/raw/2025/03/31/astro_1111116060/"
+            "baseband_1111116060_506.h5"]
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, _ps_payload({"file_replica_locations": {"minoc": uris}}), ""))
+    cp, names, ok = src.DATATRAIL.files("chime.event.baseband.raw",
+                                        "1111116060")
+    assert ok
+    assert cp == ("cadc:CHIMEFRB/data/chime/baseband/raw/2025/03/31/"
+                  "astro_1111116060")
+    assert sorted(names) == ["baseband_1111116060_506.h5",
+                             "baseband_1111116060_832.h5"]
+
+
+def test_mixed_bare_and_prefixed_replicas_share_one_common_path(monkeypatch):
+    # a 2020 event: the same directory returns both forms (1/900 bare)
+    uris = ["cadc:CHIMEFRB/data/chime/baseband/raw/2020/07/15/"
+            "astro_100260502/baseband_100260502_0.h5",
+            "data/chime/baseband/raw/2020/07/15/astro_100260502/"
+            "baseband_100260502_156.h5"]
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, _ps_payload({"file_replica_locations": {"minoc": uris}}), ""))
+    cp, names, ok = src.DATATRAIL.files("chime.event.baseband.raw",
+                                        "100260502")
+    assert ok
+    assert cp == ("cadc:CHIMEFRB/data/chime/baseband/raw/2020/07/15/"
+                  "astro_100260502")
+    assert sorted(names) == ["baseband_100260502_0.h5",
+                             "baseband_100260502_156.h5"]
+
+
+def test_replica_outside_any_known_layout_still_refuses(monkeypatch):
+    # restoration is narrow: a URI that names neither a known collection nor
+    # the archive layout stays a deterministic refusal
+    uris = ["cadc:SOMEONE_ELSE/data/chime/baseband/raw/2025/03/31/"
+            "astro_1111116060/baseband_1111116060_832.h5"]
+    _install_fake_cli(monkeypatch, lambda a: (
+        0, _ps_payload({"file_replica_locations": {"minoc": uris}}), ""))
+    with pytest.raises(src.DatatrailContractError):
+        src.DATATRAIL.files("chime.event.baseband.raw", "1111116060")
