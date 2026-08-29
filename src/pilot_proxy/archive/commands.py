@@ -61,8 +61,15 @@ def survey_chime(
     empty_age_days: int | None = None,
     strict_completeness: bool = False,
     dry_run: bool = False,
+    scopes_only: bool = False,
+    match: str | None = None,
+    expand: bool = False,
 ) -> Path:
-    """Build or resume a CHIME archive inventory."""
+    """Build or resume a CHIME archive inventory.
+
+    With ``scopes_only`` the walk stops at discovery: it writes a map of the
+    datasets each scope lists and returns that path instead of an inventory.
+    """
     instrument = load_instrument("chime")
     if workers < 1:
         raise SystemExit("chime-survey: --workers must be positive")
@@ -95,6 +102,11 @@ def survey_chime(
     else:
         out = Path(out_dir).expanduser()
 
+    if not scopes_only:
+        for flag, value in (("--match", match), ("--expand", expand)):
+            if value:
+                print(f"[chime-survey] {flag} applies to --scopes-only; ignoring")
+
     print(f"[chime-survey] {instrument.name} -> {out}")
     if dry_run:
         print("  dry-run: would survey")
@@ -117,6 +129,9 @@ def survey_chime(
         "max_events": max_events,
         "empty_age_days": empty_age_days,
         "name": inventory_name,
+        "scopes_only": bool(scopes_only),
+        "match": match,
+        "expand": bool(expand),
     }
     reader = ChimeBasebandReader()
     ctx = RunContext(instrument=instrument, options=options, reader=reader)
@@ -127,6 +142,12 @@ def survey_chime(
         inventory_path = Path(source.survey(ctx, str(out)))
     except SurveyUnavailableError as exc:
         raise SystemExit(f"chime-survey: {exc}") from exc
+
+    if scopes_only:
+        # discovery only: the result is a scope map, not a scannable inventory,
+        # so it gets no inventory meta and no completeness check
+        print(f"  scope map: {inventory_path}")
+        return inventory_path
 
     meta_path = write_inventory_meta(
         inventory_path,

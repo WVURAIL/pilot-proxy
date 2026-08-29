@@ -288,6 +288,9 @@ def _cmd_chime_survey(args: argparse.Namespace) -> None:
         empty_age_days=args.empty_age_days,
         strict_completeness=args.strict_completeness,
         dry_run=args.dry_run,
+        scopes_only=args.scopes_only,
+        match=args.match,
+        expand=args.expand,
     )
 
 
@@ -1311,6 +1314,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print the target without contacting the archive.",
+    )
+    chime_survey.add_argument(
+        "--scopes-only",
+        action="store_true",
+        help="Walk the scopes and write a dataset map instead of an inventory.",
+    )
+    chime_survey.add_argument(
+        "--match",
+        default=None,
+        help="Comma-separated terms a dataset name must all contain "
+             "(--scopes-only).",
+    )
+    chime_survey.add_argument(
+        "--expand",
+        action="store_true",
+        help="Open each matched dataset one level and map its children "
+             "(--scopes-only).",
     )
     chime_survey.set_defaults(func=_cmd_chime_survey)
 
