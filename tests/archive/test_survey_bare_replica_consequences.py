@@ -27,7 +27,6 @@ import json
 import os
 import tempfile
 
-import pytest
 
 from pilot_proxy.archive import datatrail_client as dt
 from pilot_proxy.archive.interfaces import RunContext
