@@ -22,6 +22,8 @@ docs/out/
 # PilotProxy CUDA kernel build artifacts (make build-kernel / test-kernel)
 cuda/*.o
 cuda/*.so*
+# the preserved kernel is machine-local; its manifest travels with it
+cuda/*.manifest.json
 cuda/test_c_header
 cuda/test_fstat_cuda
 cuda/test_fstat_reference

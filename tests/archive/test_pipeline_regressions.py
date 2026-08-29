@@ -22,6 +22,13 @@ from pilot_proxy.archive.interfaces import (
     UnreadableUnitError,
 )
 
+# A hang guard, NOT a rendezvous. Every wait that uses it is on an event some
+# other thread is already committed to setting, so nothing here schedules work
+# by wall clock and the ceiling is never reached; it only turns a genuine
+# deadlock into a failure instead of a hung suite. The 2s waits this replaced
+# were short enough to expire under CPU load (9 failures in 130 loaded runs).
+_RENDEZVOUS_CEILING = 120.0
+
 
 class _ByteSource(DataSource):
     info = PluginInfo(
@@ -180,6 +187,25 @@ class _LaterFailureWithBlockedPeerSource(_ByteSource):
             return False, "temporary outage"
         Path(dest).write_bytes(unit.key.encode())
         return True, ""
+
+
+class _JoinablePeerSource(_LaterFailureWithBlockedPeerSource):
+    """The blocked-peer source, plus the download worker thread running it.
+
+    `peer_returned` is set from INSIDE fetch(), so it proves only that the
+    source call is about to return. The worker still has to hand the result
+    back, delete its staged file and release its slot before the thread ends,
+    so a test that needs the worker to have FINISHED must join this thread.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.peer_thread: Optional[threading.Thread] = None
+
+    def fetch(self, unit, dest):
+        if unit.key == "unit-3":
+            self.peer_thread = threading.current_thread()
+        return super().fetch(unit, dest)
 
 
 class _OutOfOrderTailSource(_ByteSource):
@@ -343,7 +369,7 @@ class _BlockingOrderedSaveAnalyzer(_OrderedRecordingAnalyzer):
 
     def save(self, path):
         self.save_started.set()
-        assert self.release_save.wait(timeout=5)
+        assert self.release_save.wait(timeout=_RENDEZVOUS_CEILING)
         super().save(path)
 
 
@@ -775,7 +801,7 @@ def test_ordered_prefix_is_saved_before_active_peer_error(tmp_path, monkeypatch)
 
 def test_worker_finishing_during_prefix_save_returns_partial_result(
         tmp_path, monkeypatch):
-    source = _LaterFailureWithBlockedPeerSource()
+    source = _JoinablePeerSource()
     analyzer = _BlockingOrderedSaveAnalyzer()
     units = [
         Unit(key=f"unit-{index}", name=f"unit-{index}.dat")
@@ -784,10 +810,17 @@ def test_worker_finishing_during_prefix_save_returns_partial_result(
     release_errors = []
 
     def release_during_save():
+        # Hold the ordered prefix save open until the blocked download worker
+        # has genuinely FINISHED -- that is the scenario this test is named
+        # for. Waiting on the thread rather than on peer_returned (which fires
+        # while fetch() is still on the stack) is what makes the worker's exit
+        # a fact instead of a race against however long save() happens to take.
         try:
-            assert analyzer.save_started.wait(timeout=2)
+            assert analyzer.save_started.wait(timeout=_RENDEZVOUS_CEILING)
             source.release_peer.set()
-            assert source.peer_returned.wait(timeout=2)
+            assert source.peer_returned.wait(timeout=_RENDEZVOUS_CEILING)
+            source.peer_thread.join(timeout=_RENDEZVOUS_CEILING)
+            assert not source.peer_thread.is_alive()
         except BaseException as exc:                         # noqa: BLE001
             release_errors.append(exc)
         finally:
@@ -806,7 +839,7 @@ def test_worker_finishing_during_prefix_save_returns_partial_result(
         staged=3,
         checkpoint_every=50,
     )
-    releaser.join(timeout=2)
+    releaser.join(timeout=_RENDEZVOUS_CEILING)
 
     assert not releaser.is_alive()
     assert release_errors == []
