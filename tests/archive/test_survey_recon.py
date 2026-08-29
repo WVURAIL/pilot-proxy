@@ -429,3 +429,60 @@ def test_the_map_is_rewritten_in_place_not_atomically(tmp_path, monkeypatch):
     # beside it
     assert _rows(stale) == [{"scope": "s.one", "dataset": "d1"}]
     assert sorted(p.name for p in tmp_path.iterdir()) == ["scopes.jsonl"]
+
+
+# ==========================================================================
+# The CLI surface. recon() shipped for a long time with no way to invoke it
+# from the command line, so these pin the flags through to the options the
+# source actually reads.
+# ==========================================================================
+def test_scopes_only_flags_reach_the_source(monkeypatch):
+    from pilot_proxy import cli
+    from pilot_proxy.archive import commands
+
+    seen = {}
+
+    def fake_survey(**kwargs):
+        seen.update(kwargs)
+        return "/tmp/scopes.jsonl"
+
+    monkeypatch.setattr(commands, "survey_chime", fake_survey)
+    args = cli.build_parser().parse_args([
+        "chime-survey", "--scopes-only", "--match", "GAINS,corr", "--expand",
+        "--name", "probe",
+    ])
+    args.func(args)
+    assert seen["scopes_only"] is True
+    assert seen["match"] == "GAINS,corr"
+    assert seen["expand"] is True
+    assert seen["name"] == "probe"
+
+
+def test_the_recon_flags_default_off(monkeypatch):
+    from pilot_proxy import cli
+    from pilot_proxy.archive import commands
+
+    seen = {}
+    monkeypatch.setattr(commands, "survey_chime",
+                        lambda **kw: seen.update(kw) or "/tmp/x")
+    args = cli.build_parser().parse_args(["chime-survey", "--name", "plain"])
+    args.func(args)
+    assert seen["scopes_only"] is False
+    assert seen["match"] is None
+    assert seen["expand"] is False
+
+
+def test_match_and_expand_are_reported_as_ignored_without_scopes_only(
+        tmp_path, capsys):
+    # they only mean something during discovery; saying so beats dropping them
+    from pilot_proxy.archive.commands import survey_chime
+
+    survey_chime(out_dir=tmp_path / "inv", match="gains", expand=True,
+                 dry_run=True)
+    out = capsys.readouterr().out
+    assert "--match applies to --scopes-only; ignoring" in out
+    assert "--expand applies to --scopes-only; ignoring" in out
+
+    survey_chime(out_dir=tmp_path / "inv", scopes_only=True, match="gains",
+                 dry_run=True)
+    assert "ignoring" not in capsys.readouterr().out
