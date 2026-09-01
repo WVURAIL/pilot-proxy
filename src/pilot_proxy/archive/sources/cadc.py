@@ -75,6 +75,25 @@ def _default_cert() -> str:
     return os.environ.get("CADC_CERT") or os.path.expanduser("~/.ssl/cadcproxy.pem")
 
 
+STORAGE_SERVICE_ENV = "PILOT_PROXY_STORAGE_SERVICE"
+
+
+def storage_service_override() -> Optional[str]:
+    """Storage Inventory service to fetch through, or None for the default.
+
+    cadcdata routes every download through ivo://cadc.nrc.ca/global/raven, which
+    locates a replica before the bytes move. When that locator is degraded the
+    replicas themselves stay healthy, so pointing the client straight at one
+    (ivo://cadc.nrc.ca/uvic/minoc, say) keeps a run moving. Replicas serve the
+    same objects, and fetch() still checks every staged file against the size
+    the inventory recorded, so this changes the route the bytes travel and
+    nothing about which bytes arrive. The resolved value is recorded in
+    scan_scope.json, so the route a run actually took stays in its provenance.
+    """
+    value = (os.environ.get(STORAGE_SERVICE_ENV) or "").strip()
+    return value or None
+
+
 # --------------------------------------------------------------------------
 # survey: defaults, geometry, and the Datatrail CLI plumbing
 # --------------------------------------------------------------------------
@@ -327,6 +346,9 @@ class CadcDatatrailSource(DataSource):
         cert = cert or _default_cert()
         subj = (net.Subject(certificate=cert)
                 if cert and os.path.exists(cert) else net.Subject())
+        service = storage_service_override()
+        if service:
+            return StorageInventoryClient(subj, resource_id=service)
         return StorageInventoryClient(subj)
 
     # -- enumerate -----------------------------------------------------------

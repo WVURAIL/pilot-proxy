@@ -915,6 +915,7 @@ def test_checkpoint_every_reaches_pipeline(tmp_path, monkeypatch):
         "max_staged_files": 4,
         "checkpoint_every": 7,
         "staging_dir": str((tmp_path / "staging").resolve()),
+        "storage_service": None,
     }
     assert scope["execution_attempts"] == [scope["execution"]]
 
@@ -1145,3 +1146,36 @@ def test_local_scan_set_regex_overrides_flag(tmp_path, monkeypatch):
                    source_freq_id_regex=r"nomatch(\d+)$",  # flag must NOT win
                    analyzer_options=opts, verbose=False)
     assert (out / "_per_pilot" / "844.npz").exists()
+
+
+def test_scan_scope_records_the_storage_service_override(tmp_path, monkeypatch):
+    # The scope is the provenance record of how a product was produced. A run
+    # routed straight at a replica (locator degraded) must say so, or two runs
+    # with different data paths are indistinguishable after the fact.
+    monkeypatch.chdir(REPO_ROOT)
+    import pilot_proxy.archive.pipeline as _dpl
+    from pilot_proxy.archive.sources.cadc import STORAGE_SERVICE_ENV
+
+    class _Stop(Exception):
+        pass
+
+    def _spy(*a, **k):
+        raise _Stop
+
+    monkeypatch.setattr(_dpl, "run", _spy)
+    monkeypatch.setenv(STORAGE_SERVICE_ENV, "ivo://cadc.nrc.ca/uvic/minoc")
+    data = tmp_path / "data"
+    data.mkdir()
+    fmt.make_synth_file(str(data / "baseband_e_829.h5"), n_time=NFFT,
+                        n_feeds=N_FEEDS, f_center_mhz=476.3125, f_tone_bb=1200.0,
+                        seed=1)
+
+    with pytest.raises(_Stop):
+        run_chime_scan(input_dir=data, output_dir=tmp_path / "ovr",
+                       source="local", analyzer="pilot-proxy-detector",
+                       select="829", analyzer_options=_cpu_detector_options(),
+                       verbose=False)
+    scope = json.loads((tmp_path / "ovr" / "scan_scope.json").read_text())
+    assert scope["execution"]["storage_service"] == "ivo://cadc.nrc.ca/uvic/minoc"
+    assert scope["execution_attempts"][-1]["storage_service"] == (
+        "ivo://cadc.nrc.ca/uvic/minoc")

@@ -800,12 +800,16 @@ def run_chime_scan(
                 "restore the original files and local source settings or use a "
                 "fresh --output-dir"
             )
+    from pilot_proxy.archive.sources.cadc import storage_service_override
     execution = {
         "preserve_source_order": True,
         "download_workers": download_workers,
         "max_staged_files": max_staged_files,
         "checkpoint_every": checkpoint_every,
         "staging_dir": str(staging),
+        # None when the default locator served the run; set when the fetch was
+        # routed straight at a replica.
+        "storage_service": storage_service_override(),
     }
     execution_attempts = _prior_execution_attempts(previous_scope)
     execution_attempts.append(dict(execution))
