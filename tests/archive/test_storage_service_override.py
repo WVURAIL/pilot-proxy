@@ -10,10 +10,14 @@ Run:  PYTHONPATH=src python -m pytest tests/archive/test_storage_service_overrid
 """
 from __future__ import annotations
 
-import cadcdata
 import pytest
 
 from pilot_proxy.archive.sources import cadc as src
+
+# cadcdata is optional (the CADC client is not installed in the smoke jobs).
+# The module under test imports it lazily inside _make_client, so importing
+# pilot_proxy stays fine; only these tests need the real class to patch.
+cadcdata = pytest.importorskip("cadcdata")
 
 
 _UNSET = object()
