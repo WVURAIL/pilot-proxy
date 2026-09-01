@@ -517,6 +517,57 @@ def test_analyzer_resume_rejects_changed_python_source(tmp_path, monkeypatch):
         resumed.begin(ctx, meta)
 
 
+def test_analyzer_resume_allows_changed_storage_service(tmp_path, monkeypatch):
+    """A run may change which replica it fetches from and still resume.
+
+    The storage service is transport: both replicas serve the same object, and
+    fetch() checks every staged file against the inventory's recorded size. So
+    a run started while the default locator is degraded must be able to move
+    back to it later without rebuilding the product. This is the deliberate
+    counterpart to the source-build guard above -- implementation identity is
+    fingerprinted, the route is not.
+    """
+    from pilot_proxy.archive.sources.cadc import STORAGE_SERVICE_ENV
+
+    files = _make_files(tmp_path / "data", n_events=2)
+    paths = [files[(f"evt{i}", FREQ_ID)] for i in range(2)]
+    reader = ChimeBasebandPackedReader()
+    options = {
+        "detector_fn": _cpu_ref_detector_fn,
+        "kernel": _stub_kernel(K),
+        "weights": np.ones((3, K), dtype=np.int8),
+    }
+    ctx = RunContext(instrument=load_instrument("chime"), selection=[FREQ_ID],
+                     options=options)
+
+    def _meta(i):
+        m = dict(reader.probe(str(paths[i])))
+        m["unit_key"] = f"synth:{i}"
+        m["scope"] = "local"
+        return m
+
+    # first pass: fetched through a pinned replica
+    monkeypatch.setenv(STORAGE_SERVICE_ENV, "ivo://cadc.nrc.ca/uvic/minoc")
+    first = PilotProxyDetectorAnalyzer()
+    first.begin(ctx, _meta(0))
+    first.consume_file(reader.iter_arrays(str(paths[0]), ctx), _meta(0))
+    checkpoint = tmp_path / "route_change.npz"
+    first.save(str(checkpoint))
+
+    # the locator recovers: back to the library default, same build
+    monkeypatch.delenv(STORAGE_SERVICE_ENV, raising=False)
+    resumed = PilotProxyDetectorAnalyzer()
+    assert resumed.resume(str(checkpoint), ctx) is True
+    assert resumed.processed_keys() == {"synth:0"}
+    resumed.begin(ctx, _meta(1))          # must not raise: route is not identity
+    resumed.consume_file(reader.iter_arrays(str(paths[1]), ctx), _meta(1))
+    resumed.save(str(checkpoint))
+
+    with np.load(checkpoint, allow_pickle=False) as got:
+        assert [str(k) for k in got["unit_order"]] == ["synth:0", "synth:1"]
+        assert got["frame_index"].shape[0] == 2 * N_FRAMES
+
+
 # -- scan level: relaunch through the real entry point ------------------------
 
 def _fake_fetch_factory(files):
