@@ -10,9 +10,14 @@
 set -uo pipefail
 say(){ printf '\n===== %s =====\n' "$*"; }
 
-TAG=archive-run-source-20260829
-REV=65b49971ffa673f0c52987b3fe16ef7ecc8aec63
-PKG=e30ec73fd037ff68407194b323766bb3317e4168526a6456e1f0520a074b0c4c
+TAG=archive-run-source-20260901
+REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
+PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
+# The kernel qualified by the cross-arch smoke (H100 / sm90). A new session on
+# the same architecture reuses it instead of rebuilding, so its products carry
+# the same detector_version as the running shards.
+QKLIB=/arc/home/dgormley/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
+QKSHA=33b6e1c45c472c65cf46031d4b009d6f6f96652b57c9bb362489f403dfeaedbd
 TARSHA=f37fe0410bff5233b4a5afd99262f47d9451d446a7be9274b943f5373e079ae6
 SW=/arc/home/dgormley/pp_switch
 PP="$HOME/pilot-proxy"
@@ -40,7 +45,20 @@ if [ ! -d "$PP/.git" ]; then
 fi
 cd "$PP"
 git fetch --quiet origin --tags
-git checkout --quiet "$TAG"
+# $PP is on /arc and shared by every session. Moving HEAD while another
+# session is scanning from it would change the code under a live run and
+# fail every later gate (REV mismatch). So: no-op when already at REV;
+# otherwise refuse unless explicitly allowed.
+if [ "$(git rev-parse HEAD)" != "$REV" ]; then
+  if [ "${PP_ALLOW_CHECKOUT:-}" = "YES" ]; then
+    git checkout --quiet "$REV"
+  else
+    echo "REFUSING to move the shared checkout $PP from $(git rev-parse --short HEAD) to ${REV:0:7}:"
+    echo "  other sessions may be scanning from it. If no scan is running anywhere,"
+    echo "  re-run with PP_ALLOW_CHECKOUT=YES."
+    exit 1
+  fi
+fi
 test "$(git rev-parse HEAD)" = "$REV" || { echo "REV MISMATCH"; exit 1; }
 test -z "$(git status --porcelain)" || { echo "TREE NOT CLEAN"; exit 1; }
 echo "at $TAG = $REV (clean)"
@@ -69,17 +87,34 @@ python -c "from pilot_proxy.provenance import package_source_sha256 as p; s=p();
 
 say "4. kernel build + digest for THIS node arch"
 SM=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader | head -1 | tr -d '. ')
-make -C cuda clean >/dev/null; make -C cuda SM="$SM" >/dev/null || { echo "KERNEL BUILD FAILED"; exit 1; }
-SHA=$(sha256sum cuda/libfstatistic.so | cut -d' ' -f1)
-KDIR="/arc/home/dgormley/pp_kernels"
-mkdir -p "$KDIR"
-KLIB="$KDIR/pilotproxy-detector-core-2.3.0-sm${SM}-${SHA:0:12}.so"
-cp --no-clobber cuda/libfstatistic.so "$KLIB"; chmod 555 "$KLIB" 2>/dev/null || true
-echo "preserved: $KLIB"
-echo "sha256   : $SHA"
+if [ "$SM" = "90" ] && [ -f "$QKLIB" ] && echo "$QKSHA  $QKLIB" | sha256sum --check --strict >/dev/null 2>&1; then
+  echo "sm90 node: reusing the QUALIFIED kernel (no rebuild, shared cuda/ untouched)"
+  KLIB="$QKLIB"; SHA="$QKSHA"
+  echo "preserved: $KLIB"; echo "sha256   : $SHA"
+  QUALIFIED=1
+else
+  echo "no qualified kernel for sm$SM -- building one. NOTE: a freshly built kernel is"
+  echo "NOT qualified; its products will not interchange with the running shards until"
+  echo "canfar_smoke_844.sh passes against it."
+  make -C cuda clean >/dev/null; make -C cuda SM="$SM" >/dev/null || { echo "KERNEL BUILD FAILED"; exit 1; }
+  QUALIFIED=0
+fi
+if [ "$QUALIFIED" = 0 ]; then
+  SHA=$(sha256sum cuda/libfstatistic.so | cut -d' ' -f1)
+  KDIR="/arc/home/dgormley/pp_kernels"
+  mkdir -p "$KDIR"
+  KLIB="$KDIR/pilotproxy-detector-core-2.3.0-sm${SM}-${SHA:0:12}.so"
+  cp --no-clobber cuda/libfstatistic.so "$KLIB"; chmod 555 "$KLIB" 2>/dev/null || true
+  echo "preserved: $KLIB"
+  echo "sha256   : $SHA"
+fi
 
 say "5. kernel gates (CPU reference + load check)"
-make -C cuda test_ref 2>&1 | tail -2
+if [ "$QUALIFIED" = 1 ]; then
+  echo "(CPU reference test skipped: qualified kernel reused; it passed at qualification)"
+else
+  make -C cuda test_ref 2>&1 | tail -2
+fi
 PYTHONPATH=src python - "$KLIB" <<'PY'
 import sys
 from pilot_proxy.kernel import FStatKernel
