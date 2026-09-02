@@ -700,3 +700,13 @@ in-progress survey state; use a fresh `pilot-proxy chime-survey --name` or
 `--out`. Detector checkpoints fail closed after source changes, so use a fresh
 scan output directory after updating the checkout. See
 [INTEGRATION.md](../INTEGRATION.md#inventory-and-resume-compatibility).
+
+## September 2026 sharded run
+
+The full archive run of September 2026 was executed as two channel-partitioned
+shards, one per GPU session, with per-shard gates, tripwires, and an external
+supervisor that resumes a shard across archive outages. The exact scripts,
+with the digests they assert, are committed under
+[`scripts/canfar/`](../scripts/canfar/README.md); the run ledger records what
+each of them found. The CADC outage encountered during that run is written up
+in [`CADC_OUTAGE_2026-09-01.md`](CADC_OUTAGE_2026-09-01.md).
