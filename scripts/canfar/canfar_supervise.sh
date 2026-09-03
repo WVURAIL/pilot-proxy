@@ -25,7 +25,7 @@
 set -uo pipefail
 
 SHARD="${1:-}"
-case "$SHARD" in 1|2) ;; *) echo "usage: canfar_supervise.sh <1|2>"; exit 2;; esac
+case "$SHARD" in 1|2|3) ;; *) echo "usage: canfar_supervise.sh <1|2|3>"; exit 2;; esac
 
 SW=/arc/home/dgormley/pp_switch
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885

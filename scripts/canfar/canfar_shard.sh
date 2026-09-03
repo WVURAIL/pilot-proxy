@@ -4,6 +4,8 @@
 #
 # Shard 1 (notebook1): 506,521,537,552,568,583,675,752,767,813,829  (13.50 TiB, 86,541 files)
 # Shard 2 (notebook2): 598,614,629,644,660,690,706,721,736,783,798,844  (13.46 TiB, 85,896 files)
+# Shard 3 (notebook3): 767,783,813,829,798,844 -- tail channels of shards 1/2, merged back
+#   with canfar_merge_channel.sh as each completes (7.13 TiB, 48,779 files)
 # One shard per session/node. Same frozen identity as the local run:
 # tag archive-run-source-20260829, package e30ec73f..., inventory e97a57f9...,
 # qualified sm90 kernel 33b6e1c45c47 (cross-arch smoke PASS 2026-09-01).
@@ -22,7 +24,7 @@ die(){ echo "SHARD-BLOCK: $*" >&2; exit 1; }
 say(){ printf '\n===== %s =====\n' "$*"; }
 
 SHARD="${1:-}"; MODE="${2:-status}"
-case "$SHARD" in 1|2) ;; *) die "usage: canfar_shard.sh <1|2> <gate|launch|resume|tripwire|status>";; esac
+case "$SHARD" in 1|2|3) ;; *) die "usage: canfar_shard.sh <1|2|3> <update|gate|launch|resume|run|tripwire|status|stop>";; esac
 
 TAG=archive-run-source-20260829       # superseded; REV below is authoritative
 # Which Storage Inventory service to fetch through. Empty = the library
@@ -48,17 +50,32 @@ CERT="$HOME/.ssl/cadcproxy.pem"
 MINOC_CAPS_1=https://ws-uv.canfar.net/minoc/capabilities
 MINOC_CAPS_2=https://ws-cadc.canfar.net/minoc/capabilities
 
-if [ "$SHARD" = 1 ]; then
+case "$SHARD" in
+1)
   SEL=506,521,537,552,568,583,675,752,767,813,829
   SUBFRAME_CAP=2374
   GATE_URI=cadc:CHIMEFRB/data/chime/baseband/raw/2020/07/15/astro_100058001/baseband_100058001_506.h5
   GATE_MD5=62441de83c1b4f0f9b734f4264697425
-else
+  ;;
+2)
   SEL=598,614,629,644,660,690,706,721,736,783,798,844
   SUBFRAME_CAP=2333
   GATE_URI=cadc:CHIMEFRB/data/chime/baseband/raw/2020/07/15/astro_100058001/baseband_100058001_844.h5
   GATE_MD5=9c082ed5909039f7809ac30c088a226a
-fi
+  ;;
+3)
+  # Added 2026-09-03 after a third session probed 150 MiB/s while shards 1
+  # and 2 ran: bandwidth is per-session, not pooled. Takes the TAIL of each
+  # owner's list (767,813,829 from shard 1; 783,798,844 from shard 2), ordered
+  # by how soon the owner would otherwise reach them. Finished channels are
+  # handed to the owner with canfar_merge_channel.sh so it skips them.
+  # 48,779 files, 7,297.5 GiB, predeclared sub-frame quarantines 1,406.
+  SEL=767,783,813,829,798,844
+  SUBFRAME_CAP=1406
+  GATE_URI=cadc:CHIMEFRB/data/chime/baseband/raw/2020/07/15/astro_100058001/baseband_100058001_844.h5
+  GATE_MD5=9c082ed5909039f7809ac30c088a226a
+  ;;
+esac
 GATE_BYTES=91311880
 # Products carry the source identity that built them, and the detector
 # refuses to append frames from a different build (detector_version embeds
@@ -89,11 +106,13 @@ scan_args(){
 
 gate(){
   say "GATE shard $SHARD on $(hostname)"
-  OTHER=$((3-SHARD))
-  if pgrep -f "pilot-proxy chime-scan.*canfar_shard${OTHER}_" >/dev/null 2>&1; then
-    test "${PP_ALLOW_COLOCATED:-}" = "YES" \
-      || die "shard $OTHER is already running on THIS node ($(hostname)) -- one shard per node: run shard $SHARD in the OTHER session's terminal (PP_ALLOW_COLOCATED=YES overrides)"
-  fi
+  for OTHER in 1 2 3; do
+    [ "$OTHER" = "$SHARD" ] && continue
+    if pgrep -f "pilot-proxy chime-scan.*canfar_shard${OTHER}_" >/dev/null 2>&1; then
+      test "${PP_ALLOW_COLOCATED:-}" = "YES" \
+        || die "shard $OTHER is already running on THIS node ($(hostname)) -- one shard per node: run shard $SHARD in its own session (PP_ALLOW_COLOCATED=YES overrides)"
+    fi
+  done
   test -e "$VENV/bin/activate" || die "venv missing: $VENV -- run canfar_probe_bootstrap.sh on THIS node first"
   # shellcheck disable=SC1090
   source "$VENV/bin/activate"
