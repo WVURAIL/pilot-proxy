@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # CANFAR probe bootstrap v2 -- pilot-proxy v5 archive run, frozen tag.
-# Run inside ONE CANFAR session terminal (notebook1):
+# Run inside ONE CANFAR session terminal. The session MUST use
+# images.canfar.net/skaha/astroml-cuda:latest -- the non-CUDA astroml
+# image has a GPU and driver but no toolkit, and cupy cannot JIT there.
 #   bash /arc/home/dgormley/pp_switch/canfar_probe_bootstrap.sh
 # v2: phase 3 now restores the runtime OFFLINE from the freeze bundle's own
 # wheelhouse (cut at the frozen rev), per the lock's "install only from the
@@ -29,6 +31,19 @@ say "0. node identity"
 hostname; nproc; free -g | head -2
 nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader || true
 python3 --version
+
+say "0b. CUDA toolkit (image check)"
+# The session image must be astroml-CUDA. astroml:latest carries the driver but
+# no toolkit: nvidia-smi works, the kernel .so loads, fetching works, and the
+# scan then dies on its first file inside cupy's JIT. Fail here instead.
+if ! command -v nvcc >/dev/null 2>&1; then
+  echo "NO nvcc: this session has no CUDA toolkit."
+  echo "  Its image is probably images.canfar.net/skaha/astroml:latest."
+  echo "  Relaunch the session with images.canfar.net/skaha/astroml-cuda:latest"
+  echo "  (the image notebooks 1 and 2 run) and re-run this script."
+  exit 1
+fi
+echo "nvcc      : $(command -v nvcc)"
 
 say "1. certificate"
 CERT="$HOME/.ssl/cadcproxy.pem"

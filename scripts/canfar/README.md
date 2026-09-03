@@ -8,6 +8,11 @@ are meant to be read alongside the run ledger.
 
 | file | role |
 |---|---|
+**Session image must be `images.canfar.net/skaha/astroml-cuda:latest`.**
+The plain `astroml` image has a GPU and driver but no CUDA toolkit: every
+gate passes and the scan then dies on its first file inside cupy's JIT.
+The bootstrap refuses such a session up front.
+
 | `canfar_probe_bootstrap.sh` | Per-node setup: clone at the frozen revision, restore the runtime offline from the freeze bundle wheelhouse, build and preserve the node's kernel, fetch-throughput probe. Run once per session. |
 | `canfar_smoke_844.sh` | Cross-arch qualification: rerun the local B2d rehearsal (channel 844, first 8 files) on the node and compare the product unit-by-unit against the local sm89 reference. Integer fields must be bit-identical. |
 | `canfar_shard.sh` | Shard controller: `update`, `gate`, `launch`, `resume`, `run` (foreground, for headless sessions), `tripwire`, `status`, `stop`. Every launch/resume re-runs the full gate chain, ending in an md5-verified byte fetch over the route the scan will actually use. |
