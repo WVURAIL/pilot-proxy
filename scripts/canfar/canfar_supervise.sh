@@ -43,7 +43,7 @@ scan_running(){ pgrep -f "pilot-proxy chime-scan.*canfar_shard${SHARD}_" >/dev/n
 progress(){ find "$OUT/_per_pilot" -name '*.npz' -printf '%s\n' 2>/dev/null | awk '{s+=$1} END{print s+0}'; }
 terminal(){ tail -40 "$LOG" 2>/dev/null | grep -q 'incomplete requested scope'; }
 
-say "supervisor started on $(hostname) for shard $SHARD (durable bytes: $(progress))"
+say "supervisor started on $(hostname) for shard $SHARD (durable bytes: $(progress), run dir $([ -d "$OUT" ] && echo present || echo absent))"
 
 attempts=0
 backoff=$BACKOFF_MIN
@@ -61,9 +61,17 @@ while [ "$attempts" -lt "$MAX_ATTEMPTS" ]; do
 
     attempts=$((attempts + 1))
     before=$(progress)
-    say "attempt #$attempts: resuming (durable bytes $before, backoff ${backoff}s)"
+    # A shard that has never run has no run directory, and resume refuses one.
+    # Start it instead: same gate chain, same scan, and launch keeps its own
+    # fresh-path guard so it can never be started over an existing run.
+    if [ -d "$OUT" ]; then
+        MODE=resume; CONFIRM=PP_RESUME_CONFIRM
+    else
+        MODE=launch; CONFIRM=PP_LAUNCH_CONFIRM
+    fi
+    say "attempt #$attempts: $MODE (durable bytes $before, backoff ${backoff}s)"
 
-    if ! PP_RESUME_CONFIRM=YES bash "$SW/canfar_shard.sh" "$SHARD" resume >> "$SLOG" 2>&1; then
+    if ! env "$CONFIRM=YES" bash "$SW/canfar_shard.sh" "$SHARD" "$MODE" >> "$SLOG" 2>&1; then
         # Gate refused: nothing ran. Ride it out; do not treat as a failed run.
         say "gate refused (archive outage / cert / colocation) -- waiting ${backoff}s"
         sleep "$backoff"
