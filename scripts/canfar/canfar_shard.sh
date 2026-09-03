@@ -161,6 +161,28 @@ gate(){
   rm -f /tmp/pp_gate_obj.h5
   echo "byte gate : $GATE_BYTES bytes, md5 verified (route: ${SVC:-default raven})"
 
+  # cupy JIT-compiles at runtime and needs CUDA toolkit headers. The scan dies
+  # on its first file without them (shard 3, 2026-09-03), so prove it here.
+  if [ -z "${CUDA_PATH:-}" ]; then
+    for c in "${CUDA_HOME:-}" /usr/local/cuda /opt/conda              "$(dirname "$(dirname "$(command -v nvcc 2>/dev/null || echo /nonexistent/x)")")"; do
+      [ -n "$c" ] && [ -r "$c/include/cuda.h" ] && { export CUDA_PATH="$c"; break; }
+    done
+  fi
+  python - <<'PYCUDA' || die "cupy cannot compile a kernel (CUDA headers not found). Set CUDA_PATH to a toolkit whose include/cuda.h exists, or use a session image that ships the headers."
+import os, sys
+import cupy as cp
+try:
+    a = cp.arange(16, dtype=cp.float32)
+    b = (a * 2).copy()            # forces an elementwise JIT, the op shard 3 died on
+    cp.cuda.runtime.deviceSynchronize()
+    assert float(b[1]) == 2.0
+except Exception as exc:
+    print(f"  cupy JIT FAILED (CUDA_PATH={os.environ.get('CUDA_PATH', '<unset>')}): "
+          f"{type(exc).__name__}: {exc}", flush=True)
+    sys.exit(1)
+print(f"cupy JIT  : OK (CUDA_PATH={os.environ.get('CUDA_PATH', '<unset, found by cupy>')})")
+PYCUDA
+
   free_kb=$(df -P /tmp | awk 'NR==2{print $4}')
   test "$free_kb" -ge $((50*1024*1024)) || die "/tmp has <50 GiB free ($((free_kb/1024/1024)) GiB)"
   echo "staging   : /tmp $((free_kb/1024/1024)) GiB free (need >=50)"
