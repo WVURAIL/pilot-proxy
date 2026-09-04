@@ -116,6 +116,15 @@ with np.load(src, allow_pickle=False) as z:
     got = int(np.asarray(z["freq_id"]).reshape(-1)[0])
     hz = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
 assert got == ch, f"product is channel {got}, not {ch}"
+
+# The exact CHIME centre. Products carry this unrounded, so the comparison is
+# exact. The inventory's freq_mhz is rounded to 4 decimals (100 Hz), which is
+# why it cannot be the tight reference -- it is kept as a sanity cross-check
+# within that rounding.
+exact = (800.0 - 400.0 * ch / 1024.0) * 1e6
+assert abs(hz - exact) < 1.0, (
+    f"centre {hz} Hz != exact {exact} Hz for channel {ch}")
+
 want = None
 for line in open(inv_path):
     if not line.strip():
@@ -125,8 +134,11 @@ for line in open(inv_path):
         want = float(r["freq_mhz"]) * 1e6
         break
 assert want is not None, f"channel {ch} absent from the inventory"
-assert abs(hz - want) < 1.0, f"centre {hz} Hz != inventory {want} Hz for channel {ch}"
-print(f"  channel identity : freq_id {got}, centre {hz/1e6:.4f} MHz matches the inventory")
+assert abs(exact - want) <= 100.0, (
+    f"inventory {want} Hz disagrees with the formula {exact} Hz beyond its "
+    f"4-decimal rounding for channel {ch}")
+print(f"  channel identity : freq_id {got}, centre {hz/1e6:.6f} MHz exact; "
+      f"inventory agrees within its rounding")
 PY
 
 # 4. atomic copy of the product, verified
