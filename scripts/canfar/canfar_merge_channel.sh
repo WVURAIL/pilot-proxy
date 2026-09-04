@@ -78,19 +78,54 @@ if [ -e "$DSTP/.$CH.npz.datatrawl.lock" ]; then
 fi
 echo "  owner shard$OWNER: no product for $CH, currently on ${last:-?}"
 
-# 3. provenance must match an existing owner product
+# 3. run-wide provenance must match an owner product, and the product must
+#    actually be this channel. weights_hash, target_norm_sq and
+#    reference_norm_sum_sq are functions of the weights EVALUATED FOR A
+#    CHANNEL, so they differ between channels by construction and cannot be
+#    compared across them; the weight BANK and MANIFEST hashes are the
+#    run-wide facts, and they are checked.
 ref=$(ls "$DSTP"/*.npz | head -1)
-python - "$SRCP/$CH.npz" "$ref" <<'PY' || die "provenance mismatch -- do not merge"
-import sys, numpy as np
-def prov(p):
-    with np.load(p, allow_pickle=False) as z:
-        return {k: str(z[k]) for k in ("detector_version", "weights_hash", "weight_bank_sha256",
-                                       "weight_manifest_sha256", "mask_rule", "schema_version",
-                                       "target_norm_sq", "reference_norm_sum_sq")}
-a, b = prov(sys.argv[1]), prov(sys.argv[2])
-bad = [k for k in a if a[k] != b[k]]
-assert not bad, "differs in: " + ", ".join(bad)
-print("  provenance: identical to owner's existing product on all 8 identity fields")
+python - "$SRCP/$CH.npz" "$ref" "$CH" "$SW/inventory.jsonl" <<'PY' || die "provenance mismatch -- do not merge"
+import json
+import sys
+
+import numpy as np
+
+RUN_WIDE = ("detector_version", "weight_bank_sha256", "weight_manifest_sha256",
+            "mask_rule", "schema_version", "schema_name", "schema_revision",
+            "source_event_key_schema_version")
+
+
+def fields(path, keys):
+    with np.load(path, allow_pickle=False) as z:
+        return {k: str(z[k]) for k in keys if k in z.files}
+
+
+src, ref, ch, inv_path = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+a, b = fields(src, RUN_WIDE), fields(ref, RUN_WIDE)
+shared = sorted(set(a) & set(b))
+bad = [k for k in shared if a[k] != b[k]]
+assert not bad, "run-wide identity differs in: " + ", ".join(bad)
+assert "detector_version" in shared, "detector_version missing from one product"
+print(f"  run-wide identity: matches owner's product on {len(shared)} field(s) "
+      f"including detector_version")
+
+# the product must be the channel we are merging, checked against the inventory
+with np.load(src, allow_pickle=False) as z:
+    got = int(np.asarray(z["freq_id"]).reshape(-1)[0])
+    hz = float(np.asarray(z["chime_frequency_hz"]).reshape(-1)[0])
+assert got == ch, f"product is channel {got}, not {ch}"
+want = None
+for line in open(inv_path):
+    if not line.strip():
+        continue
+    r = json.loads(line)
+    if int(r["freq_id"]) == ch:
+        want = float(r["freq_mhz"]) * 1e6
+        break
+assert want is not None, f"channel {ch} absent from the inventory"
+assert abs(hz - want) < 1.0, f"centre {hz} Hz != inventory {want} Hz for channel {ch}"
+print(f"  channel identity : freq_id {got}, centre {hz/1e6:.4f} MHz matches the inventory")
 PY
 
 # 4. atomic copy of the product, verified
