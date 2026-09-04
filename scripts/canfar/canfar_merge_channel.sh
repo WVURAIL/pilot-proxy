@@ -23,6 +23,7 @@ case "$CH" in 767|813|829) OWNER=1 ;; 783|798|844) OWNER=2 ;;
   *) echo "usage: canfar_merge_channel.sh <767|813|829|783|798|844>"; exit 2 ;; esac
 die(){ echo "MERGE-BLOCK: $*" >&2; exit 1; }
 
+SW=/arc/home/dgormley/pp_switch          # inventory lives here
 R=/arc/home/dgormley/pp_runs
 SRC=$R/chime_pilots_rebuild_20260829_canfar_shard3_b59b5c0
 DST=$R/chime_pilots_rebuild_20260829_canfar_shard${OWNER}_b59b5c0
