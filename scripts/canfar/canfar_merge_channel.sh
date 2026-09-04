@@ -37,10 +37,32 @@ echo "== merge channel $CH: shard3 -> shard$OWNER =="
 # 1. shard 3 has fully disposed the channel
 test -f "$SRCP/$CH.npz" || die "no product $SRCP/$CH.npz"
 python - "$SRC/scan_scope.json" "$CH" <<'PY' || die "shard 3 has not fully disposed channel (see above)"
-import json, sys
+import json, os, sys
 scope = json.load(open(sys.argv[1])); ch = int(sys.argv[2])
-ent = next((p for p in scope["pilots"] if int(p.get("freq_id", -1)) == ch), None)
+
+
+def entry_channel(p):
+    """Scope entries name their channel by product path, not a freq_id key."""
+    prod = p.get("product") or ""
+    base = os.path.basename(prod)
+    if base.endswith(".npz") and base[:-4].isdigit():
+        return int(base[:-4])
+    sel = p.get("selection")
+    if isinstance(sel, (list, tuple)) and len(sel) == 1:
+        return int(sel[0])
+    if isinstance(sel, int):
+        return int(sel)
+    return None
+
+
+ent = next((p for p in scope["pilots"] if entry_channel(p) == ch), None)
 assert ent, "channel not in shard-3 scope"
+# A channel with quarantines reports status "partial" by design (the run's
+# predeclared disposition), so status is not the completeness test --
+# failed and unprocessed both being zero is.
+assert int(ent.get("enumerated", -1)) == (
+    int(ent.get("completed", 0)) + int(ent.get("quarantined", 0))
+), "completed + quarantined does not account for every enumerated unit"
 print(f"  shard3 scope: status={ent.get('status')} completed={ent.get('completed')} "
       f"quarantined={ent.get('quarantined')} failed={ent.get('failed')} unprocessed={ent.get('unprocessed')}")
 assert int(ent.get("failed", 1)) == 0, "failed units remain (retryable) -- let shard 3 finish"
