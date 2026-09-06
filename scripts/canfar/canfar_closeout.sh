@@ -2,7 +2,12 @@
 # Closeout for the completed 2026-09 CHIME archive run.
 #
 #   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh report
-#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh combine
+#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh combine [drop-list]
+#
+# The combine is event-keyed: it stacks the frames every selected channel
+# saw. No event in this archive was captured on all 23 channels, so a
+# 23-channel stack is empty and the drop list chooses the subset. `report`
+# prints the presence histogram and the drop-curve behind that choice.
 #
 # The scans stopped before the terminal combine by design ("incomplete
 # requested scope", because the predeclared sub-frame units can never be
@@ -19,6 +24,11 @@ set -uo pipefail
 say(){ printf '\n===== %s =====\n' "$*"; }
 
 MODE="${1:-report}"
+# Channels to exclude from the stack, comma-separated, e.g. 598,690,568,660.
+# The combine is event-keyed: it stacks only frames every selected channel
+# saw, so sparse channels shrink the intersection sharply. `report` prints the
+# drop-curve that quantifies the trade.
+DROP="${2:-}"
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
 PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
 R=/arc/home/dgormley/pp_runs
@@ -79,9 +89,19 @@ if [ "$MODE" = "report" ]; then
 fi
 
 say "2. combine"
+if [ -n "$DROP" ]; then
+  OUT="${OUT}_drop$(echo "$DROP" | tr ',' '-')"
+  echo "dropping  : $DROP"
+  echo "output    : $OUT"
+  DROPARG=(--drop "$DROP")
+else
+  echo "dropping  : nothing (all 23; expect an empty intersection unless the"
+  echo "            archive covers every channel for at least one event)"
+  DROPARG=()
+fi
 test ! -e "$OUT" || die "output dir exists: $OUT (move it aside for a fresh combine)"
 umask 077
-pilot-proxy chime-combine "${ARGS[@]}" --output-dir "$OUT" || die "combine failed"
+pilot-proxy chime-combine "${ARGS[@]}" "${DROPARG[@]}" --output-dir "$OUT"   || die "combine failed (if the intersection was empty, pass a drop list: bash closeout.sh combine 598,690,568,660 -- see the report's drop-curve)"
 
 say "3. validate the combined run directory"
 pilot-proxy validate-products --run-dir "$OUT" || die "validate failed"
