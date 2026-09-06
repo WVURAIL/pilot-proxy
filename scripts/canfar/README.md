@@ -22,7 +22,11 @@ bootstrap refuses such a session up front.
 | 5 | `canfar_merge_channel.sh` | Hands a channel finished by a helper shard to the shard that owns it, so the owner skips it instead of re-fetching. Checks run-wide identity and that the product is the channel it claims. |
 | — | `canfar_compare_duplicates.py` | Field-level, NaN-aware comparison of the channels two shards both built; the basis of the byte-identical reproduction result in the ledger. |
 | 6 | `canfar_closeout.sh` | Assembles the 23 canonical products, split across two non-overlapping shard directories, into one run directory. |
-| — | `canfar_shard2_repair.sh` | One-off ledger repair for the 2026-09-01 staging-removal incident; kept because the incident is in the ledger. |
+
+Incident and handoff artifacts from the run -- the one-off ledger repair
+script, the morning handoff note, the retired autoresume watcher -- are not
+tooling and do not live here. They are in the campaign archive's `kit/`
+alongside the ledger that explains them (git history has them too).
 
 ## After the closeout
 
