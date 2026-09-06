@@ -35,6 +35,10 @@ bootstrap refuses such a session up front.
 
 The venv must be active: the session's base python has no `pilot_proxy`.
 
+It runs anywhere the products are: the September 2026 closeout ran on the
+local WSL copy, with `--repo-dir` pointing at the checkout (the default is
+`~/pilot-proxy`) so the integrity script and the census table are found.
+
 It runs the per-product integrity checks, chooses the stacked combine subset
 by the **pre-registered rule** (`docs/PAPER_PLAN.md` decision 1), combines,
 validates, plots, builds the H0 zero-point tables and the cleaning tradeoffs,
