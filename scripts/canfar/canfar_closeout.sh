@@ -1,111 +1,124 @@
 #!/usr/bin/env bash
-# Closeout for the completed 2026-09 CHIME archive run.
+# Closeout for the completed 2026-09 CHIME archive run: assemble, then hand
+# off to the results generator.
 #
-#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh report
-#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh combine [drop-list]
+#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh assemble
+#   then:  cd ~/pilot-proxy && python scripts/generate_results.py --run-dir <printed path>
 #
-# The combine is event-keyed: it stacks the frames every selected channel
-# saw. No event in this archive was captured on all 23 channels, so a
-# 23-channel stack is empty and the drop list chooses the subset. `report`
-# prints the presence histogram and the drop-curve behind that choice.
+# This script does ONLY the assembly, because everything after it is already
+# scripts/generate_results.py's job: integrity checks, choosing the stacked
+# combine subset by the PRE-REGISTERED rule (PAPER_PLAN.md decision 1), the
+# combine itself, validate, plot, the H0 tables, the cleaning tradeoff, the
+# per-channel full-depth pass, the census, and a small bundle to carry off
+# CANFAR. It runs CPU-only.
 #
-# The scans stopped before the terminal combine by design ("incomplete
-# requested scope", because the predeclared sub-frame units can never be
-# processed), so the canonical products are stacked here instead.
-#
-# The 23 channels live in TWO shard directories and do not overlap:
+# Assembly is needed because generate_results expects one run directory whose
+# _per_pilot/ holds the channels, and this run's 23 canonical products are
+# split across two shard directories (they do not overlap):
 #   shard1 (11): 506 521 537 552 568 583 675 752 767 813 829
 #   shard2 (12): 598 614 629 644 660 690 706 721 736 783 798 844
-# They are passed explicitly rather than copied into one directory, so no
-# product is duplicated on disk and each is read from where it was written.
-# shard3's directory is a deliberate duplicate of six of these and is NOT
-# part of the canonical stack; it is kept as reproduction evidence.
+# shard3's directory duplicates six of these and is NOT copied; it is kept
+# where it is as reproduction evidence.
+#
+# Do NOT hand-pick a channel subset here. No event was captured on all 23
+# channels, so a 23-way event-keyed stack is empty -- that is a fact about
+# archive coverage. Choosing which channels to drop after seeing the
+# drop-curve would be selecting the analysis subset from the results;
+# generate_results applies the registered rule instead and records the full
+# drop-curve either way.
 set -uo pipefail
 say(){ printf '\n===== %s =====\n' "$*"; }
+die(){ echo "CLOSEOUT-BLOCK: $*" >&2; exit 1; }
 
-MODE="${1:-report}"
-# Channels to exclude from the stack, comma-separated, e.g. 598,690,568,660.
-# The combine is event-keyed: it stacks only frames every selected channel
-# saw, so sparse channels shrink the intersection sharply. `report` prints the
-# drop-curve that quantifies the trade.
-DROP="${2:-}"
+MODE="${1:-assemble}"
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
 PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
 R=/arc/home/dgormley/pp_runs
-S1=$R/chime_pilots_rebuild_20260829_canfar_shard1_b59b5c0/_per_pilot
-S2=$R/chime_pilots_rebuild_20260829_canfar_shard2_b59b5c0/_per_pilot
-OUT=$R/chime_pilots_rebuild_20260829_COMBINED
+S1=$R/chime_pilots_rebuild_20260829_canfar_shard1_b59b5c0
+S2=$R/chime_pilots_rebuild_20260829_canfar_shard2_b59b5c0
+ALL=$R/chime_pilots_rebuild_20260829_ALL23
 PP="$HOME/pilot-proxy"
 VENV="$HOME/pp-venv-$(hostname)"
-die(){ echo "CLOSEOUT-BLOCK: $*" >&2; exit 1; }
-
 CH1="506 521 537 552 568 583 675 752 767 813 829"
 CH2="598 614 629 644 660 690 706 721 736 783 798 844"
 
 say "0. environment"
 cd "$PP" || die "no checkout at $PP"
-test "$(git rev-parse HEAD)" = "$REV" || die "REV mismatch: closeout must run at the frozen source"
+test "$(git rev-parse HEAD)" = "$REV" || die "REV mismatch"
 # shellcheck disable=SC1090
 source "$VENV/bin/activate"
 got=$(python -c "from pilot_proxy.provenance import package_source_sha256 as p; print(p())")
 test "$got" = "$PKG" || die "package sha mismatch: $got"
-echo "source    : $REV"
-echo "package   : $PKG"
+echo "source  : $REV"
+echo "package : $PKG"
 
-say "1. assemble the canonical 23 (no copying -- explicit paths)"
-ARGS=(); n=0
-for c in $CH1; do
-  f="$S1/$c.npz"; test -f "$f" || die "missing $f"
-  ARGS+=(--product "$f"); n=$((n+1))
-done
-for c in $CH2; do
-  f="$S2/$c.npz"; test -f "$f" || die "missing $f"
-  ARGS+=(--product "$f"); n=$((n+1))
-done
-test "$n" -eq 23 || die "expected 23 products, found $n"
-echo "products  : $n, all present"
-python - "$S1" "$S2" "$CH1" "$CH2" <<'PYID'
-import sys
-import numpy as np
-s1, s2, c1, c2 = sys.argv[1], sys.argv[2], sys.argv[3].split(), sys.argv[4].split()
-seen = {}
-for base, chans in ((s1, c1), (s2, c2)):
-    for c in chans:
-        with np.load(f"{base}/{c}.npz", allow_pickle=False) as z:
-            seen.setdefault(str(z["detector_version"]), []).append(c)
-            assert int(np.asarray(z["freq_id"]).reshape(-1)[0]) == int(c), f"{c}: freq_id mismatch"
-print(f"  distinct detector_version across all 23: {len(seen)}")
-for v, chans in seen.items():
-    print(f"    {v[:78]}...")
-    print(f"      on {len(chans)} channel(s)")
-assert len(seen) == 1, "products were not all built by the same source+kernel"
-PYID
-
-if [ "$MODE" = "report" ]; then
-  say "2. event-presence report (no output written)"
-  pilot-proxy chime-combine "${ARGS[@]}" --report
-  say "DONE (report only). Run with 'combine' to write the combined products."
-  exit 0
-fi
-
-say "2. combine"
-if [ -n "$DROP" ]; then
-  OUT="${OUT}_drop$(echo "$DROP" | tr ',' '-')"
-  echo "dropping  : $DROP"
-  echo "output    : $OUT"
-  DROPARG=(--drop "$DROP")
-else
-  echo "dropping  : nothing (all 23; expect an empty intersection unless the"
-  echo "            archive covers every channel for at least one event)"
-  DROPARG=()
-fi
-test ! -e "$OUT" || die "output dir exists: $OUT (move it aside for a fresh combine)"
+say "1. assemble the 23 canonical products into one run directory"
+test ! -e "$ALL" || die "$ALL exists; move it aside for a fresh assembly"
+mkdir -p "$ALL/_per_pilot"
 umask 077
-pilot-proxy chime-combine "${ARGS[@]}" "${DROPARG[@]}" --output-dir "$OUT"   || die "combine failed (if the intersection was empty, pass a drop list: bash closeout.sh combine 598,690,568,660 -- see the report's drop-curve)"
+n=0
+for pair in "$S1:$CH1" "$S2:$CH2"; do
+  src="${pair%%:*}"; chans="${pair#*:}"
+  for c in $chans; do
+    f="$src/_per_pilot/$c.npz"
+    test -f "$f" || die "missing $f"
+    cp "$f" "$ALL/_per_pilot/$c.npz"
+    a=$(sha256sum "$f" | cut -d' ' -f1); b=$(sha256sum "$ALL/_per_pilot/$c.npz" | cut -d' ' -f1)
+    test "$a" = "$b" || die "copy of $c.npz did not verify"
+    n=$((n+1))
+  done
+done
+test "$n" -eq 23 || die "expected 23, copied $n"
+echo "products: $n copied and sha256-verified"
 
-say "3. validate the combined run directory"
-pilot-proxy validate-products --run-dir "$OUT" || die "validate failed"
+# One quarantine ledger for the assembled run, deduplicated by key.
+python - "$S1/_per_pilot/quarantine.jsonl" "$S2/_per_pilot/quarantine.jsonl" \
+         "$ALL/_per_pilot/quarantine.jsonl" <<'PYQ'
+import json, os, sys
+src1, src2, dst = sys.argv[1], sys.argv[2], sys.argv[3]
+seen, rows = set(), []
+for p in (src1, src2):
+    if not os.path.exists(p):
+        continue
+    for line in open(p):
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        k = r.get("quarantine_key")
+        if k in seen:
+            continue
+        seen.add(k); rows.append(r)
+with open(dst, "w") as fh:
+    for r in rows:
+        fh.write(json.dumps(r) + "\n")
+sub = sum(1 for r in rows if "shorter than one transform" in r["reason"])
+other = len(rows) - sub
+print(f"quarantine: {len(rows)} rows ({sub} sub-frame + {other} archive-corrupt), 0 duplicates")
+PYQ
 
-say "4. what was written"
-ls -la "$OUT" | sed 's/^/  /'
-say "DONE -- combined products at $OUT"
+say "2. verify the assembled set"
+python - "$ALL/_per_pilot" <<'PYV'
+import sys, pathlib
+import numpy as np
+d = pathlib.Path(sys.argv[1])
+files = sorted(d.glob("*.npz"), key=lambda p: int(p.stem))
+vers, chans = set(), []
+for f in files:
+    with np.load(f, allow_pickle=False) as z:
+        vers.add(str(z["detector_version"]))
+        fid = int(np.asarray(z["freq_id"]).reshape(-1)[0])
+        assert fid == int(f.stem), f"{f.name}: holds freq_id {fid}"
+        chans.append(fid)
+assert len(vers) == 1, f"{len(vers)} distinct detector_version -- not one build"
+print(f"  {len(files)} products, channels {chans[0]}..{chans[-1]}, one detector_version")
+print(f"  {next(iter(vers))[:90]}...")
+PYV
+
+say "DONE -- assembled at:"
+echo "  $ALL"
+echo
+echo "Next (CPU-only, no GPU needed; this is the real closeout):"
+echo "  cd ~/pilot-proxy && python scripts/generate_results.py --run-dir $ALL"
+echo
+echo "It applies the pre-registered subset rule, combines, validates, plots,"
+echo "builds the H0 tables and tradeoffs, and bundles results to carry off."
