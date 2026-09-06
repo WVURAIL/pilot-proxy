@@ -1,6 +1,8 @@
 # Global raven cannot resolve `ws.cadc-ccda.hia-iha.nrc-cnrc.gc.ca` — all `cadcget` downloads fail with HTTP 500
 
-**Observed:** 2026-09-01, from ~11:04 UTC, still ongoing at 21:55 UTC (~11 h)
+**Observed:** 2026-09-01, from ~11:04 UTC to ~23:08 UTC (~12 h)
+**Updated:** 2026-09-06, after the affected campaign completed. Sections
+marked *(post-run)* were added then and were not part of the original report.
 **Affects:** every Storage Inventory download through the default service,
 including **anonymous access to public collections**
 
@@ -137,11 +139,65 @@ against `/minoc/files/<uri>`.
 `cadcdata` 2.5.2, `cadcutils` 1.6.2, Python 3.12; X.509 proxy certificate
 (valid to 2026-09-28) and anonymous access both tested.
 
+## What followed *(post-run)*
+
+The campaign that hit this ran to completion on 2026-09-06 and gives a fuller
+picture. Availability was the dominant constraint throughout: a 26.33 TiB
+retrieval that three concurrent sessions can sustain at ~125 MiB/s -- about
+60 hours of transfer -- took five days.
+
+**Further interruptions, of a different kind.** After raven recovered, the
+byte path failed twice more with a signature unlike the DNS failure above:
+`/raven/availability` reported `true` and `cadcinfo` returned full metadata,
+while `cadcget` returned nothing.
+
+| when (UTC) | signature |
+|---|---|
+| 09-01 11:04 – 23:08 | raven `available: false`, `UnknownHostException` for the cred/baldur host |
+| 09-02 ~02:25 – 03:11 | raven `true`, `cadcinfo` answers, `cadcget` returns nothing |
+| 09-03 ~18:33 | same as above |
+
+**Sustained degradation.** On 2026-09-02 from roughly 04:00 to 13:20 UTC the
+archive served but at ~0.2 MiB/s: a full 91 MB object took 442 s via raven and
+491 s pinned to the UVic replica, so it was not route-specific. That regime is
+invisible to a timeout-based client -- reads never stall long enough to error
+-- and simply produces no progress. For reference, the same client sustained
+39–187 MiB/s when the archive was healthy.
+
+**Transient truncated transfers.** Retrievals intermittently ended with
+`ProtocolError: Connection broken: IncompleteRead(N bytes read, M more
+expected)`, several times a day during degraded periods.
+
+## Separate issue: three objects are stored unreadable *(post-run)*
+
+Distinct from availability, and worth checking against your own fixity
+records. Of 172,437 CHIMEFRB baseband objects retrieved, three cannot be
+opened by anyone. Each downloads **completely and repeatably at exactly the
+length the archive records**, so no client-side integrity check can catch
+them; each was verified twice, from two independent networks.
+
+| object | recorded size | failure |
+|---|---|---|
+| `baseband_41615268_614.h5` | 37,748,736 B | HDF5 superblock declares `stored_eof` 68,243,208 — file is short by 30.5 MB |
+| `baseband_143875213_706.h5` | 4,194,304 B | same class: truncated against its own superblock |
+| `baseband_20230601064341_844.h5` | 160,077,824 B | `bad object header version number`; md5 `4805230ff6bfb626f85bd6016031e940` |
+
+The first two are internally inconsistent: the stored byte count matches the
+inventory, but the HDF5 header inside describes a larger file. That is
+consistent with truncation *before or during ingest*, with the truncated
+length then recorded as authoritative.
+
 ## Impact
 
 Bulk retrieval fails wholesale. Three concurrent archive-processing jobs of ours
 died within the same minute when fetches began failing, and cannot restart while
 the default locator is down.
+
+*(post-run)* Across the whole campaign the practical cost was roughly a
+factor of two in wall-clock: ~60 hours of transfer at healthy rates became
+five days. The jobs themselves lost nothing -- they checkpoint and resume --
+but each interruption cost the files in flight, and the degraded stretches
+produced no progress at all while appearing healthy to every check we had.
 
 ## Suggestions
 
@@ -156,6 +212,15 @@ the default locator is down.
    "unexpected exception calling permissions service(s)".
 4. Consider adding `/availability` (not just `/capabilities`) to service
    monitoring, since capabilities stayed 200 for the whole outage.
+5. *(post-run)* The later interruptions are invisible even to
+   `/raven/availability`, which reported `true` while `cadcget` returned
+   nothing. A synthetic end-to-end fetch of a known object would catch both
+   those and the degraded-throughput regime, which no status endpoint
+   reflected.
+6. *(post-run)* Consider a fixity pass over CHIMEFRB baseband: the three
+   unreadable objects above are self-consistent by length and would pass any
+   size- or checksum-against-record check, so only opening them reveals the
+   problem.
 
 ## Where to report
 
