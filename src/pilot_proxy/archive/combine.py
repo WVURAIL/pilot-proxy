@@ -33,6 +33,8 @@ import fcntl
 
 import numpy as np
 
+from pilot_proxy.archive.chime_coarse import CHIME_COARSE_WIDTH_HZ
+
 from pilot_proxy.atomic_io import (
     atomic_write_json,
     create_temporary_sibling,
@@ -399,40 +401,77 @@ def _known_event_metadata(field: str, value: Any) -> bool:
     return bool(np.isfinite(numeric) and (field != "unit_delta_time" or numeric > 0.0))
 
 
+# One burst's baseband is captured per frequency over that frequency's own
+# DM-delayed window, so the per-channel file start times of one event differ
+# by the burst's dispersion sweep. In the 2026-09 archive run, over 8,906
+# events seen on ten or more channels, the spread was 1.5 s at the median and
+# 12.5 s at most, with lower frequencies later in every monotonic case and an
+# implied DM up to ~2,200 pc cm^-3. The sweep across the whole 400-800 MHz
+# band at DM 3,000 is 58 s; twice that is wider than any one capture can be.
+# Path-matched units further apart than this are not one acquisition.
+MAX_EVENT_START_SPREAD_S = 120.0
+
+_IDENTITY_FIELDS = (
+    "unit_scope",
+    "archive_version",
+    "unit_git_version_tag",
+    "unit_input_map_sha256",
+)
+_TIMING_FIELDS = ("unit_time0_fpga", "unit_time0_ctime", "unit_delta_time")
+
+
 def _validate_common_event_metadata(
     products: Sequence[Mapping[str, Any]], common_events: set[str]
-) -> None:
-    """Refuse path-matched events whose acquisition IDs or clocks disagree."""
+) -> dict[str, Any]:
+    """Refuse path-matched events that are not one acquisition.
+
+    The acquisition ID and the receiver-state identity fields must agree
+    wherever known, and if any pilot knows one, every pilot must. Timing
+    fields are compared only among the pilots that carry them: a missing
+    start time or sample period is a gap in the archive file's metadata, not
+    evidence of a different acquisition, and is counted rather than refused.
+    Start times may differ across pilots by up to the dispersion sweep bound.
+    The stack is event-keyed, never time-aligned, so the offset is recorded
+    in the alignment report instead of being treated as a disagreement.
+    """
     metadata = [_unit_metadata_by_event(z) for z in products]
+    spread_max = 0.0
+    partial_time0: set[str] = set()
+    partial_period: set[str] = set()
     for event in sorted(common_events):
         per_pilot = [rows[event] for rows in metadata]
-        for field in (
-            "unit_event_id",
-            "unit_time0_fpga",
-            "unit_delta_time",
-            "unit_time0_ctime",
-            "unit_scope",
-            "archive_version",
-            "unit_git_version_tag",
-            "unit_input_map_sha256",
-        ):
-            known = [row[field] for row in per_pilot if field in row and _known_event_metadata(field, row[field])]
+        periods = [
+            float(row["unit_delta_time"])
+            for row in per_pilot
+            if "unit_delta_time" in row
+            and _known_event_metadata("unit_delta_time", row["unit_delta_time"])
+        ]
+        # FPGA counts advance once per coarse-channel sample; a unit that does
+        # not record its own period is scaled by the instrument's.
+        period = min(periods) if periods else 1.0 / CHIME_COARSE_WIDTH_HZ
+        for field in ("unit_event_id", *_TIMING_FIELDS, *_IDENTITY_FIELDS):
+            known = [
+                row[field]
+                for row in per_pilot
+                if field in row and _known_event_metadata(field, row[field])
+            ]
             if not known:
                 continue
             if len(known) != len(products):
+                if field == "unit_delta_time":
+                    partial_period.add(event)
+                    continue
+                if field in _TIMING_FIELDS:
+                    partial_time0.add(event)
+                    continue
                 raise ValueError(
                     f"combine: common source event {event!r} has {field} "
                     "metadata for only some pilots; refusing an unverifiable "
                     "cross-channel alignment"
                 )
-            if field in {
-                "archive_version",
-                "unit_scope",
-                "unit_git_version_tag",
-                "unit_input_map_sha256",
-            }:
+            if field in _IDENTITY_FIELDS:
                 consistent = len({str(value) for value in known}) == 1
-            elif field in {"unit_event_id", "unit_time0_fpga"}:
+            elif field == "unit_event_id":
                 consistent = len({int(value) for value in known}) == 1
             elif field == "unit_delta_time":
                 consistent = bool(
@@ -444,45 +483,29 @@ def _validate_common_event_metadata(
                     )
                 )
             else:
-                delta_times = [
-                    float(row.get("unit_delta_time", 0.0)) for row in per_pilot
-                ]
-                sample_periods = [
-                    value
-                    for value in delta_times
-                    if np.isfinite(value) and value > 0.0
-                ]
-                if len(sample_periods) != len(products):
-                    raise ValueError(
-                        f"combine: common source event {event!r} has start "
-                        "times but lacks a sample period for some pilots; "
-                        "timing alignment is unverifiable"
-                    )
                 values = np.asarray(known, dtype=np.float64)
-                earliest = float(np.min(values))
-                latest = float(np.max(values))
-                half_sample = 0.5 * min(sample_periods)
-                # A displacement of half a sample is already ambiguous.  A
-                # direct subtraction can round an exact half-sample offset
-                # slightly downward, so reserve one timestamp ULP at each end
-                # before comparing.  This is deliberately conservative at
-                # large epoch values, where sub-sample timing may itself be
-                # unrepresentable as float64.
-                timestamp_margin = abs(float(np.spacing(earliest))) + abs(
-                    float(np.spacing(latest))
-                )
-                tolerance = max(
-                    0.0,
-                    float(np.nextafter(half_sample, 0.0)) - timestamp_margin,
-                )
-                spread = latest - earliest
-                consistent = bool(spread == 0.0 or spread < tolerance)
+                spread = float(values.max() - values.min())
+                if field == "unit_time0_fpga":
+                    spread *= period
+                spread_max = max(spread_max, spread)
+                if spread > MAX_EVENT_START_SPREAD_S:
+                    raise ValueError(
+                        f"combine: common source event {event!r} start times "
+                        f"span {spread:.3f} s across pilots on {field}, beyond "
+                        f"the {MAX_EVENT_START_SPREAD_S:.0f} s dispersion sweep "
+                        "bound; path-matched units are not one acquisition"
+                    )
+                consistent = True
             if not consistent:
                 raise ValueError(
                     f"combine: common source event {event!r} disagrees on "
                     f"{field} across pilots: {known!r}"
                 )
-
+    return {
+        "time0_spread_max_s": spread_max,
+        "n_events_partial_time0": len(partial_time0),
+        "n_events_partial_sample_period": len(partial_period),
+    }
 
 def _align_frames(
     products: Sequence[Mapping[str, Any]],
@@ -526,7 +549,7 @@ def _align_frames(
             f"chime-combine --report` shows the presence histogram and the "
             f"drop-curve; `--drop <freq_ids>` excludes channels).")
     common_events = {identity.split("\0")[0] for identity in common}
-    _validate_common_event_metadata(products, common_events)
+    timing = _validate_common_event_metadata(products, common_events)
     ref_ids = identities[0].tolist()
     canonical = [i for i in ref_ids if i in common]
     aligned: list[dict[str, Any]] = []
@@ -552,6 +575,7 @@ def _align_frames(
         })
     info = {
         "mode": "event_keyed",
+        **timing,
         "n_frames_common": len(canonical),
         "n_events_common": len(kept_events),
         "by_pilot": by_pilot,

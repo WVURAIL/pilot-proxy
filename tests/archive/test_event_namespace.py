@@ -45,13 +45,76 @@ def test_same_basename_in_different_namespaces_does_not_align() -> None:
         _align_frames([first, second])
 
 
-def test_path_matched_event_with_different_start_time_is_rejected() -> None:
+def test_path_matched_event_with_different_acquisition_id_is_rejected() -> None:
     event = "/campaign-a/baseband_100.h5"
     first = _product(14, 844, event, time0=10.0)
-    second = _product(15, 829, event, time0=20.0)
+    second = _product(15, 829, event, time0=10.0)
+    second["unit_event_id"] = np.asarray([124], dtype=np.int64)
 
-    with pytest.raises(ValueError, match="disagrees on unit_time0_ctime"):
+    with pytest.raises(ValueError, match="disagrees on unit_event_id"):
         _align_frames([first, second])
+
+
+def test_dispersed_start_times_are_accepted_and_recorded() -> None:
+    # One burst reaches lower frequencies later, so each channel's file starts
+    # later; 12.458 s is the widest spread seen in the 2026-09 archive run.
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0 + 12.458)
+    second["unit_time0_fpga"] = np.asarray(
+        [456 + round(12.458 * 390_625)], dtype=np.uint64
+    )
+
+    aligned, _, info = _align_frames([first, second])
+
+    assert len(aligned) == 2
+    assert info["time0_spread_max_s"] == pytest.approx(12.458, abs=1e-5)
+    assert info["n_events_partial_time0"] == 0
+    assert info["n_events_partial_sample_period"] == 0
+
+
+def test_start_time_spread_beyond_dispersion_bound_is_rejected() -> None:
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0 + 121.0)
+
+    with pytest.raises(ValueError, match="beyond the 120 s dispersion sweep"):
+        _align_frames([first, second])
+
+
+def test_fpga_start_spread_is_scaled_by_the_sample_period() -> None:
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0)
+    second["unit_time0_fpga"] = np.asarray(
+        [456 + 121 * 390_625], dtype=np.uint64
+    )
+
+    with pytest.raises(ValueError, match="on unit_time0_fpga, beyond"):
+        _align_frames([first, second])
+
+
+def test_missing_sample_period_on_some_pilots_is_counted_not_refused() -> None:
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0)
+    second["unit_delta_time"] = np.asarray([np.nan], dtype=np.float64)
+
+    aligned, _, info = _align_frames([first, second])
+
+    assert len(aligned) == 2
+    assert info["n_events_partial_sample_period"] == 1
+
+
+def test_single_product_without_sample_period_is_accepted() -> None:
+    # A full-depth single-channel combine has nothing to align across pilots.
+    only = _product(14, 844, "/campaign-a/baseband_100.h5", time0=10.0)
+    only["unit_delta_time"] = np.asarray([np.nan], dtype=np.float64)
+
+    aligned, _, info = _align_frames([only])
+
+    assert len(aligned) == 1
+    assert info["n_events_partial_sample_period"] == 0
 
 
 @pytest.mark.parametrize(
@@ -71,21 +134,6 @@ def test_path_matched_event_with_different_receiver_state_is_rejected(field) -> 
     second[field] = np.asarray(["second"], dtype=str)
 
     with pytest.raises(ValueError, match=rf"disagrees on {field}"):
-        _align_frames([first, second])
-
-
-def test_nearly_one_sample_start_time_shift_is_rejected() -> None:
-    event = "/campaign-a/baseband_100.h5"
-    sample_period = 1.0 / 390_625.0
-    first = _product(14, 844, event, time0=10.0)
-    second = _product(
-        15,
-        829,
-        event,
-        time0=10.0 + 0.9 * sample_period,
-    )
-
-    with pytest.raises(ValueError, match="disagrees on unit_time0_ctime"):
         _align_frames([first, second])
 
 
@@ -115,21 +163,6 @@ def test_identical_start_times_are_accepted_below_timestamp_resolution() -> None
     aligned, _, _ = _align_frames([first, second])
 
     assert len(aligned) == 2
-
-
-def test_exact_half_sample_start_time_shift_is_rejected() -> None:
-    event = "/campaign-a/baseband_100.h5"
-    sample_period = 1.0 / 390_625.0
-    first = _product(14, 844, event, time0=10.0)
-    second = _product(
-        15,
-        829,
-        event,
-        time0=10.0 + 0.5 * sample_period,
-    )
-
-    with pytest.raises(ValueError, match="disagrees on unit_time0_ctime"):
-        _align_frames([first, second])
 
 
 def test_failed_combined_build_does_not_publish_partial_set(
