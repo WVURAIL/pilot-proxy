@@ -3,7 +3,8 @@
 # off to the results generator.
 #
 #   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh assemble
-#   then:  cd ~/pilot-proxy && python scripts/generate_results.py --run-dir <printed path>
+#   then:  source "$HOME/pp-venv-$(hostname)/bin/activate"
+#          cd ~/pilot-proxy && python scripts/generate_results.py --run-dir <printed path>
 #
 # This script does ONLY the assembly, because everything after it is already
 # scripts/generate_results.py's job: integrity checks, choosing the stacked
@@ -117,8 +118,12 @@ PYV
 say "DONE -- assembled at:"
 echo "  $ALL"
 echo
-echo "Next (CPU-only, no GPU needed; this is the real closeout):"
-echo "  cd ~/pilot-proxy && python scripts/generate_results.py --run-dir $ALL"
+echo "Next (CPU-only, no GPU needed; this is the real closeout)."
+echo "The venv must be active -- the session's base python has no pilot_proxy:"
+echo
+echo "  source \"\$HOME/pp-venv-\$(hostname)/bin/activate\" \\"
+echo "    && cd ~/pilot-proxy \\"
+echo "    && python scripts/generate_results.py --run-dir $ALL"
 echo
 echo "It applies the pre-registered subset rule, combines, validates, plots,"
 echo "builds the H0 tables and tradeoffs, and bundles results to carry off."

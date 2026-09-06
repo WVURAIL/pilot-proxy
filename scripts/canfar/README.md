@@ -28,8 +28,11 @@ bootstrap refuses such a session up front.
 `canfar_closeout.sh assemble` only assembles. Everything downstream is
 `scripts/generate_results.py`, which runs CPU-only:
 
+    source "$HOME/pp-venv-$(hostname)/bin/activate"
     cd ~/pilot-proxy
     python scripts/generate_results.py --run-dir <the assembled run dir>
+
+The venv must be active: the session's base python has no `pilot_proxy`.
 
 It runs the per-product integrity checks, chooses the stacked combine subset
 by the **pre-registered rule** (`docs/PAPER_PLAN.md` decision 1), combines,
