@@ -20,6 +20,7 @@ bootstrap refuses such a session up front.
 | 3 | `canfar_shard.sh` | Shard controller: `update`, `gate`, `launch`, `resume`, `run`, `tripwire`, `status`, `stop`. Every launch and resume re-runs the full gate chain, ending in an md5-verified byte fetch over the route the scan will use, and a cupy JIT compile. |
 | 4 | `canfar_supervise.sh` | Keeps a shard running across archive outages and transient fetch failures, launching it if it has never run and resuming it otherwise. Distinguishes a refused gate (nothing ran) from a scan that ran and exited. |
 | 5 | `canfar_merge_channel.sh` | Hands a channel finished by a helper shard to the shard that owns it, so the owner skips it instead of re-fetching. Checks run-wide identity and that the product is the channel it claims. |
+| — | `canfar_compare_duplicates.py` | Field-level, NaN-aware comparison of the channels two shards both built; the basis of the byte-identical reproduction result in the ledger. |
 | 6 | `canfar_closeout.sh` | Assembles the 23 canonical products, split across two non-overlapping shard directories, into one run directory. |
 | — | `canfar_shard2_repair.sh` | One-off ledger repair for the 2026-09-01 staging-removal incident; kept because the incident is in the ledger. |
 
