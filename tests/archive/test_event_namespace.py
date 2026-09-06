@@ -55,6 +55,30 @@ def test_path_matched_event_with_different_acquisition_id_is_rejected() -> None:
         _align_frames([first, second])
 
 
+@pytest.mark.parametrize(
+    "field, key",
+    [
+        ("unit_git_version_tag", "n_events_mixed_git_version_tag"),
+        ("unit_input_map_sha256", "n_events_mixed_input_map"),
+    ],
+)
+def test_mixed_per_node_provenance_is_recorded_not_refused(field, key) -> None:
+    # Each frequency's file comes from its own baseband node; a rolling deploy
+    # leaves one burst with two writer versions or input maps across channels.
+    event = "/campaign-a/baseband_100.h5"
+    first = _product(14, 844, event, time0=10.0)
+    second = _product(15, 829, event, time0=10.0)
+    first[field] = np.asarray(["first"], dtype=str)
+    second[field] = np.asarray(["second"], dtype=str)
+
+    aligned, _, info = _align_frames([first, second])
+
+    assert len(aligned) == 2
+    assert info[key] == 1
+    if field == "unit_input_map_sha256":
+        assert info["events_mixed_input_map"] == [event]
+
+
 def test_dispersed_start_times_are_accepted_and_recorded() -> None:
     # One burst reaches lower frequencies later, so each channel's file starts
     # later; 12.458 s is the widest spread seen in the 2026-09 archive run.
@@ -117,16 +141,8 @@ def test_single_product_without_sample_period_is_accepted() -> None:
     assert info["n_events_partial_sample_period"] == 0
 
 
-@pytest.mark.parametrize(
-    "field",
-    [
-        "unit_scope",
-        "archive_version",
-        "unit_git_version_tag",
-        "unit_input_map_sha256",
-    ],
-)
-def test_path_matched_event_with_different_receiver_state_is_rejected(field) -> None:
+@pytest.mark.parametrize("field", ["unit_scope", "archive_version"])
+def test_path_matched_event_with_different_acquisition_identity_is_rejected(field) -> None:
     event = "/campaign-a/baseband_100.h5"
     first = _product(14, 844, event, time0=10.0)
     second = _product(15, 829, event, time0=10.0)

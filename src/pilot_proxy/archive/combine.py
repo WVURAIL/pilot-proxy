@@ -411,12 +411,15 @@ def _known_event_metadata(field: str, value: Any) -> bool:
 # Path-matched units further apart than this are not one acquisition.
 MAX_EVENT_START_SPREAD_S = 120.0
 
-_IDENTITY_FIELDS = (
-    "unit_scope",
-    "archive_version",
-    "unit_git_version_tag",
-    "unit_input_map_sha256",
-)
+# Acquisition identity: must agree across every pilot that carries it, and be
+# carried by all if by any. Path-matched units that differ here are not one
+# acquisition. (2026-09 run, 8,906 events on >= 10 channels: 0 disagreed.)
+_IDENTITY_FIELDS = ("unit_scope", "archive_version")
+# Per-node provenance: each frequency's file is written by its own baseband
+# node, so a rolling software deploy or input-map change leaves one burst
+# carrying two values across channels (same run: 4 events with two writer
+# tags, 1 with two input maps). Mixed values are recorded, never refused.
+_RECORDED_FIELDS = ("unit_git_version_tag", "unit_input_map_sha256")
 _TIMING_FIELDS = ("unit_time0_fpga", "unit_time0_ctime", "unit_delta_time")
 
 
@@ -425,8 +428,10 @@ def _validate_common_event_metadata(
 ) -> dict[str, Any]:
     """Refuse path-matched events that are not one acquisition.
 
-    The acquisition ID and the receiver-state identity fields must agree
-    wherever known, and if any pilot knows one, every pilot must. Timing
+    The acquisition ID, scope and archive version must agree wherever known,
+    and if any pilot knows one, every pilot must. The writer version and
+    input map are per-node provenance and may legitimately differ across one
+    burst's channels; mixed values are counted and listed, not refused. Timing
     fields are compared only among the pilots that carry them: a missing
     start time or sample period is a gap in the archive file's metadata, not
     evidence of a different acquisition, and is counted rather than refused.
@@ -438,6 +443,8 @@ def _validate_common_event_metadata(
     spread_max = 0.0
     partial_time0: set[str] = set()
     partial_period: set[str] = set()
+    partial_recorded: set[str] = set()
+    mixed: dict[str, set[str]] = {field: set() for field in _RECORDED_FIELDS}
     for event in sorted(common_events):
         per_pilot = [rows[event] for rows in metadata]
         periods = [
@@ -449,7 +456,9 @@ def _validate_common_event_metadata(
         # FPGA counts advance once per coarse-channel sample; a unit that does
         # not record its own period is scaled by the instrument's.
         period = min(periods) if periods else 1.0 / CHIME_COARSE_WIDTH_HZ
-        for field in ("unit_event_id", *_TIMING_FIELDS, *_IDENTITY_FIELDS):
+        for field in (
+            "unit_event_id", *_TIMING_FIELDS, *_IDENTITY_FIELDS, *_RECORDED_FIELDS
+        ):
             known = [
                 row[field]
                 for row in per_pilot
@@ -464,11 +473,18 @@ def _validate_common_event_metadata(
                 if field in _TIMING_FIELDS:
                     partial_time0.add(event)
                     continue
+                if field in _RECORDED_FIELDS:
+                    partial_recorded.add(event)
+                    continue
                 raise ValueError(
                     f"combine: common source event {event!r} has {field} "
                     "metadata for only some pilots; refusing an unverifiable "
                     "cross-channel alignment"
                 )
+            if field in _RECORDED_FIELDS:
+                if len({str(value) for value in known}) > 1:
+                    mixed[field].add(event)
+                continue
             if field in _IDENTITY_FIELDS:
                 consistent = len({str(value) for value in known}) == 1
             elif field == "unit_event_id":
@@ -505,6 +521,10 @@ def _validate_common_event_metadata(
         "time0_spread_max_s": spread_max,
         "n_events_partial_time0": len(partial_time0),
         "n_events_partial_sample_period": len(partial_period),
+        "n_events_partial_provenance": len(partial_recorded),
+        "n_events_mixed_git_version_tag": len(mixed["unit_git_version_tag"]),
+        "n_events_mixed_input_map": len(mixed["unit_input_map_sha256"]),
+        "events_mixed_input_map": sorted(mixed["unit_input_map_sha256"]),
     }
 
 def _align_frames(
