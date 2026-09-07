@@ -36,7 +36,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     kept in v5 as the integrity identity the gates assert. Decide keep
     (self-checking product) vs drop (8 bytes/frame) for any v6.
 
-12. **Rename `.datatrawl.lock` runtime lock-file suffix.** The archive scan's
+12. **Rename `.datatrawl.lock` runtime lock-file suffix.** The archive scan's  [status: open]
     per-product lock files are named `.<product>.datatrawl.lock` (seen live in
     `_per_pilot/` during the 20260829 run). The suffix comes from the ported
     runtime source. Transient dotfiles, so no release artifact carries the
@@ -44,7 +44,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     before publication, alongside any other in-source `datatrawl` strings.
     Cannot change during the frozen run.
 
-13. **Reclassify staging-file ENOENT/truncation as transient, not quarantine.**
+13. **Reclassify staging-file ENOENT/truncation as transient, not quarantine.**  [status: done]
     Observed 2026-09-01 on CANFAR shard 2: staging dir removed during the
     post-SIGINT drain; the reader raised UnreadableUnitError on 7 vanished
     staged files and quarantined the units permanently (silent scope loss on
@@ -54,7 +54,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     instead of writing a quarantine row. Evidence: shard-2 quarantine backup
     `quarantine.jsonl.pre_repair_20260901` beside the live ledger.
 
-14. **Real interrupt-resume rehearsal + SIGINT hygiene.** The B2d phase-1
+14. **Real interrupt-resume rehearsal + SIGINT hygiene.** The B2d phase-1  [status: done (handler restored, join 30 s; the live interrupt rehearsal is still to run)]
     SIGINT was a no-op (bash async job -> SIGINT SIG_IGN inherited; scan ran
     to completion). Any claim citing B2d as interrupt evidence should cite
     the SIGKILL test / machine-crash recovery instead. Post-run: rerun a
@@ -64,7 +64,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     (2.0 s) so an interrupt exit is a drain rather than a scratch-retention
     abort.
 
-15. **Make the storage service selectable (outage resilience).**
+15. **Make the storage service selectable (outage resilience).**  [status: done in b59b5c0 (PILOT_PROXY_STORAGE_SERVICE)]
     `_make_client` hardcodes the library default
     `ivo://cadc.nrc.ca/global/raven`. When global raven broke on 2026-09-01,
     every fetch failed even though the UVic minoc replica was healthy and
@@ -75,7 +75,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     and consider automatic failover across replicas on repeated locator 5xx.
     Verified bypass command and evidence: run ledger, "Verified bypass exists".
 
-16. **Make staging removal safe by construction.** Twice now (06:04 and 23:10
+16. **Make staging removal safe by construction.** Twice now (06:04 and 23:10  [status: superseded: the CANFAR launcher scripts are retired]
     on 2026-09-01) a staging directory was removed under a live scan, and both
     times readable units were permanently quarantined as staging-ENOENT.
     Deferred item 13 fixes the misclassification; this adds the operational
@@ -83,7 +83,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     refuses while any scan matching that run directory is alive, so no
     hand-typed `rm -rf` is ever the interface.
 
-17. **Retry transient transport failures instead of aborting the run.**
+17. **Retry transient transport failures instead of aborting the run.**  [status: done]
     `cadc_transport.expected_errors()` returns (OSError, cadcutils
     HttpException, requests RequestException). A raw
     `urllib3.exceptions.ProtocolError` -- "Connection broken:
@@ -96,7 +96,7 @@ Source and docs changes that would dirty the worktree, in rough priority order.
     retried like any other transient. Until then, canfar_supervise.sh restarts
     the scan externally.
 
-18. **Format exceptions defensively in the fetch retry loop.**
+18. **Format exceptions defensively in the fetch retry loop.**  [status: done]
     `sources/cadc.py:466` builds its retry message with
     `f"{type(exc).__name__}: {exc}"`. cadcutils raises an HttpException whose
     `__str__` returns a non-string, so formatting it raises
