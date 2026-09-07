@@ -3,9 +3,16 @@
 One more location, following the ``_paths.py`` convention:
 
   PP_PER_PILOT  directory of per-pilot survey products (*.npz)
-                (default: ~/pilot_proxy_runs/chime-pilots/_per_pilot)
+                (default: the 23 canonical products of the September 2026
+                archive campaign, ~/rail/products/chime_pilots_rebuild_20260829/
+                products/_per_pilot; the superseded complete-23 set the
+                dissertation still quotes is ~/rail/products/
+                per_pilot_2026-08-20_complete23)
 
-Products are external inputs, so loading never enables pickle.
+Products are external inputs, so loading never enables pickle. Both product
+vocabularies load: read measurements through
+``pilot_proxy.archived_product_keys.measurement`` and the derived ``mu0`` and
+fine ratio through ``pilot_proxy.product_contract``.
 """
 from __future__ import annotations
 
@@ -15,8 +22,9 @@ from pathlib import Path
 
 import numpy as np
 
-PER_PILOT = Path(os.environ.get(
-    "PP_PER_PILOT", "~/pilot_proxy_runs/chime-pilots/_per_pilot")).expanduser()
+DEFAULT_PER_PILOT = (
+    "~/rail/products/chime_pilots_rebuild_20260829/products/_per_pilot")
+PER_PILOT = Path(os.environ.get("PP_PER_PILOT", DEFAULT_PER_PILOT)).expanduser()
 
 
 def load_npz(path) -> dict[str, np.ndarray]:

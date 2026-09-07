@@ -25,6 +25,24 @@ rank/eta decision is inactive and no calibrated detection policy is applied.
 
 Keep active staging on WSL ext4. Do not stage through `/mnt/c`, and do not run several detector processes against the single GPU.
 
+## Where a run writes
+
+Storage on the workstation is by pipeline stage, one producer each:
+`~/rail/datasets/` holds raw inputs, `~/rail/products/` holds everything
+pilot-proxy produces, `~/rail/results/` holds RFIsher's results. A scan
+therefore lives entirely under one directory of `~/rail/products/`, named for
+the run, with the layout the September 2026 campaign left behind
+(`~/rail/products/chime_pilots_rebuild_20260829/`):
+
+    ~/rail/products/<run>/products/   the chime-scan output directory (_per_pilot/ inside)
+    ~/rail/products/<run>/staging/    staged downloads; delete only after `stop` confirms exit
+    ~/rail/products/<run>/logs/       scan and supervisor logs
+
+Smoke tests and rehearsals go under a dated `~/rail/products/dev_rehearsals_<YYYY-MM>/`.
+The former `~/rail/pilot_proxy_runs`, `pilot_proxy_staging` and
+`pilot_proxy_logs` directories were retired on 2026-09-06 and must not be
+recreated; the blocks below are written for the new layout.
+
 ## Freeze one source revision
 
 Finish all source changes before any final gate. Commit and push them, then
@@ -162,11 +180,13 @@ The production run is blocked unless the product validates and peak use stays
 below 13,900 MiB, leaving at least 15 percent of device memory free.
 
 ```bash
-SMOKE_INPUT=/home/djg/rail/data_checks/datatrail_pull_844
+SMOKE_INPUT=/home/djg/rail/studies_2026-08/data_checks/datatrail_pull_844
 SMOKE_FILE="$SMOKE_INPUT/data/chime/baseband/raw/2020/07/15/astro_100058001/baseband_100058001_844.h5"
 SOURCE_SHORT=$(git rev-parse --short=12 HEAD)
-SMOKE_OUTPUT="/home/djg/rail/pilot_proxy_runs/local_file_smoke_844_${SOURCE_SHORT}"
-VRAM_LOG="/home/djg/rail/pilot_proxy_runs/local_file_smoke_844_${SOURCE_SHORT}.vram.csv"
+REHEARSALS="/home/djg/rail/products/dev_rehearsals_$(date -u +%Y-%m)"
+mkdir -p "$REHEARSALS"
+SMOKE_OUTPUT="$REHEARSALS/local_file_smoke_844_${SOURCE_SHORT}"
+VRAM_LOG="$REHEARSALS/local_file_smoke_844_${SOURCE_SHORT}.vram.csv"
 
 test ! -e "$SMOKE_OUTPUT" || exit 1
 test ! -e "$VRAM_LOG" || exit 1
@@ -281,8 +301,10 @@ capped product separate from production.
 ```bash
 BUNDLE_DIR=/home/djg/rail/archive_inputs/chime-pilots-v5
 SOURCE_SHORT=$(git rev-parse --short=12 HEAD)
-REHEARSAL_OUTPUT="/home/djg/rail/pilot_proxy_runs/local_archive_rehearsal_844_${SOURCE_SHORT}"
-REHEARSAL_STAGING="/home/djg/rail/pilot_proxy_staging/local_archive_rehearsal_844_${SOURCE_SHORT}"
+REHEARSALS="/home/djg/rail/products/dev_rehearsals_$(date -u +%Y-%m)"
+mkdir -p "$REHEARSALS"
+REHEARSAL_OUTPUT="$REHEARSALS/local_archive_rehearsal_844_${SOURCE_SHORT}"
+REHEARSAL_STAGING="$REHEARSALS/local_archive_rehearsal_844_${SOURCE_SHORT}.staging"
 
 test ! -e "$REHEARSAL_OUTPUT" || exit 1
 test ! -e "$REHEARSAL_STAGING" || exit 1
@@ -406,9 +428,10 @@ openssl x509 -in /home/djg/.ssl/cadcproxy.pem -noout -checkend 259200
 
 BUNDLE_DIR=/home/djg/rail/archive_inputs/chime-pilots-v5
 INVENTORY_PATH="$BUNDLE_DIR/inventory.jsonl"
-OUTPUT_DIR=/home/djg/rail/pilot_proxy_runs/chime_pilots_local_v5
-STAGING_DIR=/home/djg/rail/pilot_proxy_staging/chime_pilots_local_v5
-LOG_DIR=/home/djg/rail/pilot_proxy_logs
+RUN_ROOT=/home/djg/rail/products/chime_pilots_local_v5
+OUTPUT_DIR="$RUN_ROOT/products"
+STAGING_DIR="$RUN_ROOT/staging"
+LOG_DIR="$RUN_ROOT/logs"
 RUN_LOG="$LOG_DIR/chime_pilots_local_v5.log"
 WEIGHTS_PATH="$PWD/weights/chime_dtv_weights_k128.bin"
 KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so
@@ -673,8 +696,9 @@ umask 077
 
 BUNDLE_DIR=/home/djg/rail/archive_inputs/chime-pilots-v5
 INVENTORY_PATH="$BUNDLE_DIR/inventory.jsonl"
-OUTPUT_DIR=/home/djg/rail/pilot_proxy_runs/chime_pilots_local_v5
-STAGING_DIR=/home/djg/rail/pilot_proxy_staging/chime_pilots_local_v5
+RUN_ROOT=/home/djg/rail/products/chime_pilots_local_v5
+OUTPUT_DIR="$RUN_ROOT/products"
+STAGING_DIR="$RUN_ROOT/staging"
 WEIGHTS_PATH="$PWD/weights/chime_dtv_weights_k128.bin"
 PROFILE_PATH="$PWD/configs/receiver_profiles/chime_dtv_fengine.json"
 KERNEL_LIB=/home/djg/rail/kernels/pilotproxy-detector-core-2.3.0-sm89-f6cd8529ca4b.so

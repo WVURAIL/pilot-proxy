@@ -21,7 +21,13 @@ from pilot_proxy.atsc_channels import (
 )
 from pilot_proxy.detector_reference import REFERENCE_WEIGHT_TERMS
 from pilot_proxy.archived_product_keys import (
+    ARCHIVED_FINE_POWER_RATIO,
     ARCHIVED_REFERENCE_NORM_SUM_SQ,
+)
+from pilot_proxy.fine_reduction import (
+    WEIGHT_TERM_REF_LOWER,
+    WEIGHT_TERM_REF_UPPER,
+    WEIGHT_TERM_TARGET,
 )
 from pilot_proxy.detector_contract import (
     NORMALIZED_POSITIVE_EXCESS_MASK_RULE,
@@ -168,6 +174,52 @@ def null_power_ratio_of(product: Mapping[str, Any]) -> float:
             "correction"
         )
     return 2.0 * target / denominator
+
+
+def fine_power_ratio_of(product: Mapping[str, Any]) -> np.ndarray:
+    """The per-frame fine statistic, ``F2[b] = 2 S_t[b] / (S_l[b] + S_u[b])``.
+
+    Current products retain the exact ``uint64`` fine-power terms
+    (``fine_power_u64``, shape ``(N, 3, B)``) and store nothing derived from
+    them, so the ratio is formed here, the way ``fine_reduction.fine_reduce``
+    forms it (a zero denominator gives 0.0). Archived products stored a
+    ``float32`` ratio formed with ``numpy.fft`` instead; it is returned as
+    stored, under either spelling. The two are the same statistic but not the
+    same numbers: the archived ratio was never bit-equal to the deployed
+    fixed-point transform.
+
+    Returns ``float64`` of shape ``(N, B)``.
+    """
+    if "fine_power_u64" in product:
+        terms = np.asarray(product["fine_power_u64"])
+        if terms.ndim != 3:
+            raise CurrentProductContractError(
+                "fine_power_u64 must have shape (N, 3, B); got "
+                f"{terms.shape}"
+            )
+        if terms.shape[1] == 0 or terms.shape[2] == 0:
+            # The (N, 0, 0) placeholder of a product whose fine stage was off.
+            raise CurrentProductContractError(
+                "product retains no fine terms (fine_num_bins = 0), so no fine "
+                "power ratio can be formed"
+            )
+        if terms.shape[1] != 3:
+            raise CurrentProductContractError(
+                "fine_power_u64 must have shape (N, 3, B); got "
+                f"{terms.shape}"
+            )
+        s_t = terms[:, WEIGHT_TERM_TARGET].astype(np.float64)
+        s_l = terms[:, WEIGHT_TERM_REF_LOWER].astype(np.float64)
+        s_u = terms[:, WEIGHT_TERM_REF_UPPER].astype(np.float64)
+        den = s_l + s_u
+        positive = den > 0.0
+        return np.where(positive, 2.0 * s_t / np.where(positive, den, 1.0), 0.0)
+    for name in ("fine_power_ratio", ARCHIVED_FINE_POWER_RATIO):
+        if name in product:
+            return np.asarray(product[name], dtype=np.float64)
+    raise CurrentProductContractError(
+        "product carries neither fine_power_u64 nor a stored fine power ratio"
+    )
 
 
 def exact_integer_array(

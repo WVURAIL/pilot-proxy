@@ -40,8 +40,8 @@ from pathlib import Path
 import numpy as np
 
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO)
+from pilot_proxy.archived_product_keys import measurement
+from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 
 import _products as P
 
@@ -64,9 +64,9 @@ def _frames(d):
     """(frame times, valid mask, coarse F/mu0, fine [nframes, 256])."""
     t = d["unit_time0_ctime"][d["frame_unit_index"].ravel()]
     valid = d["valid"].ravel().astype(bool)
-    mu0 = float(np.ravel(d["mu0"])[0])
-    coarse = d[ARCHIVED_COARSE_POWER_RATIO].ravel() / mu0
-    fine = d[ARCHIVED_FINE_POWER_RATIO]
+    mu0 = null_power_ratio_of(d)
+    coarse = measurement(d, "coarse_power_ratio").ravel() / mu0
+    fine = fine_power_ratio_of(d)
     return t, valid, coarse, fine
 
 

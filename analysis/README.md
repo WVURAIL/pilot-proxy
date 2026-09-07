@@ -16,7 +16,7 @@ Set up the bundle once:
     tar -xzf ~/paper/bundles/results_bundle_*.tar.gz \
         -C ~/paper/results_bundle --strip-components=1
 
-## CANFAR-side (need ~/pilot_proxy_runs/chime-pilots/_per_pilot)
+## Product-side (need a per-pilot products directory, `PP_PER_PILOT`)
 
 | script | writes |
 |---|---|
@@ -62,13 +62,14 @@ Run order — (1) first, the rest in any order:
   setting everywhere.
 * Regeneration is deterministic: same dumps + bundle -> byte-identical CSVs.
 
-## Where things go (path conventions, recorded 2026-07-20)
+## Where things go (path conventions, revised 2026-09-06)
 
-    ~/datatrawl-inventories/<name>/  archive inventories (one per survey name)
-    ~/pilot_proxy_runs/<name> scan products (chime-pilots, chime-controls, ...)
+    ~/rail/datasets/          raw inputs (baseband, SDR captures)
+    ~/rail/products/<run>/    everything pilot-proxy produces, one directory per
+                              run: products/ (the scan output, _per_pilot inside),
+                              logs/, and for the campaign kit/ and qualification/
+    ~/rail/results/           RFIsher's results and frozen releases
     ~/paper/                  analysis data home: dumps/, out/, results_bundle/
-    ~/archive/                transfer tarballs and completed-run bundles
-                              (generate_results.py writes bundles here)
     <repo>/generated/         generated waveforms and testbench captures
     <repo>/data/provenance/   paper-grade provenance, committed (incl. the
                               event_presence_keys.csv.gz the survey scripts
@@ -82,8 +83,11 @@ and --noise-source explicitly, and every new host is qualified with a
 ## Survey-plate figures (need per-pilot survey products)
 
 These read the per-pilot survey products (`*.npz`) directly rather than the
-`~/paper` dumps. Point `PP_PER_PILOT` at the products directory (default
-`~/pilot_proxy_runs/chime-pilots/_per_pilot`). Style is shared through
+`~/paper` dumps. Point `PP_PER_PILOT` at the products directory (default: the
+September 2026 campaign's canonical products,
+`~/rail/products/chime_pilots_rebuild_20260829/products/_per_pilot`; the
+superseded complete-23 set is `~/rail/products/per_pilot_2026-08-20_complete23`).
+Both product vocabularies load; see `docs/DISSERTATION_EXPORTS.md`. Style is shared through
 `_style.py` (the manuscript palette), product discovery through
 `_products.py`.
 

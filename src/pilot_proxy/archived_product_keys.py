@@ -8,7 +8,18 @@ current vocabulary renamed the measurements everywhere else, and
 spellings off every current surface -- except this module, its single
 designated home. Read archived products through these constants; current
 products use the current vocabulary directly and never need this module.
+
+``measurement`` is the one reader both kinds of product go through: it takes
+the current name and falls back to the archived spelling, so analysis code
+written against the current vocabulary runs unchanged on the 2020--2026
+archive and on the 2026-09 rebuild.
 """
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+import numpy as np
 
 ARCHIVED_COARSE_POWER_RATIO = "fstat_raw"
 ARCHIVED_FINE_POWER_RATIO = "fstat_fine"
@@ -37,3 +48,28 @@ ARCHIVED_TO_CURRENT = {
     "mu0": "null_power_ratio",
     ARCHIVED_REFERENCE_NORM_SUM_SQ: "reference_norm_sum_sq",
 }
+
+# current spelling -> the spelling the 2020--2026 archive used.
+CURRENT_TO_ARCHIVED = {current: archived for archived, current in ARCHIVED_TO_CURRENT.items()}
+
+
+def archived_spelling(name: str) -> str | None:
+    """The archived key for a current measurement name, or None if it never changed."""
+    return CURRENT_TO_ARCHIVED.get(name)
+
+
+def measurement(product: Mapping[str, Any], name: str) -> np.ndarray:
+    """Read one measurement by its current name from a current or archived product.
+
+    The current key is preferred; a product that predates the rename is read
+    through the migration map. Anything still missing raises ``KeyError`` so
+    a caller cannot mistake an absent measurement for a zero one. ``mu0`` and
+    the fine power ratio are not stored by current products at all; use
+    ``product_contract.null_power_ratio_of`` and ``fine_power_ratio_of``.
+    """
+    if name in product:
+        return np.asarray(product[name])
+    archived = CURRENT_TO_ARCHIVED.get(name)
+    if archived is not None and archived in product:
+        return np.asarray(product[archived])
+    raise KeyError(f"product carries neither {name!r} nor its archived spelling")

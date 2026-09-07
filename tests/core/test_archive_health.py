@@ -411,6 +411,9 @@ def test_residual_view_filters_frames_and_records_source(tmp_path) -> None:
         # the archived column names until that migration is coordinated.
         assert view[ARCHIVED_COARSE_POWER_RATIO][:, 0].tolist() == [1.0, 2.0]
         assert "coarse_power_ratio" not in view.files
+        # RFIsher's residual reader refuses a view without the per-frame
+        # shelf estimate beside the statistic.
+        assert view[ARCHIVED_DATA_SHELF_SNR_DB].shape == (2, 1)
         assert np.all(view["valid"] == 1)
         assert ARCHIVED_FINE_POWER_RATIO not in view.files
 

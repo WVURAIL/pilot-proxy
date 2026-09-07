@@ -6,7 +6,7 @@ import operator
 
 import numpy as np
 
-from pilot_proxy.archived_product_keys import ARCHIVED_DATA_SHELF_SNR_DB
+from pilot_proxy.archived_product_keys import measurement
 
 QUIET_ERA_MAX_LEVEL_DB = 1.0
 QUIET_FLOOR_PERCENTILE = 90.0
@@ -32,7 +32,7 @@ def quiet_era_floor_db(
     if not 0.0 <= percentile <= 100.0:
         raise ValueError("percentile must be in [0, 100]")
     z = channel._z
-    shelf = z[ARCHIVED_DATA_SHELF_SNR_DB][:, 0][channel.health_include]
+    shelf = measurement(z, "estimated_data_shelf_snr_db")[:, 0][channel.health_include]
     fm = channel.frame_month
     best = None
     for era in eras:

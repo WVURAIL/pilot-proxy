@@ -23,6 +23,15 @@ bootstrap refuses such a session up front.
 | — | `canfar_compare_duplicates.py` | Field-level, NaN-aware comparison of the channels two shards both built; the basis of the byte-identical reproduction result in the ledger. |
 | 6 | `canfar_closeout.sh` | Assembles the 23 canonical products, split across two non-overlapping shard directories, into one run directory. |
 
+The CANFAR home these scripts name (`/arc/home/dgormley/`) holds nothing
+unique any more: after the closeout its copy of the products was verified
+against the workstation copy and the home is being cleared. The qualified
+sm90 kernel, the `pp_switch` kit (inventory, launcher scripts) and the runtime
+freeze tar are preserved under the campaign's `kit/` directory,
+`~/rail/products/chime_pilots_rebuild_20260829/kit/` on the workstation and
+`Datasets/pilot-tone-pipeline/products/chime_pilots_rebuild_20260829/kit/` on
+the WVU RAIL OneDrive, beside the products and the run ledger.
+
 Incident and handoff artifacts from the run -- the one-off ledger repair
 script, the morning handoff note, the retired autoresume watcher -- are not
 tooling and do not live here. They are in the campaign archive's `kit/`

@@ -29,9 +29,7 @@ from pathlib import Path
 import numpy as np
 
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO,
-    ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB)
+from pilot_proxy.archived_product_keys import measurement
 from pilot_proxy.archive_health import (
     FRAME_HEALTH_GATE_SCHEMA_VERSION,
     evaluate_frame_health,
@@ -39,6 +37,7 @@ from pilot_proxy.archive_health import (
     recompute_corrected_fine_diagnostics,
     temporary_residual_health_views,
 )
+from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 from rfisher import residual as res
 
 import _products as P
@@ -101,8 +100,8 @@ def pool_db(a):
 def channel_record(z):
     """Every per-channel report field from one product archive."""
     fid = int(z["freq_id"][0])
-    mu0 = float(z["mu0"][0])
-    fstat = z[ARCHIVED_COARSE_POWER_RATIO][:, 0]
+    mu0 = null_power_ratio_of(z)
+    fstat = measurement(z, "coarse_power_ratio")[:, 0]
     fui = z["frame_unit_index"]
     ev_id = z["unit_event_id"]
     t0 = z["unit_time0_ctime"]
@@ -149,7 +148,7 @@ def channel_record(z):
 
     # averaged fine spectrum: natural order for the envelope fit,
     # fftshifted dB for display
-    fine = np.nanmean(z[ARCHIVED_FINE_POWER_RATIO][healthy], axis=0)
+    fine = np.nanmean(fine_power_ratio_of(z)[healthy], axis=0)
     fine_db = (10 * np.log10(np.maximum(np.fft.fftshift(fine), 1e-3))).round(2)
 
     # off-nominal carrier envelope: nominal pilot offset within the comb,
@@ -172,7 +171,7 @@ def channel_record(z):
         env_meas = env_station = None
 
     valid = healthy
-    lvl_all = z[ARCHIVED_NORMALIZED_COARSE_POWER_RATIO_DB][:, 0]
+    lvl_all = measurement(z, "normalized_coarse_power_ratio_db")[:, 0]
     lva = lvl_all[np.isfinite(lvl_all) & valid]
     corrected_fine = recompute_corrected_fine_diagnostics(z, health)
     spectra = health_correct_integrated_spectra(z, health)

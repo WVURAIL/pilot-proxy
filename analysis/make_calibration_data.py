@@ -262,9 +262,16 @@ def main(argv=None):
     ident = [x for x in st if x.eta_is_identified]
     ratios = sorted(x.eta_bracket_ratio for x in st
                     if x.eta_bracket_ratio == x.eta_bracket_ratio)
-    print("eta identified (bracket ratio < 1.1) on %d of %d channels; "
-          "ratio median %.2f, max %.2f"
-          % (len(ident), len(st), ratios[len(ratios) // 2], ratios[-1]))
+    if ratios:
+        print("eta identified (bracket ratio < 1.1) on %d of %d channels; "
+              "ratio median %.2f, max %.2f"
+              % (len(ident), len(st), ratios[len(ratios) // 2], ratios[-1]))
+    else:
+        # No science-priced threshold table: every channel carries the
+        # historical fallback eta and no bracket ratio exists to summarise.
+        print("eta identified on %d of %d channels; no bracket ratios "
+              "(no per-channel threshold table was supplied)"
+              % (len(ident), len(st)))
     print("kept channels, median masked fraction: %.1f%% under F > 1, "
           "%.1f%% under F > eta*mu"
           % (100 * t["kept_median_occ_provisional"],

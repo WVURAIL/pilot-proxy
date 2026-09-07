@@ -41,8 +41,8 @@ from pathlib import Path
 import numpy as np
 
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO)
+from pilot_proxy.archived_product_keys import measurement
+from pilot_proxy.product_contract import null_power_ratio_of
 from pilot_proxy.archive_health import (
     FRAME_HEALTH_GATE_SCHEMA_VERSION,
     evaluate_frame_health,
@@ -338,7 +338,7 @@ def historical_report(paths, by_ch):
 def apply_to_archive(pd, paths):
     """Stage 2: apply the historical report rule to every archived frame.
 
-    The archived products store the raw coarse power ratio per frame, so the
+    Every product stores the raw coarse power ratio per frame, so the
     report masks are exact post-hoc recomputations, not approximations. Every
     denominator and distribution is restricted by the v1 frame-health gate.
     The frozen output field names retain the earlier artifact schema.
@@ -352,8 +352,8 @@ def apply_to_archive(pd, paths):
             ch = str(int(z["physical_channel"][0]))
             rec = pd["channels"][ch]
             action = rec["recommendation"]["action"]
-            F = z[ARCHIVED_COARSE_POWER_RATIO][:, 0]
-            mu0 = float(np.asarray(z["mu0"]).ravel()[0])
+            F = measurement(z, "coarse_power_ratio")[:, 0]
+            mu0 = null_power_ratio_of(z)
             health = evaluate_frame_health(z)
             valid = health.include
             t0 = z["unit_time0_ctime"]
@@ -483,7 +483,7 @@ def main(argv=None):
                 source_path=p,
                 fid=int(z["freq_id"][0]),
                 pilot_mhz=float(z["pilot_frequency_hz"][0]) / 1e6,
-                mu0=round(float(z["mu0"][0]), 5),
+                mu0=round(null_power_ratio_of(z), 5),
             )
 
     # RFIsher owns the residual and forecast machinery, but its public APIs

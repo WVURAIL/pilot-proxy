@@ -40,6 +40,7 @@ import numpy as np
 
 from pilot_proxy.archived_product_keys import (
     ARCHIVED_TO_CURRENT,
+    measurement,
 )
 from pilot_proxy.atomic_io import (
     atomic_write_json,
@@ -65,7 +66,7 @@ from pilot_proxy.fine_reduction import (
     independent_bin_mask,
     p_fa_to_threshold_k,
 )
-from pilot_proxy.product_contract import null_power_ratio_of
+from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 from pilot_proxy.json_utils import json_safe
 from pilot_proxy.provenance import file_sha256, package_source_sha256
 
@@ -165,6 +166,10 @@ _RESIDUAL_FRAME_FIELDS = (
     "valid",
     "reject_mask",
     "coarse_power_ratio",
+    # RFIsher's residual reader needs the per-frame shelf estimate beside
+    # the statistic; without it every health view is refused as neither a
+    # current product nor a supported archived one.
+    "estimated_data_shelf_snr_db",
     "frame_unit_index",
 )
 _RESIDUAL_METADATA_FIELDS = (
@@ -264,12 +269,12 @@ def _array(product: Mapping[str, Any], name: str) -> np.ndarray:
     absent is resolved once through the migration map. Anything still missing
     fails closed.
     """
-    if name in product:
-        return np.asarray(product[name])
-    archived = _ARCHIVED_SPELLING.get(name)
-    if archived is not None and archived in product:
-        return np.asarray(product[archived])
-    raise ArchiveHealthError(f"archive product is missing required field {name!r}")
+    try:
+        return measurement(product, name)
+    except KeyError:
+        raise ArchiveHealthError(
+            f"archive product is missing required field {name!r}"
+        ) from None
 
 
 def _scalar(product: Mapping[str, Any], name: str) -> Any:
@@ -853,7 +858,7 @@ def recompute_corrected_fine_diagnostics(
 
     gate = evaluate_frame_health(product) if health is None else health
     geometry = corrected_fine_geometry(product)
-    fine = np.asarray(_array(product, "fine_power_ratio"), dtype=np.float64)
+    fine = fine_power_ratio_of(product)
     n_frames, n_bins = fine.shape
     if gate.include.shape != (n_frames,):
         raise ArchiveHealthError("health mask and fine product have different frame counts")
@@ -3103,7 +3108,7 @@ def _plot_product_diagnostics(
             dtype=np.float64,
         )
         times = frame_utc_seconds(product)
-        fine = np.asarray(_array(product, "fine_power_ratio"), dtype=np.float64)
+        fine = fine_power_ratio_of(product)
         include = health.include
         channel_dir = figure_root / f"channel_{channel:02d}_fid_{fid:04d}"
         channel_dir.mkdir(parents=True, exist_ok=True)

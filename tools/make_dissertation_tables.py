@@ -11,11 +11,20 @@ cross-repository dependency, and the export module records whatever inputs
 this tool produced.
 
 ``worked_example_spectra.csv`` is generated only behind ``--worked-example``:
-the two archived frames it contains are named explicitly (UTC day and
-F/mu0 ratio, WORKED_EXAMPLE_PANELS below) and no row is written unless the
+the two frames it contains are named explicitly (UTC day and F/mu0 ratio,
+WORKED_EXAMPLE_PANELS below) and exactly one frame per panel must answer to
+that name. On an archived (2020--2026) product no row is written unless the
 digits the dissertation quotes --- T[60..64] of the exemplar frame and the
-weakest frame's designated-window maximum --- reproduce from the product.
-The self-test is the provenance.
+weakest frame's designated-window maximum --- also reproduce; those digits
+belong to the archived float fine ratio. A current product retains the
+exact fine terms instead, so its fine ratio is the deployed statistic and
+differs in the last digits by construction: the frame is identified by day
+and coarse ratio alone and the new digits are printed for the record. The
+self-test is the provenance either way.
+
+Both product vocabularies are read: the current names through
+``archived_product_keys.measurement`` and the derived ``mu0`` and fine
+ratio through ``product_contract``.
 
 Tables NOT generated here, deliberately:
 
@@ -35,12 +44,12 @@ from pathlib import Path
 
 import numpy as np
 
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_FINE_POWER_RATIO)
+from pilot_proxy.archived_product_keys import measurement
 from pilot_proxy.archive_health import (
     evaluate_frame_health,
     health_correct_integrated_spectra,
 )
+from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 
 SPECTRUM_KEY = "integrated_spectrum_before_mask"
 NFFT = 16384
@@ -182,13 +191,16 @@ def census_centre_rows(products_dir: Path) -> list[dict]:
 
 
 def worked_example_rows(products_dir: Path) -> list[dict]:
-    """(panel, fine_bin, T) for the worked example's two archived frames.
+    """(panel, fine_bin, T) for the worked example's two frames.
 
-    Frames are located by UTC day and F/mu0 ratio (WORKED_EXAMPLE_PANELS)
-    and accepted only when the published digits reproduce: T[60..64] of the
-    exemplar frame, the designated-window maximum of the weakest frame.
-    Exactly one frame per panel must verify; anything else aborts rather
-    than guessing.
+    Frames are located by UTC day and F/mu0 ratio (WORKED_EXAMPLE_PANELS).
+    On an archived product they are accepted only when the published digits
+    reproduce: T[60..64] of the exemplar frame, the designated-window
+    maximum of the weakest frame. On a current product (exact fine terms
+    retained, no stored float ratio) the published digits cannot apply, so
+    the day-and-ratio identity is the whole test and the new digits are
+    printed. Exactly one frame per panel must verify; anything else aborts
+    rather than guessing.
     """
     path = None
     for candidate in sorted(glob.glob(os.path.join(products_dir, "*.npz"))):
@@ -200,10 +212,11 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
         raise SystemExit(f"no product for channel {WORKED_EXAMPLE_CHANNEL} "
                          f"under {products_dir}")
     with np.load(path, allow_pickle=False) as archive:
-        fstat = np.asarray(archive[ARCHIVED_COARSE_POWER_RATIO],
+        exact_terms = "fine_power_u64" in archive
+        fstat = np.asarray(measurement(archive, "coarse_power_ratio"),
                            dtype=float).reshape(-1)
-        mu0 = float(np.ravel(archive["mu0"])[0])
-        fine = np.asarray(archive[ARCHIVED_FINE_POWER_RATIO], dtype=float)
+        mu0 = null_power_ratio_of(archive)
+        fine = fine_power_ratio_of(archive)
         unit_index = np.asarray(archive["frame_unit_index"],
                                 dtype=int).reshape(-1)
         unit_t0 = np.asarray(archive["unit_time0_ctime"],
@@ -220,7 +233,9 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
         for i in np.where(health.include & (days == day)
                           & (np.abs(ratio - target) < WORKED_RATIO_TOL))[0]:
             T = fine[i]
-            if panel == "a":
+            if exact_terms:
+                ok = True
+            elif panel == "a":
                 ok = all(abs(float(T[60 + j]) - WORKED_A_T60_64[j]) < 0.002
                          for j in range(5))
             else:
@@ -228,15 +243,21 @@ def worked_example_rows(products_dir: Path) -> list[dict]:
             if ok:
                 verified.append(int(i))
         if len(verified) != 1:
+            what = ("answer to the day and F/mu0 ratio" if exact_terms
+                    else "reproduce the published digits")
             raise SystemExit(
                 f"worked-example panel {panel}: {len(verified)} frames on "
-                f"{day} reproduce the published digits (need exactly 1); "
-                "refusing to guess")
+                f"{day} {what} (need exactly 1); refusing to guess")
         T = fine[verified[0]]
         rows += [{"panel": panel, "fine_bin": b, "T": f"{float(T[b]):.6g}"}
-                 for b in range(256)]
+                 for b in range(len(T))]
         print(f"worked-example panel {panel}: frame {verified[0]} "
               f"({day}, F/mu0={ratio[verified[0]]:.4f}) verified")
+        if exact_terms:
+            print("  exact-term fine ratio, T[60..64] = "
+                  + ", ".join(f"{float(T[60 + j]):.3f}" for j in range(5))
+                  + f"; T[62] = {float(T[62]):.2f}"
+                  " (the published digits are the archived float ratio's)")
     return rows
 
 

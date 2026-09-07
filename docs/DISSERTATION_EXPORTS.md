@@ -88,6 +88,18 @@ Tables are written to `exports/dissertation/inputs/` (ignored by git) and are
 then supplied to the exporter through `--census-psd`,
 `--worked-example-spectra`, and `--bao-time-vs-masking`.
 
+The generator reads either product vocabulary. The 2020--2026 archive spells
+its measurements under the retired names and stores `mu0` and a float fine
+ratio; the 2026-09 rebuild uses the current names, stores no `mu0` (it is
+`2*target_norm_sq/reference_norm_sum_sq`) and retains the exact fine-power
+terms instead of a ratio. Everything under `analysis/` and `tools/` goes
+through `pilot_proxy.archived_product_keys.measurement`,
+`product_contract.null_power_ratio_of` and `product_contract.fine_power_ratio_of`,
+so the same script produces the same table shape from both. The fine ratio
+of a current product is the deployed fixed-point statistic and differs in
+its last digits from the archived float ratio, which is why the worked
+example's published digits are checked only on archived products.
+
 `tools/make_chain_table.py` generates the per-channel residual-chain table
 (the dissertation's Table 9.6 and its lower-band extension) from the same
 products via the released `rfisher` residual machinery. It passes only

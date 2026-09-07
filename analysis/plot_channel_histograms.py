@@ -47,8 +47,7 @@ from matplotlib.patches import Patch
 from rfisher import residual as R
 
 import _paths  # noqa: F401  -- puts <repo>/src on sys.path
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO, ARCHIVED_DATA_SHELF_SNR_DB)
+from pilot_proxy.archived_product_keys import measurement
 from pilot_proxy.archive_health import temporary_residual_health_views
 import _products as P
 
@@ -224,8 +223,8 @@ def channel_row(path) -> dict:
     d = P.load_npz(path)
     v = d["valid"][:, 0].astype(bool)
     rej = d["reject_mask"][:, 0].astype(bool)
-    F = d[ARCHIVED_COARSE_POWER_RATIO][:, 0]
-    shelf = d[ARCHIVED_DATA_SHELF_SNR_DB][:, 0]
+    F = measurement(d, "coarse_power_ratio")[:, 0]
+    shelf = measurement(d, "estimated_data_shelf_snr_db")[:, 0]
     mu0 = prov.mu0
 
     kept, hit = v & ~rej, v & rej

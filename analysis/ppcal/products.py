@@ -3,18 +3,21 @@
 
 Conventions locked against the pilot-proxy source:
 
-* The archived coarse power ratio (``ARCHIVED_COARSE_POWER_RATIO``) is the
-  statistic F = 2*P_target/(P_ref_lo + P_ref_hi), summed over all 2048 input
-  streams before the ratio; its exact null mean is the stored ``mu0`` =
-  2*target_norm_sq/reference_norm_sum_sq.
+* The coarse power ratio (``coarse_power_ratio``; the archived products spell
+  it differently and are read through ``archived_product_keys.measurement``)
+  is the statistic F = 2*P_target/(P_ref_lo + P_ref_hi), summed over all 2048
+  input streams before the ratio; its exact null mean is ``mu0`` =
+  2*target_norm_sq/reference_norm_sum_sq, derived from the weight norms
+  (``product_contract.null_power_ratio_of``) rather than read.
 * The stored spectra live in the *receiver* spectral frame, which is inverted
   with respect to RF when ``sense == -1``.  RF offset from the CHIME channel
   centre is therefore ``sense * f_stored``; DC (``f_stored == 0``) is the
   channel centre in either frame.
-* The archived fine power ratio (``ARCHIVED_FINE_POWER_RATIO``) is the
-  time-coherent window-axis FFT: 256 padded bins of (390625/128)/256 =
-  11.9209 Hz, centred convention ``((b+128) % 256) - 128``, again
-  sense-flipped with respect to RF.
+* The fine power ratio (``product_contract.fine_power_ratio_of``: formed
+  from the exact retained terms of a current product, or the stored float
+  ratio of an archived one) is the time-coherent window-axis FFT: 256 padded
+  bins of (390625/128)/256 = 11.9209 Hz, centred convention
+  ``((b+128) % 256) - 128``, again sense-flipped with respect to RF.
 * Frame health uses the released ``pilot_proxy.archive_health`` v1 gate.
 """
 from __future__ import annotations
@@ -31,11 +34,9 @@ from pilot_proxy.archive_health import (
     evaluate_frame_health,
     health_correct_integrated_spectra,
 )
-from pilot_proxy.archived_product_keys import (
-    ARCHIVED_COARSE_POWER_RATIO,
-    ARCHIVED_FINE_POWER_RATIO,
-)
+from pilot_proxy.archived_product_keys import measurement
 from pilot_proxy.detector_geometry import predicted_pilot_fine_bin
+from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 
 SAMPLE_RATE_HZ = 390625.0            # one CHIME frequency channel
 COARSE_HZ = SAMPLE_RATE_HZ / 128     # 3051.7578 Hz detector bin
@@ -79,7 +80,7 @@ class Channel:
         z = self._z
         self.fid = int(z["freq_id"][0])
         self.ch = int(z["physical_channel"][0])
-        self.mu0 = float(z["mu0"][0])
+        self.mu0 = null_power_ratio_of(z)
         self.sense = int(z["sense"])
         self.nfft = int(z["nfft"])
         self.window = int(z["detector_window_samples"])
@@ -98,7 +99,7 @@ class Channel:
     @cached_property
     def fstat(self):
         """Healthy-frame coarse statistic F."""
-        return self._z[ARCHIVED_COARSE_POWER_RATIO][self.health_include, 0]
+        return measurement(self._z, "coarse_power_ratio")[self.health_include, 0]
 
     @cached_property
     def rho(self):
@@ -120,7 +121,7 @@ class Channel:
     @cached_property
     def fine(self):
         """Healthy-frame fine statistic, shape (n_frames, 256)."""
-        return self._z[ARCHIVED_FINE_POWER_RATIO][self.health_include]
+        return fine_power_ratio_of(self._z)[self.health_include]
 
     # ---- unit level ------------------------------------------------------
     @cached_property
