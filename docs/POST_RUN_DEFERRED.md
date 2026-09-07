@@ -5,7 +5,9 @@ Source and docs changes that would dirty the worktree, in rough priority order.
 1. Remove the datatrail prefix workaround once CHIMEFRB fixes the service
    (_restore_collection in datatrail_client.py is a no-op after the fix; the
    upstream report draft is at
-   ~/rail/inventory_rebuild/UPSTREAM_DATATRAIL_PREFIX_REGRESSION.md, venue
+   UPSTREAM_DATATRAIL_PREFIX_REGRESSION.md in the archived inventory-rebuild
+   evidence (WVU OneDrive, Datasets/pilot-tone-pipeline/archive/
+   inventory_rebuild_2026-08/), venue
    CHIMEFRB/datatrail -- file it whenever, independent of the run).
 2. Promote the outage-seam rehearsal into the test tree
    (evidence/40_freeze_replay/rehearsal-20260830/outage_rehearsal.py) so the
