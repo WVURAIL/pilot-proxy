@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -1910,6 +1911,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Sequence[str] | None = None) -> int:
+    # A detached launcher (``nohup cmd &`` in a script) starts the process
+    # with SIGINT ignored and Python leaves it that way, so an interrupt is a
+    # silent no-op and a scan cannot be asked to drain. Take the default back.
+    if signal.getsignal(signal.SIGINT) is signal.SIG_IGN:
+        signal.signal(signal.SIGINT, signal.default_int_handler)
     parser = build_parser()
     args = parser.parse_args(argv)
     args.func(args)

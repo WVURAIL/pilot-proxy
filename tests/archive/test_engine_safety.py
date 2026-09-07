@@ -469,3 +469,83 @@ def test_geometry_only_telescope_not_archive_ready():
 if __name__ == "__main__":
     rc = pytest.main([__file__, "-q"])
     sys.exit(rc)
+
+
+# ---------------------------------------------------------------------------
+# #13 staging failures are retried, not quarantined: a staged copy that has
+# vanished or is short of the archive's recorded size says nothing about the
+# archived bytes (2026-09-01: a staging directory removed under a live scan
+# quarantined 14 readable units).
+# ---------------------------------------------------------------------------
+class _VanishingReader(ChimeBasebandReader):
+    """Loses the staged copy before it can read it."""
+
+    def probe(self, path):
+        os.remove(path)
+        raise UnreadableUnitError(f"[Errno 2] Unable to open file {path}")
+
+
+class _TruncatingReader(ChimeBasebandReader):
+    """Finds a staged copy cut short."""
+
+    def probe(self, path):
+        with open(path, "r+b") as fh:
+            fh.truncate(os.path.getsize(path) // 2)
+        raise UnreadableUnitError("CHIME packed baseband is shorter than one transform")
+
+
+def _synth_size(work, fcen):
+    """Size of the file _FakeSynthSource will stage, to declare as the archive's."""
+    probe = os.path.join(work, "size_probe.h5")
+    make_synth_file(probe, 2 * NFFT, 16, fcen / 1e6, F_TONE_BB, seed=1)
+    size = os.path.getsize(probe)
+    os.remove(probe)
+    return size
+
+
+@pytest.mark.parametrize("reader_cls, declare_short", [
+    (_VanishingReader, False),
+    (_TruncatingReader, True),
+])
+def test_incomplete_staged_copy_is_a_transient_failure_not_a_quarantine(reader_cls, declare_short):
+    work = _tmp("staging_failure")
+    inst = inst_mod.load_instrument("chime")
+    fcen = inst.freq_of_freq_id(844) * 1e6
+    meta = {"f_center_hz": fcen}
+    if declare_short:
+        meta["size_bytes"] = _synth_size(work, fcen)   # the archive's size; the copy will be shorter
+    unit = Unit(key="src://staged", name="staged_844.h5", meta=meta)
+    src = _FakeSynthSource(fcen, n_frames=2)
+    ctx = RunContext(instrument=inst, selection=[844], options={})
+    out = os.path.join(work, "prod.npz")
+    tmp = os.path.join(work, "tmp")
+    quarantine = os.path.join(work, "quarantine.jsonl")
+
+    res = pipeline.run(source=src, reader=reader_cls(), analyzer=_RecordingAnalyzer(),
+                       units=[unit], out_path=out, tmp_dir=tmp, ctx=ctx,
+                       quarantine_path=quarantine, verbose=False)
+    assert res.n_failed == 1 and res.n_quarantined == 0
+    assert not os.path.exists(quarantine) or open(quarantine).read().strip() == ""
+
+    # The next run fetches it again and, read cleanly this time, completes it.
+    res = pipeline.run(source=src, reader=ChimeBasebandReader(), analyzer=_RecordingAnalyzer(),
+                       units=[unit], out_path=out, tmp_dir=tmp, ctx=ctx,
+                       quarantine_path=quarantine, verbose=False)
+    assert res.n_new == 1 and res.n_failed == 0 and res.n_quarantined == 0
+
+
+def test_short_but_archive_sized_copy_is_still_quarantined():
+    """A file the archive itself stores short is a property of the object."""
+    work = _tmp("archive_short")
+    inst = inst_mod.load_instrument("chime")
+    fcen = inst.freq_of_freq_id(844) * 1e6
+    unit = Unit(key="src://short", name="short_844.h5", meta={"f_center_hz": fcen, "size_bytes": 1})
+    src = _FakeSynthSource(fcen, n_frames=2)
+    ctx = RunContext(instrument=inst, selection=[844], options={})
+    out = os.path.join(work, "prod.npz"); tmp = os.path.join(work, "tmp")
+    quarantine = os.path.join(work, "quarantine.jsonl")
+    res = pipeline.run(source=src, reader=_TruncatingReader(), analyzer=_RecordingAnalyzer(),
+                       units=[unit], out_path=out, tmp_dir=tmp, ctx=ctx,
+                       quarantine_path=quarantine, verbose=False)
+    assert res.n_quarantined == 1 and res.n_failed == 0
+    assert "shorter than one transform" in open(quarantine).read()

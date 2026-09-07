@@ -40,7 +40,11 @@ from .interfaces import (DataSource, Reader, Analyzer, RunContext, Unit,
 
 
 _WORKER_POLL_SECONDS = 0.1
+# How long an abnormal stop waits for its download workers. A failure aborts
+# promptly and retains scratch under any writer still active; an interrupt is
+# a request to drain, so a fetch in flight is allowed to finish or fail.
 _WORKER_JOIN_SECONDS = 2.0
+_INTERRUPT_JOIN_SECONDS = 30.0
 _STAGE_KEY_HEX_LENGTH = 16
 _PROGRESS_EVERY_UNITS = 25
 DEFAULT_CHECKPOINT_EVERY = 50
@@ -137,6 +141,23 @@ def _rm(path: Optional[str]) -> None:
             f"staged file {path!r} still exists after removal. Its scratch "
             "slot was not released; remove the file and rerun."
         )
+
+
+def _staged_copy_incomplete(dest, unit) -> str | None:
+    """Why a staged copy cannot be judged: missing, or short of the archive's
+    recorded size. Either is a staging failure to retry, never a quarantine."""
+    if not dest or not os.path.exists(dest):
+        return "staged copy missing (errno 2)"
+    meta = getattr(unit, "meta", None) or {}
+    expected = meta.get("size_bytes")
+    try:
+        expected = int(expected) if expected is not None else None
+    except (TypeError, ValueError):
+        expected = None
+    actual = os.path.getsize(dest)
+    if expected is not None and 0 < expected and actual < expected:
+        return f"staged copy short ({actual} of {expected} bytes)"
+    return None
 
 
 def _stage_name(unit: Unit) -> str:
@@ -832,6 +853,25 @@ def _run_with_output_lock_held(
                     # so it wins on any key collision.
                     meta = {**dict(unit.meta), **dict(reader.probe(dest))}
                 except UnreadableUnitError as exc:
+                    incomplete = _staged_copy_incomplete(dest, unit)
+                    if incomplete is not None:
+                        # The staged copy vanished or is shorter than the
+                        # archive says the object is: a staging failure, not
+                        # a property of the archived bytes. Leave the unit
+                        # unrecorded so the next resume fetches it again.
+                        # (2026-09-01: a staging directory removed under a
+                        # live scan quarantined 14 readable units this way.)
+                        fail += 1
+                        print(f"  FAIL read {unit.name}: {incomplete}; "
+                              "will refetch on resume", file=sys.stderr)
+                        if requires_in_order:
+                            ordered_stop_reason = RuntimeError(
+                                f"staged copy incomplete for {unit.name}: "
+                                f"{incomplete}"
+                            )
+                            stop.set()
+                            break
+                        continue
                     # The reader explicitly classified this as a deterministic
                     # problem with the staged bytes. Only that narrow class is
                     # safe to remember in the persistent quarantine ledger.
@@ -968,11 +1008,14 @@ def _run_with_output_lock_held(
     finally:
         stop.set()
         _discard_ready()
+        join_window = _WORKER_JOIN_SECONDS
         if planned_stop:
             for w in started_workers:
                 w.join()
         else:
-            join_deadline = time.monotonic() + _WORKER_JOIN_SECONDS
+            if isinstance(run_failure, KeyboardInterrupt):
+                join_window = _INTERRUPT_JOIN_SECONDS
+            join_deadline = time.monotonic() + join_window
             for w in started_workers:
                 w.join(timeout=max(0.0, join_deadline - time.monotonic()))
         # A fetch may have completed while the workers were being joined.
@@ -1022,7 +1065,7 @@ def _run_with_output_lock_held(
     if active_workers:
         active_error = ActiveDownloadWorkersError(
             f"{len(active_workers)} download worker(s) did not stop within "
-            f"{_WORKER_JOIN_SECONDS:g} seconds; source.fetch() is still in "
+            f"{join_window:g} seconds; source.fetch() is still in "
             f"progress. Scratch was retained at {tmp_dir!r} to prevent deletion "
             "under an active writer. Do not start another run with this scratch "
             "directory. Exit this process or wait for the source operation to "

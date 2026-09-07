@@ -1315,3 +1315,48 @@ def test_prequarantined_product_outcome_reflects_resume(
     else:
         assert "no product exists" in output
         assert f"product: {out}" not in output
+
+
+class _InterruptingAnalyzer(_FileAnalyzer):
+    """Raises KeyboardInterrupt on the first unit, as an operator's Ctrl-C would."""
+
+    def consume_file(self, arrays, meta):
+        list(arrays)
+        raise KeyboardInterrupt
+
+
+def _release_after(source, seconds):
+    threading.Timer(seconds, source.release_fetch.set).start()
+
+
+def test_interrupt_drains_an_active_fetch_instead_of_retaining_scratch(tmp_path, monkeypatch):
+    """An interrupt asks for a drain: a fetch in flight finishes within the
+    interrupt window, so scratch is cleaned and no writer is left active."""
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 0.05)
+    monkeypatch.setattr(pipeline, "_INTERRUPT_JOIN_SECONDS", 3.0)
+    source = _BlockingSource()
+    units = [Unit(key="unit-1", name="unit-1.dat"), Unit(key="unit-2", name="unit-2.dat")]
+    _release_after(source, 0.4)
+    with pytest.raises(KeyboardInterrupt):
+        _run(tmp_path, source=source, reader=_ByteReader(), analyzer=_InterruptingAnalyzer(),
+             units=units, workers=2, staged=2)
+    assert source.blocking_fetch_returned.is_set()
+    assert list((tmp_path / "scratch").iterdir()) == []
+
+
+def test_interrupt_window_is_the_interrupt_one(tmp_path, monkeypatch):
+    """With the interrupt window shorter than the fetch, the interrupt still
+    reports the active worker and retains scratch -- the failure window is
+    not what governs an interrupt."""
+    monkeypatch.setattr(pipeline, "_WORKER_JOIN_SECONDS", 3.0)
+    monkeypatch.setattr(pipeline, "_INTERRUPT_JOIN_SECONDS", 0.05)
+    source = _BlockingSource()
+    units = [Unit(key="unit-1", name="unit-1.dat"), Unit(key="unit-2", name="unit-2.dat")]
+    try:
+        with pytest.raises(pipeline.ActiveDownloadWorkersError, match=r"0\.05 seconds") as caught:
+            _run(tmp_path, source=source, reader=_ByteReader(), analyzer=_InterruptingAnalyzer(),
+                 units=units, workers=2, staged=2)
+        assert isinstance(caught.value.__cause__, KeyboardInterrupt)
+    finally:
+        source.release_fetch.set()
+    assert source.blocking_fetch_returned.wait(timeout=2)

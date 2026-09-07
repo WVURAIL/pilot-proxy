@@ -463,7 +463,7 @@ class CadcDatatrailSource(DataSource):
                 if "NotFound" in type(exc).__name__:
                     discard_partial()
                     return False, "NotFound"
-                last = f"{type(exc).__name__}: {exc}"
+                last = _cadc_transport.describe_exception(exc)
             if k < retries:
                 discard_partial()
                 time.sleep(delay)

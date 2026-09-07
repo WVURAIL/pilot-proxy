@@ -9,6 +9,7 @@ simple test clients or older transports.
 """
 from __future__ import annotations
 
+import http.client
 import socket
 import threading
 import time
@@ -49,6 +50,17 @@ def expected_errors() -> tuple:
         pass
     else:
         errors.append(RequestException)
+    try:
+        from urllib3.exceptions import ProtocolError
+    except ImportError:
+        pass
+    else:
+        # A truncated transfer surfaces from requests as a raw urllib3
+        # ProtocolError ("Connection broken: IncompleteRead(...)"), outside
+        # RequestException. It is as transient as any other broken connection
+        # and killed both CANFAR shards within one minute on 2026-09-02.
+        errors.append(ProtocolError)
+    errors.append(http.client.IncompleteRead)
     return tuple(errors)
 
 
@@ -129,3 +141,29 @@ def configure_request_timeout(client) -> bool:
     except (AttributeError, TypeError):
         return False
     return True
+
+
+def describe_exception(exc: BaseException) -> str:
+    """Name and message of an exception, never raising.
+
+    Some library exceptions' ``__str__`` returns a non-string (cadcutils'
+    HttpException wraps an HTTPError that way), so formatting them raises
+    TypeError. Inside a retry loop that turns a retryable error into the one
+    that ends the run: both CANFAR shards died of it on 2026-09-03. The
+    wrapped exception's own message is preferred to a bare repr.
+    """
+    name = type(exc).__name__
+    for candidate in (exc, getattr(exc, "orig_exception", None)):
+        if candidate is None:
+            continue
+        try:
+            text = str(candidate)
+        except Exception:                                  # noqa: BLE001
+            continue
+        if isinstance(text, str) and text:
+            return f"{name}: {text}"
+    try:
+        text = repr(exc)
+    except Exception:                                      # noqa: BLE001
+        return name
+    return f"{name}: {text}" if isinstance(text, str) and text else name
