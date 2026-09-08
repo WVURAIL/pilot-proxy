@@ -9,10 +9,6 @@ __pycache__/
 *.h5
 *.pdf
 *.png
-!docs/evidence/estimator_transfer_2026-08-25/figures/fig_estimator_transfer_digital.pdf
-!docs/evidence/estimator_transfer_2026-08-25/figures/fig_estimator_transfer_digital.png
-!docs/evidence/sdr_ota_transfer_2026-08-25/figures/fig_estimator_transfer_ota.pdf
-!docs/evidence/sdr_ota_transfer_2026-08-25/figures/fig_estimator_transfer_ota.png
 # pytest cache
 .pytest_cache/
 # Deterministic TeX facts generated from profiles and source constants.
@@ -36,3 +32,23 @@ work/
 analysis/dissertation/out/
 generated/
 results/
+
+# Evidence studies are committed whole. A study directory under docs/evidence/
+# is the record a dissertation chapter cites, so it must be able to carry its
+# own figures (*.png, *.pdf), arrays (*.npz, *.npy, *.h5) and any subdirectory
+# it happens to name build/, work/, generated/ or results/ -- every one of
+# which the rules above would otherwise swallow without a word. Git cannot
+# re-include a file under an excluded *directory*, so the directory itself has
+# to be re-included first, and this block has to come last so that it is the
+# final matching pattern for both.
+!docs/evidence/**/
+!docs/evidence/**
+
+# ...but hygiene still wins inside it. The blanket re-inclusion above is by
+# extension-blind design, so without these it would also track caches, build
+# droppings and OS metadata that happen to land under an evidence directory.
+docs/evidence/**/__pycache__/
+docs/evidence/**/*.py[cod]
+docs/evidence/**/.pytest_cache/
+docs/evidence/**/.DS_Store
+docs/evidence/**/Thumbs.db

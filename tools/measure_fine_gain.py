@@ -281,30 +281,43 @@ def main():
     ap.add_argument("--out", default="generated/fine_gain_mc")
     ap.add_argument("--stage", choices=["h0", "sweep", "report", "verify"],
                     required=True)
-    ap.add_argument("--trials", type=int, default=1000)
-    ap.add_argument("--seed", type=int, default=0)
+    # None means "not given": the sweep stages and the verification gate want
+    # very different defaults -- 1000 trials at 2048 streams against 3 at 64 --
+    # and a gate that silently inherits the sweep's is ten thousand times more
+    # expensive than the bit-exactness check it is meant to be. Resolved per
+    # stage below, so an explicit --trials still reaches whichever stage runs.
+    ap.add_argument("--trials", type=int, default=None)
+    ap.add_argument("--seed", type=int, default=None)
     ap.add_argument("--snr-db", type=float, default=None)
     ap.add_argument("--half-bin", action="store_true",
                     help="inject at the half-bin (scalloping) offset")
-    ap.add_argument("--streams", type=int, default=STREAMS)
+    ap.add_argument("--streams", type=int, default=None)
     ap.add_argument("--batch", type=int, default=8)
     args = ap.parse_args()
     os.makedirs(args.out, exist_ok=True)
     if args.stage == "verify":
-        verify()
+        # Forward only what was actually given, so the README's
+        # "--stage verify --trials 4" is honoured while a bare --stage verify
+        # keeps verify()'s own cheap defaults.
+        given = {k: v for k, v in (("seed", args.seed), ("trials", args.trials),
+                                   ("streams", args.streams)) if v is not None}
+        verify(**given)
         return 0
+    trials = 1000 if args.trials is None else args.trials
+    seed = 0 if args.seed is None else args.seed
+    streams = STREAMS if args.streams is None else args.streams
     if args.stage == "report":
         return report(args.out)
     if args.stage == "sweep":
         if args.snr_db is None:
             ap.error("--snr-db required for sweep")
-        run_stage(args.out, "sweep", args.trials, args.seed,
+        run_stage(args.out, "sweep", trials, seed,
                   snr_db=args.snr_db,
                   b0=(HALF_BIN if args.half_bin else ANCHOR),
-                  streams=args.streams, batch=args.batch,
+                  streams=streams, batch=args.batch,
                   tag=("_half" if args.half_bin else ""))
         return 0
-    run_stage(args.out, "h0", args.trials, args.seed, streams=args.streams,
+    run_stage(args.out, "h0", trials, seed, streams=streams,
               batch=args.batch)
     return 0
 

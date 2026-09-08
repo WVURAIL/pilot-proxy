@@ -1,10 +1,88 @@
 #!/usr/bin/env bash
+#
+#   run_estimator_transfer.sh [RESULT_DIR]
+#   run_estimator_transfer.sh --check-runtime
+#
+# The second form resolves and reports the Python that would be used and exits
+# without running anything, which is the cheap way to find out whether this
+# machine can drive the sweep before committing hours to it.
+#
+# Runtime selection, in order: $PILOT_PROXY_PYTHON, an activated virtualenv,
+# the repository's own .venv, the venv scripts/setup_env.sh builds
+# ($VENV_DIR, default ~/pilot-proxy-venv), then python3/python on PATH.
 set -euo pipefail
 
 project_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+check_runtime_only=0
+if [[ ${1:-} == "--check-runtime" ]]; then
+  check_runtime_only=1
+  shift
+fi
 result_dir=${1:-"$project_dir/../estimator_transfer_2026-08-25"}
-runtime=${PILOT_PROXY_PYTHON:-/home/djg/rail/venvs/ppci/bin/python}
 max_parallel=${ESTIMATOR_TRANSFER_JOBS:-4}
+
+# Every point below is launched as "$runtime", so a runtime that does not
+# resolve fails 26 times over inside per-point logs with nothing on the
+# console --- which is exactly how the hardcoded ~/rail/venvs/ppci default
+# rotted unnoticed once that venv was removed. Discover the interpreter from
+# the conventions this repository already documents, and prove the one we pick
+# can import what the sweep needs before spending the first CPU-hour on it.
+# The probe runs under the same PYTHONNOUSERSITE=1 PYTHONPATH=src environment
+# as the sweep points themselves, so an interpreter whose cupy lives only in
+# ~/.local is rejected here rather than at the first point. It must echo the
+# sentinel: a non-Python executable would otherwise read the here-document,
+# ignore it and exit 0.
+probe_runtime() {
+  local reply
+  reply=$(PYTHONNOUSERSITE=1 PYTHONPATH="$project_dir/src" "$1" - <<'PROBE' 2>/dev/null
+import cupy  # both backends below are --detector/synthesis-backend cuda
+from pilot_proxy.testbench import evaluate_snr  # noqa: F401
+print("estimator-transfer-runtime-ok")
+PROBE
+  ) || return 1
+  [[ $reply == "estimator-transfer-runtime-ok" ]]
+}
+
+resolve_runtime() {
+  local candidates=() rejected=() cand found
+  if [[ -n "${PILOT_PROXY_PYTHON:-}" ]]; then
+    # An explicit override is a deliberate choice: use it or say why not.
+    candidates=("$PILOT_PROXY_PYTHON")
+  else
+    [[ -n "${VIRTUAL_ENV:-}" ]] && candidates+=("$VIRTUAL_ENV/bin/python")
+    candidates+=("$project_dir/.venv/bin/python")
+    candidates+=("${VENV_DIR:-$HOME/pilot-proxy-venv}/bin/python")
+    for name in python3 python; do
+      if found=$(command -v "$name" 2>/dev/null); then
+        candidates+=("$found")
+      fi
+    done
+  fi
+
+  for cand in "${candidates[@]}"; do
+    if [[ -x "$cand" ]] && probe_runtime "$cand"; then
+      printf '%s\n' "$cand"
+      return 0
+    fi
+    rejected+=("$cand")
+  done
+
+  {
+    echo "No Python able to run the estimator-transfer sweep was found."
+    echo "Each candidate must be executable and must import cupy and"
+    echo "pilot_proxy.testbench.evaluate_snr with PYTHONPATH=$project_dir/src."
+    echo "Tried, in order:"
+    printf '  %s\n' "${rejected[@]}"
+    echo "Set PILOT_PROXY_PYTHON to the interpreter you want used."
+  } >&2
+  return 2
+}
+
+runtime=$(resolve_runtime)
+echo "estimator transfer: runtime $runtime ($("$runtime" -V 2>&1))"
+if (( check_runtime_only )); then
+  exit 0
+fi
 
 if [[ ! "$max_parallel" =~ ^[1-9][0-9]*$ ]]; then
   echo "ESTIMATOR_TRANSFER_JOBS must be a positive integer." >&2
