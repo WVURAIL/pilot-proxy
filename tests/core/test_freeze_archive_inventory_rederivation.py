@@ -171,15 +171,6 @@ def test_ledger_records_the_legacy_frame_estimate_column(tmp_path):
     assert _manifest["accounting"]["low_estimate_exclusions"] == 1
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "freeze_archive_inventory.py reads row['n_frames'], but "
-        "BasebandReader.annotate_row now emits 'n_frames_estimate'; a fresh "
-        "survey therefore yields an all-null estimate column and "
-        "low_estimate_exclusions == 0, with no error raised"
-    ),
-)
 def test_ledger_records_the_current_survey_frame_estimate_column(tmp_path):
     """A fresh survey writes ``n_frames_estimate`` (int); the ledger must read it."""
     manifest, ledger, _out = _freeze(
@@ -191,15 +182,15 @@ def test_ledger_records_the_current_survey_frame_estimate_column(tmp_path):
     assert manifest["accounting"]["low_estimate_exclusions"] == 1
 
 
-def test_current_survey_schema_degrades_silently(tmp_path):
-    """Characterise today's failure mode so a fix has to change this test."""
-    manifest, ledger, _out = _freeze(
-        tmp_path, _default_rows(estimate_field="n_frames_estimate")
-    )
-    assert [row["n_frames_estimate"] for row in ledger] == [None, None]
-    assert [row["below_one_frame_estimate"] for row in ledger] == [False, False]
-    assert manifest["accounting"]["low_estimate_exclusions"] == 0
-    # The exclusion decision itself is unaffected: it comes from the product.
+def test_current_frame_estimate_takes_precedence_over_legacy(tmp_path):
+    rows = _default_rows(estimate_field="n_frames_estimate")
+    for row in rows:
+        row["n_frames"] = 999
+    manifest, ledger, _out = _freeze(tmp_path, rows)
+    excluded = {row["name"]: row for row in ledger}
+    assert excluded["b.h5"]["n_frames_estimate"] == 0
+    assert excluded["b.h5"]["below_one_frame_estimate"] is True
+    assert manifest["accounting"]["low_estimate_exclusions"] == 1
     assert manifest["accounting"]["zero_frame_units"] == 2
     assert manifest["accounting"]["excluded_units"] == 2
 

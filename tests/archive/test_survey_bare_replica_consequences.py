@@ -11,10 +11,8 @@ Two claims are pinned:
   A. the patch's intended benefit -- an all-bare, single-directory event that
      used to be refused now surveys to completion with the correct rows;
 
-  B. its cost -- a replica set that mixes directories used to be a clean,
-     first-pass `refused` with the offending URI in the ledger, and is now an
-     `empty` event carrying a common_path two levels above any real replica,
-     reached only after _MAX_ATTEMPTS survey passes.
+  B. restoring collection prefixes must preserve the refusal of replica
+     sets that span directories, rather than treating them as missing data.
 
 Run:  TMPDIR=/tmp PYTHONPATH=src python -m pytest \
       tests/archive/test_survey_bare_replica_consequences.py -q
@@ -146,7 +144,7 @@ def test_all_bare_event_was_refused_pre_patch():
 
 
 # ======================================================================
-# B. the cost
+# B. mixed directories remain a contract refusal
 # ======================================================================
 def test_mixed_directory_event_was_a_clean_first_pass_refusal_pre_patch():
     with tempfile.TemporaryDirectory() as out, fake_archive([MIXED_EVENT],
@@ -159,25 +157,20 @@ def test_mixed_directory_event_was_a_clean_first_pass_refusal_pre_patch():
         assert src.survey_completeness_issues(out)["refused"] == 1
 
 
-def test_mixed_directory_event_becomes_a_late_empty_post_patch():
-    """No refusal, no rows: the event is retried across _MAX_ATTEMPTS survey
-    passes and finally ledgered as `empty` -- carrying a common_path that is
-    two levels above either replica and an unparseable obs_date."""
+def test_mixed_directory_event_is_refused_after_collection_restoration():
     with tempfile.TemporaryDirectory() as out, fake_archive([MIXED_EVENT]):
-        seen = []
-        for _ in range(cadc_datatrail._MAX_ATTEMPTS):
-            text, src = _survey(out)
-            seen.append(text)
-            assert "contract refusal" not in text
+        text, src = _survey(out)
+        assert "contract refusal -- recorded and skipped" in text
         ledger = _rows(os.path.join(out, "no_files_events.jsonl"))
         assert _rows(os.path.join(out, "inventory.jsonl")) == []
         assert len(ledger) == 1, ledger
         entry = ledger[0]
-        assert entry["reason"] == "max-attempts", entry
-        assert entry["common_path"] == MIXED_DERIVED_CP, entry
+        assert entry["reason"] == "datatrail-contract-refusal", entry
+        assert "multiple directories" in entry["detail"]
+        assert entry["common_path"] is None
         assert entry["obs_date"] == "unknown", entry
-        assert entry["attempts"] == cadc_datatrail._MAX_ATTEMPTS, entry
-        assert src.survey_completeness_issues(out)["refused"] == 0
+        assert entry["attempts"] == 1
+        assert src.survey_completeness_issues(out)["refused"] == 1
 
 
 def test_the_derived_path_is_not_where_either_replica_lives():

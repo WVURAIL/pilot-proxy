@@ -27,6 +27,10 @@ this file is the on-GPU gate.
 from __future__ import annotations
 
 import time
+import os
+from pathlib import Path
+import shutil
+import subprocess
 
 import numpy as np
 import pytest
@@ -278,6 +282,56 @@ def test_mask_last_block_determinism_over_repeats():
         if baseline is None:
             baseline = current
         assert current == baseline
+
+
+@pytest.mark.cuda
+@pytest.mark.parametrize("window_samples", [64, 128])
+def test_mask_waits_for_delayed_power_writers(tmp_path, window_samples):
+    cp = _import_cupy_or_skip()
+    nvcc = shutil.which(os.environ.get("NVCC", "nvcc"))
+    if nvcc is None:
+        pytest.skip("nvcc is required to build the scheduling regression")
+    cuda_dir = Path(__file__).resolve().parents[2] / "cuda"
+    source = (cuda_dir / "f_statistic.cu").read_text()
+    write = "            atomicAdd(&fine[i], static_cast<unsigned long long>(re * re + im * im));"
+    assert source.count(write) == 1
+    # Delay the second warp before its final power additions, without changing them.
+    delay = """            if (MaskOut != NULL && n == FSTAT_NUM_WEIGHT_TERMS - 1
+                    && s == 0 && tid >= 32) {
+                const unsigned long long start = clock64();
+                while (clock64() - start < 5000000ULL) { }
+            }
+"""
+    instrumented = tmp_path / "f_statistic.cu"
+    instrumented.write_text(source.replace(write, delay + write))
+    library = tmp_path / "libfstatistic.so"
+    result = subprocess.run(
+        [nvcc, "-std=c++14", "-O3", "-DNDEBUG", "-Xcompiler=-fPIC", "--shared",
+         f"-arch=sm_{cp.cuda.Device().compute_capability}",
+         f"-DFSTAT_DETECTOR_WINDOW_SAMPLES={window_samples}",
+         "-DFSTAT_BLOCK_THREADS=64", "-I", str(cuda_dir), str(instrumented),
+         "-o", str(library)],
+        capture_output=True, text=True, timeout=120,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    kernel = FStatKernel(library)
+    streams, batch, anchor = 2, 64, 40
+    rng = np.random.default_rng(20260908)
+    packed = rng.integers(0, 256, size=(batch, streams * WINDOWS, window_samples),
+                          dtype=np.uint8).astype(np.int8)
+    weights = rng.integers(0, 256, size=(TERMS, window_samples),
+                           dtype=np.uint8).astype(np.int8)
+    bulk, rank = _bulk_and_rank(anchor)
+    fine, mask, _ = _run_mask(
+        cp, kernel, packed, weights, anchor=anchor, half_width=0,
+        bulk=bulk, rank=rank, mult=MULT_Q16, batch=batch, streams=streams,
+        with_taps=False,
+    )
+    expected = [fine_mask_decision(
+        frame, anchor_bin=anchor, designated_half_width=0, bulk_mask=bulk,
+        cfar_rank=rank, multiplier_q16=MULT_Q16,
+    ).mask for frame in fine]
+    np.testing.assert_array_equal(mask, expected)
 
 
 @pytest.mark.cuda

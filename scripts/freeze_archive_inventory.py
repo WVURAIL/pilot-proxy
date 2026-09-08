@@ -641,7 +641,7 @@ def freeze_inventory(
                 "quarantine_key"
             )
             evidence["historical_quarantine_reason"] = historical.get("reason")
-        estimate = row.get("n_frames")
+        estimate = row.get("n_frames_estimate", row.get("n_frames"))
         below_one = (
             isinstance(estimate, (int, float))
             and not isinstance(estimate, bool)

@@ -86,14 +86,14 @@ def _fake_archive(monkeypatch):
     return seen
 
 
-def _survey(out_dir):
+def _survey(out_dir, *, return_source=False):
     ctx = RunContext(instrument=None, selection=None,
                      options={"scope": SCOPE, "freq_ids": list(FREQ_IDS)})
     buf = io.StringIO()
     with contextlib.redirect_stdout(buf):
         source = cadc_datatrail.CadcDatatrailSource()
         source.survey(ctx, str(out_dir))
-    return buf.getvalue()
+    return (buf.getvalue(), source) if return_source else buf.getvalue()
 
 
 def _rows(path):
@@ -126,73 +126,46 @@ def test_all_bare_replicas_survey_to_the_same_rows(monkeypatch, tmp_path):
     assert "accepted-empty" in text and "0 accepted-empty" in text
 
 
-# ==========================================================================
-# GAP the suite does not cover: restoration widens the population reaching
-# os.path.commonprefix, which is CHARACTER-wise, not path-wise. A bare
-# replica from a NEIGHBOURING event directory no longer refuses -- it
-# silently shortens the common path from the event directory to the day
-# directory. survey() then probes .../2020/07/15/baseband_<ev>_<fid>.h5,
-# gets a definitive absence for every freq_id, and books 0 rows / 0 errors.
-# The bytes are there; only the derived path is not.
-#
-# Pre-patch this input was a refusal, which is loud and ledgered with the
-# offending URI. Post-patch it is a silent empty that burns _MAX_ATTEMPTS
-# resumes and then writes the event off. xfail(strict) so the suite stays
-# green while the hazard is pinned: fixing it (path-wise common prefix, or
-# refusing a restored replica that changes the common-path depth) flips
-# this to pass.
-# ==========================================================================
-@pytest.mark.xfail(strict=True, reason=(
-    "restored bare replica from a sibling directory shortens common_path to "
-    "the day directory; survey probes one level too high and writes 0 rows "
-    "for an event whose bytes are in CADC"))
-def test_bare_replica_from_a_sibling_directory_does_not_silently_empty(
-        monkeypatch, tmp_path):
+@pytest.mark.parametrize("neighbour_prefix", ["", "cadc:CHIMEFRB/"])
+def test_sibling_directory_replicas_are_refused(monkeypatch, tmp_path,
+                                               neighbour_prefix):
     _fake_ps(monkeypatch, [
         f"cadc:CHIMEFRB/{EVENT_DIR}/{baseband_filename(EVENT, 0)}",
-        f"{DAY}/astro_{NEIGHBOUR}/{baseband_filename(NEIGHBOUR, 1)}",
+        f"{neighbour_prefix}{DAY}/astro_{NEIGHBOUR}/{baseband_filename(NEIGHBOUR, 1)}",
     ])
-    _fake_archive(monkeypatch)
-    _survey(tmp_path)
-    assert _rows(tmp_path / "inventory.jsonl"), (
-        "survey wrote no rows for an event whose bytes exist in CADC")
+    probed = _fake_archive(monkeypatch)
+    with pytest.raises(DatatrailContractError, match="multiple directories"):
+        dt.Datatrail().common_path(SCOPE, EVENT)
+    text = _survey(tmp_path)
+    assert "1 contract-refused" in text
+    assert not probed
+    assert _rows(tmp_path / "inventory.jsonl") == []
+    ledger = _rows(tmp_path / "no_files_events.jsonl")
+    assert [row["reason"] for row in ledger] == ["datatrail-contract-refusal"]
+    assert "multiple directories" in ledger[0]["detail"]
 
 
-def test_sibling_directory_case_churns_then_is_written_off(
+def test_sibling_directory_refusal_stays_visible_until_resurveyed(
         monkeypatch, tmp_path):
-    """Characterization of what actually happens today, so the write-off is
-    visible in the suite rather than only in a production ledger.
-
-    The shortened path also defeats _DATE_RE (cadc.py:111), which needs a
-    trailing '/' after the day and therefore cannot match a common path that
-    ENDS at the day directory. obs_date is 'unknown', so the aged-out
-    fast path never fires and the event burns every retry first.
-    """
     _fake_ps(monkeypatch, [
         f"cadc:CHIMEFRB/{EVENT_DIR}/{baseband_filename(EVENT, 0)}",
         f"{DAY}/astro_{NEIGHBOUR}/{baseband_filename(NEIGHBOUR, 1)}",
     ])
     probed = _fake_archive(monkeypatch)
+    assert "1 contract-refused" in _survey(tmp_path)
+    _, source = _survey(tmp_path, return_source=True)
+    assert not probed
+    assert source.survey_completeness_issues(str(tmp_path))["refused"] == 1
+    assert [row["reason"] for row in _rows(tmp_path / "no_files_events.jsonl")] == [
+        "datatrail-contract-refusal"]
 
-    text = _survey(tmp_path)
-    assert _rows(tmp_path / "inventory.jsonl") == []
-    assert "0 contract-refused" in text          # the loud path is gone
-    assert "1 resolved-but-empty (retry next run)" in text
-    assert _rows(tmp_path / "no_files_events.jsonl") == []
-    # the probes went one directory too high, so none of them could resolve
-    assert set(probed).isdisjoint(ARCHIVE)
-    assert set(probed) == {f"cadc:CHIMEFRB/{DAY}/"
-                           f"{baseband_filename(EVENT, fid)}"
-                           for fid in FREQ_IDS}
-
-    # ... and it is undatable, so it churns to _MAX_ATTEMPTS before the
-    # event is written off as never having been in CADC storage.
-    for _ in range(cadc_datatrail._MAX_ATTEMPTS - 1):
-        text = _survey(tmp_path)
-    ledger = _rows(tmp_path / "no_files_events.jsonl")
-    assert [r["reason"] for r in ledger] == ["max-attempts"]
-    assert ledger[0]["obs_date"] == "unknown"
-    assert ledger[0]["common_path"] == f"cadc:CHIMEFRB/{DAY}"
+    _fake_ps(monkeypatch, [f"{EVENT_DIR}/{baseband_filename(EVENT, fid)}"
+                           for fid in FREQ_IDS])
+    retry = tmp_path / "retry"
+    _survey(retry)
+    assert len(_rows(retry / "inventory.jsonl")) == len(FREQ_IDS)
+    assert set(probed) == ARCHIVE
+    assert _rows(retry / "no_files_events.jsonl") == []
 
 
 # ==========================================================================

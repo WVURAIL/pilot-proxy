@@ -439,19 +439,21 @@ class Datatrail:
                     base: float = 4.0, deadline=None) -> tuple:
         """Resolve an event's CADC common path.
 
-        Same `ps --json` call as files(), normalized to the path. datatrail
-        derives its common path from the minoc URI list and files() replicates
-        that normalization exactly, so this equals what dtcli's own
-        find_dataset_common_path computes from the same /query/dataset/find
-        response.
+        Same `ps --json` call as files(), restricted to a single directory.
+        Survey readers append basenames to this path, so nested relative
+        names cannot be represented here and must not look like absent data.
 
         Contract: (None, False) = couldn't query (transient /
         service down, retried); (None, True) = queried OK but no minoc files
         (no-data); (path, True) = resolved, prefixed with the cadc:CHIMEFRB
         collection.
         """
-        cp, _names, ok = self.files(
+        cp, names, ok = self.files(
             scope, event, retries=retries, base=base, deadline=deadline)
+        if any("/" in name for name in names):
+            raise DatatrailContractError(
+                f"[datatrail ps {scope} {event}] minoc replicas span "
+                "multiple directories; cannot resolve one event directory")
         return cp, ok
 
 

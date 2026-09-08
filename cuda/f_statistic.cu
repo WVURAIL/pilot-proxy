@@ -1646,6 +1646,8 @@ kernel_fused_fine(
     __shared__ unsigned long long s_num[FSTAT_FINE_NUM_BINS];
     __shared__ unsigned long long s_den[FSTAT_FINE_NUM_BINS];
     __threadfence();
+    // Every warp must publish its powers before this block reports completion.
+    __syncthreads();
     if (tid == 0) {
         const int prior = atomicAdd(&MaskOut[b], 1);
         s_last = (prior == num_streams - 1) ? 1 : 0;
