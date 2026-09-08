@@ -48,6 +48,7 @@ from ..recon import match_terms, recon
 from ..survey_state import (
     VIEW_FLUSH_INTERVAL, SurveyStore, atomic_write_json, build_configuration,
     ensure_manifest, load_attempts, with_survey_output_lock,
+    SurveyRun, STALE_VIEWS_MARKER,
 )
 
 
@@ -375,6 +376,10 @@ class CadcDatatrailSource(DataSource):
                 f"inventory not found: {path}\n"
                 "Build one with `pilot-proxy chime-survey` "
                 "(or pass --inventory <path>).")
+        if (Path(path).parent / STALE_VIEWS_MARKER).exists():
+            raise SystemExit(
+                f"inventory views in {Path(path).parent} may be stale after an active "
+                "or interrupted survey; rerun the same survey command to refresh them")
         n_channels = getattr(ctx.instrument, "n_channels", None)
         sel = parse_selection(ctx.selection, n_channels=n_channels)
         seen, units = set(), []
@@ -577,330 +582,383 @@ class CadcDatatrailSource(DataSource):
                                 include_outrigger, empty_age_days,
                                 minimum_bytes, survey_schema),
         )
-        inv_path = out / "inventory.jsonl"
-        fid_note = (f" freq_ids={len(freq_ids)} ({freq_ids[0]}..{freq_ids[-1]})"
-                    if freq_ids else "")
-        print(f"[survey] scopes={list(scopes)}"
-              f" shape={reader_name} minimum_bytes={minimum_bytes}"
-              f"{fid_note} -> {inv_path}", flush=True)
+        with SurveyRun(out) as execution:
+            inv_path = out / "inventory.jsonl"
+            fid_note = (f" freq_ids={len(freq_ids)} ({freq_ids[0]}..{freq_ids[-1]})"
+                        if freq_ids else "")
+            print(f"[survey] scopes={list(scopes)}"
+                  f" shape={reader_name} minimum_bytes={minimum_bytes}"
+                  f"{fid_note} -> {inv_path}", flush=True)
 
-        # ---- phase 1: enumerate the unique events (cached) ----
-        membership = _enumerate_events(scopes, include_outrigger,
-                                       out / "enum_cache.json", re_enumerate)
-        events = sorted(ev for ev, lbls in membership.items()
-                        if include_outrigger
-                        or not any(_OUTRIGGER_RE.search(x) for x in lbls))
-        print(f"to survey: {len(events)} events", flush=True)
+            # ---- phase 1: enumerate the unique events (cached) ----
+            membership = _enumerate_events(scopes, include_outrigger,
+                                           out / "enum_cache.json", re_enumerate)
+            events = sorted(ev for ev, lbls in membership.items()
+                            if include_outrigger
+                            or not any(_OUTRIGGER_RE.search(x) for x in lbls))
+            print(f"to survey: {len(events)} events", flush=True)
 
-        # ---- phase 2: verify each event's freq_ids (resumable) ----
-        attempts_path = out / "attempts.json"
-        attempts = load_attempts(attempts_path)
-        store = SurveyStore(out / "survey_state.sqlite3")
-        surveyed = store.completed_keys()
-        # A crash can land after the event transaction but before its attempts
-        # checkpoint. The committed event wins; discard that harmless stale count.
-        for key in surveyed:
-            attempts.pop(key, None)
-        atomic_write_json(attempts_path, attempts)
-        # Recover JSONL/text views if a previous process stopped after committing
-        # SQLite but before its periodic/final render.
-        store.render_views(out)
-        print(f"resume: {len(surveyed)} events already done", flush=True)
-
-        # accept-as-empty ledger: one JSON object per written-off event, so the
-        # write-off is auditable (when, how many sightings, why) and greppable.
-        no_files_path = out / "no_files_events.jsonl"
-        pool = ThreadPoolExecutor(max_workers=workers)
-        n_new = 0
-        n_committed = 0
-        # run-level accounting so a 0-row inventory can never read as success
-        n_rows = n_no_data = n_incomplete = n_empty_retry = n_empty_accepted = 0
-        n_refused = 0
-
-        def mark_done(key, scope, ev, status, records=(), *, incomplete=None,
-                      no_files=None):
-            nonlocal n_committed
-            store.commit(key, scope, ev, status, records,
-                         incomplete=incomplete, no_files=no_files)
-            surveyed.add(key)
-            attempts.pop(key, None)
+            # ---- phase 2: verify each event's freq_ids (resumable) ----
+            attempts_path = out / "attempts.json"
+            attempts = load_attempts(attempts_path)
+            pending_path = out / "pending_events.json"
+            pending = _load_json_file(pending_path, {})
+            if not isinstance(pending, dict):
+                raise SystemExit(f"invalid pending survey state: {pending_path}")
+            store = SurveyStore(out / "survey_state.sqlite3")
+            surveyed = store.completed_keys()
+            # A crash can land after the event transaction but before its attempts
+            # checkpoint. The committed event wins; discard that harmless stale count.
+            for key in surveyed:
+                attempts.pop(key, None)
+                pending.pop(key, None)
             atomic_write_json(attempts_path, attempts)
-            n_committed += 1
-            if n_committed % VIEW_FLUSH_INTERVAL == 0:
-                store.render_views(out)
+            atomic_write_json(pending_path, pending)
+            # Recover JSONL/text views if a previous process stopped after committing
+            # SQLite but before its periodic/final render.
+            store.render_views(out)
+            print(f"resume: {len(surveyed)} events already done", flush=True)
 
-        def bump(key):
-            attempts[key] = attempts.get(key, 0) + 1
-            atomic_write_json(attempts_path, attempts)
+            # accept-as-empty ledger: one JSON object per written-off event, so the
+            # write-off is auditable (when, how many sightings, why) and greppable.
+            no_files_path = out / "no_files_events.jsonl"
+            pool = ThreadPoolExecutor(max_workers=workers)
+            n_new = 0
+            n_committed = 0
+            # run-level accounting so a 0-row inventory can never read as success
+            n_rows = n_no_data = n_incomplete = n_empty_retry = n_empty_accepted = 0
+            n_refused = 0
 
-        def verify(scope, ev, deadline):
+            def mark_done(key, scope, ev, status, records=(), *, incomplete=None,
+                          no_files=None):
+                nonlocal n_committed
+                store.commit(key, scope, ev, status, records,
+                             incomplete=incomplete, no_files=no_files)
+                surveyed.add(key)
+                attempts.pop(key, None)
+                pending.pop(key, None)
+                atomic_write_json(attempts_path, attempts)
+                atomic_write_json(pending_path, pending)
+                n_committed += 1
+                if n_committed % VIEW_FLUSH_INTERVAL == 0:
+                    store.render_views(out)
+
+            def bump(key):
+                attempts[key] = attempts.get(key, 0) + 1
+                atomic_write_json(attempts_path, attempts)
+
+            def verify(scope, ev, deadline):
+                try:
+                    cp, ps_ok = DATATRAIL.common_path(
+                        scope, ev, deadline=deadline)
+                except DatatrailContractError as exc:
+                    # Deterministic: the service answered, the payload is not one
+                    # this adapter can act on. Retrying cannot change it, and it
+                    # must never masquerade as an outage (which would stall the
+                    # whole survey on one event and then abort with a misleading
+                    # certificate message).
+                    return "refused", [], [], 0, "unknown", None, str(exc), {}
+                if not ps_ok:
+                    return "service_down", [], [], 0, "unknown", None, None, {}
+                if not cp:
+                    return "no_data", [], [], 0, "unknown", None, None, {}
+                obs_date = (lambda m: f"{m[1]}-{m[2]}-{m[3]}" if m else "unknown")(
+                    _DATE_RE.search(cp))
+                labels = membership[(scope, ev)]
+                # The candidate files one event contributes -- (name, fields) pairs
+                # from the reader's shape. Baseband yields one per freq_id; a
+                # per-event product may yield a single file with its own fields.
+                cand = [candidate_file(item, reader_name)
+                        for item in shape.survey_files(ev, cp, freq_ids, ctx)]
+                candidate_names = [name for name, _fields in cand]
+                if len(candidate_names) != len(set(candidate_names)):
+                    raise SystemExit(
+                        f"reader {reader_name!r} yielded duplicate archive names "
+                        f"for event {ev!r}")
+
+                def probe(item):
+                    name, fields = item
+                    size, err = self._cadc_size(
+                        join_uri(cp, name), deadline=deadline)
+                    return name, fields, size, err
+
+                records, errored, sub_floor = [], [], []
+                for name, fields, size, err in pool.map(probe, cand):
+                    if err is not None:
+                        errored.append(name)
+                    elif size is not None and size >= minimum_bytes:
+                        # Self-describing row: `name` is what enumerate/fetch will
+                        # stage (joined to common_path), and the shape's per-file
+                        # fields land verbatim as columns.
+                        rec = {
+                            "scope": str(scope), "event": str(ev), "name": name,
+                            "size_bytes": int(size),
+                            "common_path": str(cp), "obs_date": obs_date,
+                            "datasets": list(labels),
+                            "collection_restored": bool(getattr(cp, "collection_restored", False)),
+                        }
+                        rec.update(fields)
+                        annotate_row(shape, rec, ctx.instrument)
+                        records.append(rec)
+                    elif size is not None:
+                        sub_floor.append({"name": name, "size_bytes": int(size)})
+                details = {
+                    "collection_restored": bool(getattr(cp, "collection_restored", False)),
+                    "minimum_archive_bytes": minimum_bytes,
+                    "sub_floor_files": sub_floor,
+                    "n_sub_floor": len(sub_floor),
+                    "n_absent": len(cand) - len(records) - len(errored) - len(sub_floor),
+                }
+                if errored and len(errored) == len(cand):       # all errored -> outage
+                    return "service_down", records, errored, len(cand), obs_date, cp, None, details
+                return "progress", records, errored, len(cand), obs_date, cp, None, details
+
             try:
-                cp, ps_ok = DATATRAIL.common_path(
-                    scope, ev, deadline=deadline)
-            except DatatrailContractError as exc:
-                # Deterministic: the service answered, the payload is not one
-                # this adapter can act on. Retrying cannot change it, and it
-                # must never masquerade as an outage (which would stall the
-                # whole survey on one event and then abort with a misleading
-                # certificate message).
-                return "refused", [], [], 0, "unknown", None, str(exc)
-            if not ps_ok:
-                return "service_down", [], [], 0, "unknown", None, None
-            if not cp:
-                return "no_data", [], [], 0, "unknown", None, None
-            obs_date = (lambda m: f"{m[1]}-{m[2]}-{m[3]}" if m else "unknown")(
-                _DATE_RE.search(cp))
-            labels = membership[(scope, ev)]
-            # The candidate files one event contributes -- (name, fields) pairs
-            # from the reader's shape. Baseband yields one per freq_id; a
-            # per-event product may yield a single file with its own fields.
-            cand = [candidate_file(item, reader_name)
-                    for item in shape.survey_files(ev, cp, freq_ids, ctx)]
-            candidate_names = [name for name, _fields in cand]
-            if len(candidate_names) != len(set(candidate_names)):
-                raise SystemExit(
-                    f"reader {reader_name!r} yielded duplicate archive names "
-                    f"for event {ev!r}")
-
-            def probe(item):
-                name, fields = item
-                size, err = self._cadc_size(
-                    join_uri(cp, name), deadline=deadline)
-                return name, fields, size, err
-
-            records, errored = [], []
-            for name, fields, size, err in pool.map(probe, cand):
-                if err is not None:
-                    errored.append(name)
-                elif size is not None and size >= minimum_bytes:
-                    # Self-describing row: `name` is what enumerate/fetch will
-                    # stage (joined to common_path), and the shape's per-file
-                    # fields land verbatim as columns.
-                    rec = {
-                        "scope": str(scope), "event": str(ev), "name": name,
-                        "size_bytes": int(size),
-                        "common_path": str(cp), "obs_date": obs_date,
-                        "datasets": list(labels),
-                    }
-                    rec.update(fields)
-                    annotate_row(shape, rec, ctx.instrument)
-                    records.append(rec)
-            if errored and len(errored) == len(cand):       # all errored -> outage
-                return "service_down", records, errored, len(cand), obs_date, cp, None
-            return "progress", records, errored, len(cand), obs_date, cp, None
-
-        try:
-            for i, (scope, ev) in enumerate(events, 1):
-                key = f"{scope}|{ev}"
-                if key in surveyed:
-                    continue
-                if max_events is not None and n_new >= int(max_events):
-                    print(f"reached --max-events={max_events}; stopping "
-                          f"(resumable).", flush=True)
-                    break
-
-                # ride out a transient outage on the SAME event; only a sustained
-                # one aborts (the signature of an expired cert, which won't heal).
-                backoff = _INITIAL_SERVICE_BACKOFF
-                outage_started = _monotonic()
-                outage_deadline = outage_started + max(
-                    0.0, float(_MAX_SERVICE_WAIT))
-                attempted = False
-
-                def unavailable(elapsed):
-                    return SurveyUnavailableError(
-                        "Datatrail/CADC remained unreachable for "
-                        f"{elapsed:g}s. "
-                        f"Partial survey state was preserved in {out}. Renew "
-                        "the certificate with `cadc-get-cert -u <user>` (or "
-                        "wait for the service to recover), then rerun the same "
-                        "survey command."
-                    )
-
-                while True:
-                    if attempted:
-                        now = _monotonic()
-                        if now >= outage_deadline:
-                            raise unavailable(max(0.0, now - outage_started))
-                    (status, records, errored, n_cand,
-                     obs_date, cp, refusal) = verify(scope, ev, outage_deadline)
-                    attempted = True
-                    if status != "service_down":
+                for i, (scope, ev) in enumerate(events, 1):
+                    key = f"{scope}|{ev}"
+                    if key in surveyed:
+                        continue
+                    if max_events is not None and n_new >= int(max_events):
+                        print(f"reached --max-events={max_events}; stopping "
+                              f"(resumable).", flush=True)
                         break
-                    now = _monotonic()
-                    elapsed = max(0.0, now - outage_started)
-                    remaining = max(0.0, outage_deadline - now)
-                    if remaining <= 0:
-                        raise unavailable(elapsed)
-                    sleep_for = min(float(backoff), remaining)
-                    print(f"[{i}/{len(events)}] {ev}: service unreachable -- "
-                          f"waiting {sleep_for:g}s "
-                          f"(elapsed {elapsed:g}s)", flush=True)
-                    _sleep(sleep_for)
-                    backoff = min(
-                        backoff * _RETRY_BACKOFF_MULTIPLIER,
-                        _MAX_SERVICE_BACKOFF,
-                    )
 
-                n_new += 1
-                if status == "refused":
-                    # Committed as done (resume skips it) with the reason in
-                    # the accept-as-empty ledger, so the write-off is
-                    # auditable and greppable rather than a silent gap. If the
-                    # named URI turns out to be a legitimate new collection,
-                    # widen _MINOC_COLLECTIONS in datatrail_client.py and re-open
-                    # these rows (DELETE FROM events WHERE status='refused'
-                    # in survey_state.sqlite3) before re-running.
-                    n_refused += 1
-                    ledger = {
-                        "ts": datetime.datetime.now(datetime.timezone.utc)
-                                      .strftime("%Y-%m-%dT%H:%M:%SZ"),
-                        "scope": scope, "event": ev,
-                        "n_expected": 0,
-                        "attempts": attempts.get(key, 0) + 1,
-                        "obs_date": "unknown", "age_days": None,
-                        "common_path": None,
-                        "reason": "datatrail-contract-refusal",
-                        "detail": refusal,
-                    }
-                    print(f"[{i}/{len(events)}] {ev}: datatrail contract "
-                          f"refusal -- recorded and skipped: {refusal}",
-                          flush=True)
-                    mark_done(key, scope, ev, "refused", no_files=ledger)
-                    continue
-                if status == "no_data":
-                    n_no_data += 1
-                    mark_done(key, scope, ev, "no-data")
-                    continue
+                    # ride out a transient outage on the SAME event; only a sustained
+                    # one aborts (the signature of an expired cert, which won't heal).
+                    backoff = _INITIAL_SERVICE_BACKOFF
+                    outage_started = _monotonic()
+                    outage_deadline = outage_started + max(
+                        0.0, float(_MAX_SERVICE_WAIT))
+                    attempted = False
 
-                # `empty` = a common path resolved but every requested freq_id
-                # came back absent/sub-floor: 0 rows AND 0 hard errors. That is
-                # NOT a clean, fully-resolved event and must never be written
-                # out as a silent 0-row "done". Absence here is
-                # already definitive per probe (_cadc_size reports NotFound as
-                # an answer, not an error; outages take the service_down
-                # circuit; hard errors take the INCOMPLETE path), so the only
-                # transient it could mask is archive-side replication lag --
-                # which can only affect a RECENT observation. An empty event
-                # whose obs_date is at least `empty_age_days` old is therefore
-                # accepted on FIRST sighting; a younger or undatable one stays
-                # un-done (retried across resumes) until _MAX_ATTEMPTS. Either
-                # way the acceptance is recorded in no_files_events.jsonl, so a
-                # 0-row event can neither vanish silently nor re-probe forever.
-                empty = not records and not errored
-                sightings = attempts.get(key, 0) + 1    # incl. this run's probe
-                age_days = _obs_age_days(obs_date) if empty else None
-                aged_out = (empty and age_days is not None
-                            and age_days >= empty_age_days)
-                write_recs, done, incomplete = _commit_decision(
-                    len(errored), attempts.get(key, 0), len(records),
-                    empty_max_attempts=(1 if aged_out else None))
-                if write_recs:
-                    n_rows += len(records)
-                if incomplete:
-                    n_incomplete += 1
-                if done:
-                    no_files_record = None
-                    if empty:                  # terminal 0-file event: ledger it
-                        no_files_record = {
+                    def unavailable(elapsed):
+                        return SurveyUnavailableError(
+                            "Datatrail/CADC remained unreachable for "
+                            f"{elapsed:g}s. "
+                            f"Partial survey state was preserved in {out}. Renew "
+                            "the certificate with `cadc-get-cert -u <user>` (or "
+                            "wait for the service to recover), then rerun the same "
+                            "survey command."
+                        )
+
+                    while True:
+                        if attempted:
+                            now = _monotonic()
+                            if now >= outage_deadline:
+                                raise unavailable(max(0.0, now - outage_started))
+                        (status, records, errored, n_cand,
+                         obs_date, cp, refusal, details) = verify(scope, ev, outage_deadline)
+                        attempted = True
+                        if status != "service_down":
+                            break
+                        now = _monotonic()
+                        elapsed = max(0.0, now - outage_started)
+                        remaining = max(0.0, outage_deadline - now)
+                        if remaining <= 0:
+                            raise unavailable(elapsed)
+                        sleep_for = min(float(backoff), remaining)
+                        print(f"[{i}/{len(events)}] {ev}: service unreachable -- "
+                              f"waiting {sleep_for:g}s "
+                              f"(elapsed {elapsed:g}s)", flush=True)
+                        _sleep(sleep_for)
+                        backoff = min(
+                            backoff * _RETRY_BACKOFF_MULTIPLIER,
+                            _MAX_SERVICE_BACKOFF,
+                        )
+
+                    n_new += 1
+                    if status == "refused":
+                        # Committed as done (resume skips it) with the reason in
+                        # the accept-as-empty ledger, so the write-off is
+                        # auditable and greppable rather than a silent gap. If the
+                        # named URI turns out to be a legitimate new collection,
+                        # widen _MINOC_COLLECTIONS in datatrail_client.py and re-open
+                        # these rows (DELETE FROM events WHERE status='refused'
+                        # in survey_state.sqlite3) before re-running.
+                        n_refused += 1
+                        ledger = {
                             "ts": datetime.datetime.now(datetime.timezone.utc)
                                           .strftime("%Y-%m-%dT%H:%M:%SZ"),
                             "scope": scope, "event": ev,
-                            "n_expected": n_cand,
-                            "attempts": sightings,
-                            "obs_date": obs_date,
-                            "age_days": age_days,
-                            "common_path": cp,
-                            "reason": "aged-out" if aged_out else "max-attempts",
+                            "n_expected": 0,
+                            "attempts": attempts.get(key, 0) + 1,
+                            "obs_date": "unknown", "age_days": None,
+                            "common_path": None,
+                            "reason": "datatrail-contract-refusal",
+                            "detail": refusal,
                         }
-                        n_empty_accepted += 1
-                    mark_done(
-                        key, scope, ev,
-                        "empty" if empty else
-                        "incomplete" if incomplete else "complete",
-                        records if write_recs else (),
-                        incomplete=errored if incomplete else None,
-                        no_files=no_files_record,
-                    )
-                else:
-                    bump(key)
-                    if empty:
+                        print(f"[{i}/{len(events)}] {ev}: datatrail contract "
+                              f"refusal -- recorded and skipped: {refusal}",
+                              flush=True)
+                        mark_done(key, scope, ev, "refused", no_files=ledger)
+                        continue
+                    if status == "no_data":
+                        n_no_data += 1
+                        mark_done(key, scope, ev, "no-data")
+                        continue
+                    if n_cand == 0:
+                        mark_done(key, scope, ev, "empty-selection", no_files={
+                            "scope": scope, "event": ev, "n_expected": 0,
+                            "common_path": str(cp), "reason": "no-selected-candidates",
+                            "attempts": attempts.get(key, 0) + 1,
+                            **details,
+                        })
+                        print(f"[{i}/{len(events)}] {ev}: reader selection produced "
+                              "no candidate files; no archive absence inferred", flush=True)
+                        continue
+
+                    # `empty` = a common path resolved but every requested freq_id
+                    # came back absent/sub-floor: 0 rows AND 0 hard errors. That is
+                    # NOT a clean, fully-resolved event and must never be written
+                    # out as a silent 0-row "done". Absence here is
+                    # already definitive per probe (_cadc_size reports NotFound as
+                    # an answer, not an error; outages take the service_down
+                    # circuit; hard errors take the INCOMPLETE path), so the only
+                    # transient it could mask is archive-side replication lag --
+                    # which can only affect a RECENT observation. An empty event
+                    # whose obs_date is at least `empty_age_days` old is therefore
+                    # accepted on FIRST sighting; a younger or undatable one stays
+                    # un-done (retried across resumes) until _MAX_ATTEMPTS. Either
+                    # way the acceptance is recorded in no_files_events.jsonl, so a
+                    # 0-row event can neither vanish silently nor re-probe forever.
+                    empty = not records and not errored
+                    sightings = attempts.get(key, 0) + 1    # incl. this run's probe
+                    if empty and details["collection_restored"] and not details["n_sub_floor"]:
+                        # A guessed prefix with no independently found object is
+                        # not evidence of archive absence, regardless of age or
+                        # repeat count. Keep it resumable and record why.
+                        pending[key] = {
+                            "scope": scope, "event": ev, "common_path": str(cp),
+                            "reason": "unverified-restored-collection",
+                            "attempts": sightings, "n_expected": n_cand, **details,
+                        }
+                        atomic_write_json(pending_path, pending)
+                        bump(key)
                         n_empty_retry += 1
-
-                # surface the empty case too -- otherwise it prints nothing and
-                # the run looks like it did nothing at all (0 events processed
-                # visibly, 0 rows on disk).
-                if (records or errored or empty
-                        or i % _EVENT_PROGRESS_INTERVAL == 0):
-                    if empty and done:
-                        why = (f"obs {obs_date}, {age_days}d old" if aged_out
-                               else f"attempt {sightings}/{_MAX_ATTEMPTS}")
-                        tag = (f" -- not in CADC storage; accepting as empty "
-                               f"({why})")
-                    elif empty:
-                        tag = (f" -- not in CADC storage; re-checking in case "
-                               f"transient ({sightings}/{_MAX_ATTEMPTS})")
+                        print(f"[{i}/{len(events)}] {ev}: restored collection "
+                              "has no verified object; remains pending", flush=True)
+                        continue
+                    age_days = _obs_age_days(obs_date) if empty else None
+                    aged_out = (empty and age_days is not None
+                                and age_days >= empty_age_days)
+                    write_recs, done, incomplete = _commit_decision(
+                        len(errored), attempts.get(key, 0), len(records),
+                        empty_max_attempts=(1 if aged_out else None))
+                    if write_recs:
+                        n_rows += len(records)
+                    if incomplete:
+                        n_incomplete += 1
+                    if done:
+                        no_files_record = None
+                        if empty:                  # terminal 0-file event: ledger it
+                            no_files_record = {
+                                "ts": datetime.datetime.now(datetime.timezone.utc)
+                                              .strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                "scope": scope, "event": ev,
+                                "n_expected": n_cand,
+                                "attempts": sightings,
+                                "obs_date": obs_date,
+                                "age_days": age_days,
+                                "common_path": cp,
+                                "reason": "below-reader-floor" if details["n_sub_floor"]
+                                          else "aged-out" if aged_out else "max-attempts",
+                                **details,
+                            }
+                            n_empty_accepted += 1
+                        mark_done(
+                            key, scope, ev,
+                            "empty" if empty else
+                            "incomplete" if incomplete else "complete",
+                            records if write_recs else (),
+                            incomplete=errored if incomplete else None,
+                            no_files=no_files_record,
+                        )
                     else:
-                        tag = (f" INCOMPLETE({len(errored)})" if incomplete
-                               else f" ({len(errored)} unresolved, retry)"
-                               if errored else "")
-                    print(f"[{i}/{len(events)}] {ev}: "
-                          f"{len(records)}/{n_cand} files{tag}", flush=True)
-        finally:
-            # Cancel work that has not started and join active probes before
-            # releasing the output lock or returning an error. Supported CADC
-            # calls carry finite per-request timeouts (and the outage deadline),
-            # so shutdown is bounded by the remaining in-flight requests.
-            pool.shutdown(wait=True, cancel_futures=True)
-            atomic_write_json(attempts_path, attempts)
-            try:
-                store.render_views(out)
-            finally:
-                try:
-                    status_counts = store.status_counts()
-                    current_event_keys = {
-                        f"{scope}|{event}" for scope, event in events
-                    }
-                    self._last_survey_completeness = {
-                        "incomplete": status_counts.get("incomplete", 0),
-                        "refused": status_counts.get("refused", 0),
-                        "pending": len(current_event_keys - surveyed),
-                    }
-                finally:
-                    store.close()
+                        bump(key)
+                        if empty:
+                            n_empty_retry += 1
 
-        # Row-level accounting: the final word on the run, so an empty
-        # inventory can never hide behind "survey wrote <path>" while 0 rows
-        # landed.
-        total_rows = (sum(1 for ln in open(inv_path) if ln.strip())
-                      if inv_path.exists() else 0)
-        print(f"\nsurvey: {n_new} events this run -- {n_rows} rows written, "
-              f"{n_no_data} no-data, {n_empty_accepted} accepted-empty, "
-              f"{n_empty_retry} resolved-but-empty (retry next run), "
-              f"{n_incomplete} incomplete, {n_refused} contract-refused",
-              flush=True)
-        if n_empty_accepted or n_refused:
-            print(f"accepted-empty ledger: {no_files_path}", flush=True)
-        if n_refused:
-            print("contract refusals name the offending replica URI in the "
-                  "ledger; if it is a legitimate new collection, widen "
-                  "_MINOC_COLLECTIONS in pilot_proxy.archive.datatrail_client "
-                  "re-open refused rows before re-running.", flush=True)
-        if total_rows == 0:
-            print(
-                "[warn] inventory.jsonl is EMPTY (0 rows). Every surveyed event "
-                "resolved to zero retrievable files, so nothing was written -- "
-                "usually the environment, not the survey. Sanity-check one event: "
-                "`datatrail ps <scope> <event> -s` (is a 'Common Path:' line "
-                "printed?), then `cadcinfo --cert ~/.ssl/cadcproxy.pem <cadc-uri>` "
-                "for one freq_id (NotFound = the bytes aged off storage, or a size "
-                f"under this reader's {minimum_bytes}-byte floor; pass the cert or "
-                "the CLI runs anonymously and "
-                "reports a misleading 'Unauthorized'). The lowest event IDs are the "
-                "likeliest to have aged out of the archive, so a larger "
-                "--max-events often starts filling the inventory.", flush=True)
-        print(f"survey wrote {inv_path}", flush=True)
-        return str(inv_path)
+                    # surface the empty case too -- otherwise it prints nothing and
+                    # the run looks like it did nothing at all (0 events processed
+                    # visibly, 0 rows on disk).
+                    if (records or errored or empty
+                            or i % _EVENT_PROGRESS_INTERVAL == 0):
+                        if empty and done:
+                            why = (f"obs {obs_date}, {age_days}d old" if aged_out
+                                   else f"attempt {sightings}/{_MAX_ATTEMPTS}")
+                            cause = ("objects below reader byte floor" if details["n_sub_floor"]
+                                     else "not in CADC storage")
+                            tag = (f" -- {cause}; accepting as empty "
+                                   f"({why})")
+                        elif empty:
+                            cause = ("objects below reader byte floor" if details["n_sub_floor"]
+                                     else "not in CADC storage")
+                            tag = (f" -- {cause}; re-checking in case "
+                                   f"transient ({sightings}/{_MAX_ATTEMPTS})")
+                        else:
+                            tag = (f" INCOMPLETE({len(errored)})" if incomplete
+                                   else f" ({len(errored)} unresolved, retry)"
+                                   if errored else "")
+                        print(f"[{i}/{len(events)}] {ev}: "
+                              f"{len(records)}/{n_cand} files{tag}", flush=True)
+            finally:
+                # Cancel work that has not started and join active probes before
+                # releasing the output lock or returning an error. Supported CADC
+                # calls carry finite per-request timeouts (and the outage deadline),
+                # so shutdown is bounded by the remaining in-flight requests.
+                pool.shutdown(wait=True, cancel_futures=True)
+                atomic_write_json(attempts_path, attempts)
+                try:
+                    store.render_views(out)
+                    execution.views_current()
+                finally:
+                    try:
+                        status_counts = store.status_counts()
+                        current_event_keys = {
+                            f"{scope}|{event}" for scope, event in events
+                        }
+                        self._last_survey_completeness = {
+                            "incomplete": (status_counts.get("incomplete", 0)
+                                           + status_counts.get("empty-selection", 0)),
+                            "refused": status_counts.get("refused", 0),
+                            "pending": len(current_event_keys - surveyed),
+                        }
+                        execution.record["completeness"] = dict(self._last_survey_completeness)
+                    finally:
+                        store.close()
+
+            # Row-level accounting: the final word on the run, so an empty
+            # inventory can never hide behind "survey wrote <path>" while 0 rows
+            # landed.
+            total_rows = (sum(1 for ln in open(inv_path) if ln.strip())
+                          if inv_path.exists() else 0)
+            print(f"\nsurvey: {n_new} events this run -- {n_rows} rows written, "
+                  f"{n_no_data} no-data, {n_empty_accepted} accepted-empty, "
+                  f"{n_empty_retry} resolved-but-empty (retry next run), "
+                  f"{n_incomplete} incomplete, {n_refused} contract-refused",
+                  flush=True)
+            if n_empty_accepted or n_refused:
+                print(f"accepted-empty ledger: {no_files_path}", flush=True)
+            if n_refused:
+                print("contract refusals name the offending replica URI in the "
+                      "ledger; if it is a legitimate new collection, widen "
+                      "_MINOC_COLLECTIONS in pilot_proxy.archive.datatrail_client "
+                      "re-open refused rows before re-running.", flush=True)
+            if total_rows == 0:
+                print(
+                    "[warn] inventory.jsonl is EMPTY (0 rows). Every surveyed event "
+                    "resolved to zero retrievable files, so nothing was written -- "
+                    "usually the environment, not the survey. Sanity-check one event: "
+                    "`datatrail ps <scope> <event> -s` (is a 'Common Path:' line "
+                    "printed?), then `cadcinfo --cert ~/.ssl/cadcproxy.pem <cadc-uri>` "
+                    "for one freq_id (NotFound = the bytes aged off storage, or a size "
+                    f"under this reader's {minimum_bytes}-byte floor; pass the cert or "
+                    "the CLI runs anonymously and "
+                    "reports a misleading 'Unauthorized'). The lowest event IDs are the "
+                    "likeliest to have aged out of the archive, so a larger "
+                    "--max-events often starts filling the inventory.", flush=True)
+            print(f"survey wrote {inv_path}", flush=True)
+            return str(inv_path)
 
     # -- doctor --------------------------------------------------------------
     def fetch_preflight(self, ctx: RunContext) -> tuple[bool, list[str], list[str]]:

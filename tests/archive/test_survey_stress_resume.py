@@ -299,21 +299,20 @@ def test_a_killed_run_leaves_a_truthful_looking_but_stale_inventory(
     assert len(_lines(tmp_path / "surveyed_events.txt")) == 4
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "INVARIANT NOT YET HELD: nothing on disk distinguishes a killed survey "
-    "directory from a finished one, so inventory.jsonl can be stale by up to "
-    "VIEW_FLUSH_INTERVAL-1 events with no warning. Fix: write a dirty marker "
-    "at the start of phase 2 and remove it after the final render."))
-def test_a_killed_directory_announces_that_its_views_are_stale(monkeypatch,
-                                                               tmp_path):
+def test_active_commits_mark_views_stale_until_final_render(monkeypatch, tmp_path):
+    from pilot_proxy.archive.survey_state import SurveyStore, STALE_VIEWS_MARKER
     _install_cli(monkeypatch)
     _install_archive(monkeypatch)
     _install_enumeration(monkeypatch, EVENTS[:2])
+    original = SurveyStore.commit
+    observed = []
+    def commit(store, *args, **kwargs):
+        observed.append((tmp_path / STALE_VIEWS_MARKER).exists())
+        return original(store, *args, **kwargs)
+    monkeypatch.setattr(SurveyStore, "commit", commit)
     _survey(tmp_path)
-    finished = {p.name for p in tmp_path.iterdir()}
-    (tmp_path / "inventory.jsonl").write_text("")     # simulate the kill
-    killed = {p.name for p in tmp_path.iterdir()}
-    assert killed != finished
+    assert observed == [True, True]
+    assert not (tmp_path / STALE_VIEWS_MARKER).exists()
 
 
 def test_deleting_the_views_never_loses_a_row(monkeypatch, tmp_path):
@@ -444,8 +443,8 @@ def test_a_live_holder_refuses_a_second_survey_and_changes_no_state(
     _install_archive(monkeypatch)
     _install_enumeration(monkeypatch, EVENTS[:2])
     _survey(tmp_path)
-    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()
-              if p.name != ".survey.lock"}
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*")
+              if p.is_file() and p.name != ".survey.lock"}
 
     probed = _install_archive(monkeypatch)
     with SurveyOutputLock(tmp_path):
@@ -455,8 +454,8 @@ def test_a_live_holder_refuses_a_second_survey_and_changes_no_state(
     assert "already in use by another active survey" in message
     assert "choose a different --name/output directory" in message
     assert probed == []
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()
-            if p.name != ".survey.lock"} == before
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*")
+            if p.is_file() and p.name != ".survey.lock"} == before
 
 
 def test_the_lock_file_is_not_treated_as_legacy_survey_state(tmp_path):

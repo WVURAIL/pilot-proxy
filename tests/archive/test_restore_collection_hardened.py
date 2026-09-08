@@ -178,21 +178,20 @@ def test_v2_accepts_every_spelling_of_the_same_replica_set(
 
 def test_v2_refuses_a_non_canonical_bare_path(monkeypatch):
     bad = ["data/../../etc/passwd", "data/../../etc/shadow"]
-    assert _resolve(monkeypatch, {"minoc": bad})[0] == "OK"      # shipped: accepts
+    assert _resolve(monkeypatch, {"minoc": bad})[0] == "REFUSED"  # shared canonical-path guard
     r = _resolve(monkeypatch, {"minoc": bad}, restore=_restore_collection_v2)
     assert r[0] == "REFUSED", r
 
 
 def test_v2_refuses_to_guess_when_more_than_one_collection_is_configured(
         monkeypatch):
-    """The shipped version stamps _MINOC_DEFAULT_COLLECTION regardless, which
-    makes the 'spans multiple collections' check blind to bare replicas."""
+    """The current implementation and proposed spelling extension both refuse ambiguity."""
     monkeypatch.setattr(dt, "_MINOC_COLLECTIONS",
                         ("cadc:CHIMEFRB/", "cadc:CHIMEOUTRIGGER/"))
     uris = ["data/kko/baseband/raw/2023/08/01/a/b_0.h5",
             "data/kko/baseband/raw/2023/08/01/a/b_1.h5"]
     shipped = _resolve(monkeypatch, {"minoc": uris})
-    assert shipped[0] == "OK" and shipped[1].startswith("cadc:CHIMEFRB/")
+    assert shipped[0] == "REFUSED"
     v2 = _resolve(monkeypatch, {"minoc": uris}, restore=_restore_collection_v2)
     assert v2[0] == "REFUSED", v2
 

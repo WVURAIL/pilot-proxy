@@ -12,6 +12,7 @@ from pathlib import Path
 
 from . import invpaths
 from .names import validate_identifier
+from .survey_provenance import inventory_identity, runtime_provenance
 
 
 INVENTORY_META_SCHEMA_KEY = "datatrawl_inventory"
@@ -126,7 +127,15 @@ def write_inventory_meta(
         "scope_request": scope_request or None,
         "freq_ids": freq_ids,
         "created": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+        **runtime_provenance(),
+        **inventory_identity(inventory_path),
     }
+    # Writing a sidecar for an older inventory must not invent its producer.
+    runs = sorted((inventory_path.parent / "survey_runs").glob("*.json"))
+    payload["provenance_basis"] = (
+        "survey execution records; top-level software identifies this metadata writer"
+        if runs else "metadata writer only; original survey execution unavailable")
+    payload["survey_runs"] = [str(p.relative_to(inventory_path.parent)) for p in runs]
     meta_path = inventory_meta_path(inventory_path)
     meta_path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(

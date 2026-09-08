@@ -317,11 +317,11 @@ _PS_SHAPES = [
      ("refuse", "outside the expected collection(s) ['cadc:CHIMEFRB/'] "
                 "(1/1 replicas affected)")),
     ("collection-root-only", _minoc(["cadc:CHIMEFRB/"]),
-     ("refuse", "no usable common directory/name split")),
+     ("refuse", "not a canonical path")),
     ("bare-root-only", _minoc(["data/"]),
-     ("refuse", "no usable common directory/name split")),
+     ("refuse", "not a canonical path")),
     ("directory-only", _minoc([f"{_B}/"]),
-     ("refuse", "no usable common directory/name split")),
+     ("refuse", "not a canonical path")),
     # -- no-data ANSWERS: queried fine, this dataset has no minoc files ----
     ("files-null", None, ("nodata",)),
     ("files-empty-dict", {}, ("nodata",)),
@@ -386,41 +386,26 @@ def test_a_deterministic_refusal_spawns_exactly_one_child(monkeypatch):
     assert len(calls) == 1, calls
 
 
-def test_the_span_check_counts_votes_after_restoration(monkeypatch):
-    # KNOWN DEFECT, pinned as a characterization. cadc.py:727-731 tells the
-    # operator to widen _MINOC_COLLECTIONS when a refusal names a legitimate
-    # new collection. Doing that leaves _restore_collection stamping the
-    # hard-coded _MINOC_DEFAULT_COLLECTION (datatrail_client.py:153), and the
-    # span check at :416-418 counts prefixes AFTER restoration -- so an
-    # all-bare replica set of the SECOND collection passes as single-collection
-    # with the WRONG prefix.
+def test_ambiguous_bare_and_mixed_replies_are_refused(monkeypatch):
+    # A bare reply cannot identify a collection when two are configured.
     monkeypatch.setattr(dt, "_MINOC_COLLECTIONS",
                         ("cadc:CHIMEFRB/", "cadc:CHIMEOUTRIGGER/"))
     bare = ["data/kko/baseband/raw/2025/01/01/a/b_0.h5",
             "data/kko/baseband/raw/2025/01/01/a/b_1.h5"]
     _install_fake_cli(monkeypatch,
                       lambda args: (0, _ps_payload(_minoc(bare)), ""))
-    cp, names, ok = dt.Datatrail().files(SCOPE, EVENT, retries=0)
-    assert ok and names == ["b_0.h5", "b_1.h5"]
-    assert cp == "cadc:CHIMEFRB/data/kko/baseband/raw/2025/01/01/a"
+    with pytest.raises(DatatrailContractError, match="outside the expected collection"):
+        dt.Datatrail().files(SCOPE, EVENT, retries=0)
 
-    # ... while a genuinely MIXED reply is still caught, because the prefixed
-    # half votes for its own collection.
+    # A prefixed member cannot establish the identity of a bare member.
     mixed = ["cadc:CHIMEOUTRIGGER/data/kko/x/b_0.h5", "data/kko/x/b_1.h5"]
     _install_fake_cli(monkeypatch,
                       lambda args: (0, _ps_payload(_minoc(mixed)), ""))
     with pytest.raises(DatatrailContractError) as excinfo:
         dt.Datatrail().files(SCOPE, EVENT, retries=0)
-    assert "span multiple collections" in str(excinfo.value)
+    assert "outside the expected collection" in str(excinfo.value)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "INVARIANT NOT YET HELD: restoration must refuse to guess a collection "
-    "when more than one is configured. Today _restore_collection stamps the "
-    "hard-coded _MINOC_DEFAULT_COLLECTION regardless -- see "
-    "test_the_span_check_counts_votes_after_restoration. Fix: derive the "
-    "prefix from _MINOC_COLLECTIONS[0] and return the URI unchanged when "
-    "len(_MINOC_COLLECTIONS) != 1, so the caller refuses it."))
 def test_restoration_refuses_to_guess_between_two_collections(monkeypatch):
     monkeypatch.setattr(dt, "_MINOC_COLLECTIONS",
                         ("cadc:CHIMEFRB/", "cadc:CHIMEOUTRIGGER/"))
@@ -548,7 +533,8 @@ def test_enumeration_aborts_when_a_scope_cannot_be_listed(monkeypatch, tmp_path)
     assert "could not list datasets under scope" in str(excinfo.value)
     assert not (tmp_path / "enum_cache.json").exists()
     assert sorted(p.name for p in tmp_path.iterdir()) == [
-        ".survey.lock", "survey_manifest.json"]
+        ".survey.lock", ".survey.views-stale", "survey_manifest.json", "survey_runs"]
+    assert json.loads((tmp_path / "survey_manifest.json").read_text())["latest_run"]["status"] == "failed"
 
 
 def test_enumeration_aborts_mid_walk_without_a_partial_cache(monkeypatch,
@@ -658,14 +644,9 @@ def test_a_valid_but_empty_listing_is_not_an_outage(monkeypatch, tmp_path):
     ("sub-floor", MINIMUM_ARCHIVE_BYTES - 1),
     ("zero-byte", 0),
 ])
-def test_absent_and_present_but_unusable_bytes_are_ledgered_identically(
+def test_absent_and_present_but_unusable_bytes_have_explicit_reasons(
         monkeypatch, tmp_path, case, size):
-    # CHARACTERIZATION of a real hazard. cadc.py:653 drops any file below the
-    # reader's floor into NEITHER records nor errored, so `empty` is true and
-    # an old observation is written off on FIRST sighting -- with a ledger row
-    # byte-identical (modulo ts) to a genuinely absent event. A truncated
-    # archive object and an aged-off one are indistinguishable in the audit
-    # trail. See the strict-xfail below for the invariant that should hold.
+    # Byte-presence and reader eligibility are separate observations.
     cp = f"cadc:CHIMEFRB/{_event_dir(days_ago=400)}"
     _install_fake_cli(monkeypatch, lambda args: (0, _ps_payload(_minoc(
         [f"{cp}/{baseband_filename(EVENT, f)}" for f in FREQ_IDS])), ""))
@@ -687,16 +668,15 @@ def test_absent_and_present_but_unusable_bytes_are_ledgered_identically(
     assert row == {
         "scope": SCOPE, "event": EVENT, "n_expected": 2, "attempts": 1,
         "obs_date": obs, "age_days": 400, "common_path": cp,
-        "reason": "aged-out",
+        "reason": "aged-out" if size is None else "below-reader-floor",
+        "collection_restored": False, "minimum_archive_bytes": MINIMUM_ARCHIVE_BYTES,
+        "n_absent": 2 if size is None else 0,
+        "n_sub_floor": 0 if size is None else 2,
+        "sub_floor_files": [] if size is None else [
+            {"name": baseband_filename(EVENT, f), "size_bytes": size} for f in FREQ_IDS],
     }
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "INVARIANT NOT YET HELD: the accept-as-empty ledger must distinguish "
-    "'absent from CADC' from 'present but below the reader's byte floor'. "
-    "cadc.py:653 silently discards sub-floor files, so a truncated archive "
-    "object is written off with reason 'aged-out' exactly like an aged-off "
-    "one. Fix: carry a sub-floor count into the no_files ledger record."))
 def test_a_sub_floor_file_is_ledgered_differently_from_an_absent_one(
         monkeypatch, tmp_path):
     cp = f"cadc:CHIMEFRB/{_event_dir(days_ago=400)}"
@@ -805,14 +785,9 @@ def test_an_undatable_common_path_fails_open_into_the_retry_path(monkeypatch,
     assert "re-checking in case transient (1/3)" in text
 
 
-def test_a_restored_uri_that_does_not_resolve_is_written_off_not_refused(
+def test_unverified_restoration_remains_pending_across_retries(
         monkeypatch, tmp_path):
-    # The patch's load-bearing risk, measured both ways. _restore_collection
-    # stamps cadc:CHIMEFRB/ onto ANY "data/"-rooted string and nothing ever
-    # verifies the result resolves; _cadc_size reports the non-existent object
-    # as a DEFINITIVE ABSENCE (cadc.py:473-474). A mis-restored URI on an old
-    # observation therefore becomes a terminal, quiet write-off instead of a
-    # loud, re-openable refusal that names the offending URI.
+    # Failed resolution of a reconstructed collection remains resumable.
     bare = [f"{_event_dir(days_ago=400)}/{baseband_filename(EVENT, f)}"
             for f in FREQ_IDS]
     _install_fake_cli(monkeypatch, lambda args: (0, _ps_payload(_minoc(bare)), ""))
@@ -822,9 +797,13 @@ def test_a_restored_uri_that_does_not_resolve_is_written_off_not_refused(
 
     _survey(tmp_path / "patched")
     patched = _state(tmp_path / "patched")
-    assert patched.statuses == {f"{SCOPE}|{EVENT}": "empty"}
-    assert patched.ledger[0]["reason"] == "aged-out"
-    assert patched.ledger[0]["attempts"] == 1        # terminal on FIRST sighting
+    assert patched.statuses == {}
+    assert patched.ledger == []
+    for _ in range(4):
+        _survey(tmp_path / "patched")
+    assert _state(tmp_path / "patched").statuses == {}
+    pending = json.loads((tmp_path / "patched" / "pending_events.json").read_text())
+    assert pending[f"{SCOPE}|{EVENT}"]["reason"] == "unverified-restored-collection"
 
     # the same reply with restoration reverted: a refusal that names the URI.
     monkeypatch.setattr(dt, "_restore_collection", lambda uri: uri)
@@ -835,13 +814,6 @@ def test_a_restored_uri_that_does_not_resolve_is_written_off_not_refused(
     assert bare[0] in reverted.ledger[0]["detail"]
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "INVARIANT NOT YET HELD: a restored collection prefix is a GUESS, and a "
-    "guess that resolves to nothing must not be terminal on first sighting. "
-    "Today it is written off as 'aged-out', indistinguishable from bytes that "
-    "aged off storage. Fix: confirm at least one restored URI resolves per "
-    "run, or record `restored_collection: true` so the write-off is "
-    "re-openable."))
 def test_a_restored_uri_that_resolves_to_nothing_is_not_terminal(monkeypatch,
                                                                  tmp_path):
     bare = [f"{_event_dir(days_ago=400)}/{baseband_filename(EVENT, f)}"
@@ -854,10 +826,9 @@ def test_a_restored_uri_that_resolves_to_nothing_is_not_terminal(monkeypatch,
     assert _state(tmp_path).statuses == {}
 
 
-def test_a_restored_bare_reply_produces_the_same_rows_as_a_prefixed_one(
+def test_restored_and_prefixed_rows_share_identity_but_record_origin(
         monkeypatch, tmp_path):
-    # The patch's BENEFIT, end to end: identical rows, identical common_path,
-    # identical probed URIs whichever form datatrail happens to emit.
+    # URI identity and verified bytes agree while restoration remains auditable.
     day = _day_dir(400)
     event_dir = f"{day}/astro_{EVENT}"
     names = [baseband_filename(EVENT, f) for f in FREQ_IDS]
@@ -875,7 +846,11 @@ def test_a_restored_bare_reply_produces_the_same_rows_as_a_prefixed_one(
     prefixed, probed_a = run("prefixed",
                              [f"cadc:CHIMEFRB/{event_dir}/{n}" for n in names])
     bare, probed_b = run("bare", [f"{event_dir}/{n}" for n in names])
-    assert prefixed.rows == bare.rows != []
+    assert prefixed.rows and bare.rows
+    assert all(not r["collection_restored"] for r in prefixed.rows)
+    assert all(r["collection_restored"] for r in bare.rows)
+    assert [{k: v for k, v in r.items() if k != "collection_restored"} for r in prefixed.rows] == [
+        {k: v for k, v in r.items() if k != "collection_restored"} for r in bare.rows]
     assert {r["common_path"] for r in bare.rows} == {f"cadc:CHIMEFRB/{event_dir}"}
     assert sorted(probed_a) == sorted(probed_b) == sorted(present)
     assert bare.statuses == {f"{SCOPE}|{EVENT}": "complete"}

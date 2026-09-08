@@ -288,8 +288,8 @@ def test_a_second_survey_in_one_directory_is_refused_not_interleaved(
     _install_archive(monkeypatch, probes)
     _install_enumeration(monkeypatch)
     _survey(tmp_path, workers=2)
-    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()
-              if p.name != ".survey.lock"}
+    before = {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*")
+              if p.is_file() and p.name != ".survey.lock"}
     n_probes = len(probes.records)
 
     with SurveyOutputLock(tmp_path):
@@ -299,8 +299,8 @@ def test_a_second_survey_in_one_directory_is_refused_not_interleaved(
     assert str(tmp_path.resolve()) in str(excinfo.value)
     assert len(probes.records) == n_probes          # nothing was probed
     # ... and nothing on disk moved, except the diagnostic lock file itself.
-    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()
-            if p.name != ".survey.lock"} == before
+    assert {str(p.relative_to(tmp_path)): p.read_bytes() for p in tmp_path.rglob("*")
+            if p.is_file() and p.name != ".survey.lock"} == before
 
 
 def test_the_lock_covers_enumeration_and_every_commit(monkeypatch, tmp_path):

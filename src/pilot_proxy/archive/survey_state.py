@@ -19,14 +19,18 @@ import json
 import os
 import sqlite3
 import threading
+import datetime
+import uuid
 from collections.abc import Mapping
 from functools import wraps
 from pathlib import Path
+from .survey_provenance import inventory_identity, runtime_provenance
 
 
 MANIFEST_SCHEMA = 1
 DATABASE_SCHEMA = 1
 VIEW_FLUSH_INTERVAL = 100
+STALE_VIEWS_MARKER = ".survey.views-stale"
 
 _OPERATIONAL_OPTIONS = frozenset({
     "workers", "max_events", "re_enumerate", "name", "root", "inventory",
@@ -38,6 +42,7 @@ _STATE_NAMES = frozenset({
     "incomplete_events.txt", "no_files_events.jsonl", "enum_cache.json",
     "survey_state.sqlite3", "survey_state.sqlite3-wal",
     "survey_state.sqlite3-shm",
+    STALE_VIEWS_MARKER, "survey_runs",
 })
 _TABLE_COLUMNS = {
     "metadata": ("key", "value"),
@@ -153,6 +158,60 @@ def atomic_write_lines(path: Path, lines) -> None:
 def atomic_write_json(path: Path, value) -> None:
     atomic_write_lines(
         path, (json.dumps(value, sort_keys=True, separators=(",", ":")),))
+
+
+class SurveyRun:
+    """Record each execution separately from its stable resume configuration.
+
+    The marker survives SIGKILL. It is cleared only after all database views
+    have been refreshed; an ordinary exception alone cannot certify freshness.
+    Callers must hold SurveyOutputLock and validate the manifest first.
+    """
+    def __init__(self, out):
+        self.out = Path(out)
+        self.marker = self.out / STALE_VIEWS_MARKER
+        self.record = {"run_id": uuid.uuid4().hex, "status": "running",
+                       "started": self.now(), "finished": None,
+                       "views_current": False, **runtime_provenance()}
+        self.path = self.out / "survey_runs" / (self.record["run_id"] + ".json")
+
+    @staticmethod
+    def now():
+        return datetime.datetime.now(datetime.timezone.utc).isoformat()
+
+    def publish(self):
+        atomic_write_json(self.path, self.record)
+        manifest_path = self.out / "survey_manifest.json"
+        manifest = _read_json(manifest_path)
+        if not isinstance(manifest, dict):
+            raise RuntimeError("survey manifest disappeared during execution")
+        manifest["latest_run"] = dict(self.record)
+        atomic_write_json(manifest_path, manifest)
+
+    def __enter__(self):
+        atomic_write_json(self.marker, {
+            "run_id": self.record["run_id"], "started": self.record["started"],
+            "reason": "survey views may lag SQLite; resume the same survey to refresh"})
+        self.publish()
+        return self
+
+    def views_current(self):
+        self.marker.unlink(missing_ok=True)
+        self.record["views_current"] = True
+
+    def __exit__(self, kind, error, traceback):
+        self.record.update(
+            finished=self.now(),
+            status="finished" if kind is None else
+                   "interrupted" if issubclass(kind, KeyboardInterrupt) else "failed",
+            **inventory_identity(self.out / "inventory.jsonl"))
+        if kind is not None:
+            self.record["error_type"] = kind.__name__
+        self.publish()
+        if kind is not None and issubclass(kind, KeyboardInterrupt):
+            print(f"Survey interrupted; committed state was preserved in {self.out}. "
+                  "Rerun the same survey command to resume.", flush=True)
+        return False
 
 
 def _manifest_value(value):

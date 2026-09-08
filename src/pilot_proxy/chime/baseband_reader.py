@@ -14,6 +14,7 @@ from typing import Iterable, Iterator, Mapping
 
 from pilot_proxy.archive.interfaces import (Reader, RunContext, PluginInfo, READY,
                                             STREAM_COMPLEX_BASEBAND)
+from pilot_proxy.archive.names import baseband_filename
 from . import baseband_format as fmt
 from .unreadable import unreadable_file
 
@@ -23,13 +24,6 @@ from .unreadable import unreadable_file
 # belongs to this format, not to the generic CADC source: other readers may
 # legitimately describe much smaller products.
 MINIMUM_ARCHIVE_BYTES = 1 << 20
-
-
-def baseband_filename(event, freq_id) -> str:
-    """The archive filename of one baseband unit. THE naming definition --
-    survey delegates here through survey_files and stores the result in each
-    inventory row, so enumeration never reconstructs historical names."""
-    return f"baseband_{event}_{freq_id}.h5"
 
 
 class ChimeBasebandReader(Reader):

@@ -275,21 +275,19 @@ def test_resume_after_sigint_has_no_duplicates_and_no_re_probes(tmp_path):
 
 
 def test_an_interrupted_run_reports_the_interruption(tmp_path):
-    """A bare KeyboardInterrupt traceback is not an operator-grade exit.
-
-    An interrupted survey should say that state was preserved and that the
-    same command resumes it. Today it does not; this xfail flips to a failure
-    the moment it does, so the message can never regress unnoticed.
-    """
     out = tmp_path / "inv"
     evs = events(4)
+    buffer = io.StringIO()
     with fake_archive(evs, cp_hook=interrupt_before_event(evs[2])):
-        with pytest.raises(KeyboardInterrupt):
-            survey(out, workers=2)
-    assert len(db_state(out)["status"]) == 2       # state WAS preserved ...
-    pytest.xfail("... but survey() re-raises a bare KeyboardInterrupt with no "
-                 "message saying so and no instruction to rerun to resume")
-
+        with contextlib.redirect_stdout(buffer), pytest.raises(KeyboardInterrupt):
+            C.CadcDatatrailSource().survey(RunContext(
+                instrument=None, selection=None,
+                options={"workers": 2, "freq_ids": list(FIDS)}), str(out))
+    assert len(db_state(out)["status"]) == 2
+    assert "committed state was preserved" in buffer.getvalue()
+    assert "Rerun the same survey command" in buffer.getvalue()
+    run = json.loads((out / "survey_manifest.json").read_text())["latest_run"]
+    assert run["status"] == "interrupted" and run["views_current"]
 
 # ============================================================ 2. SIGKILL ====
 KILL_CHILD = '''
@@ -498,14 +496,16 @@ def test_a_kill_between_commit_and_checkpoint_leaves_no_stale_attempt_count(
     assert json.loads((out / "attempts.json").read_text()) == {}
 
 
-def test_a_killed_run_leaves_no_marker_that_the_views_are_stale(tmp_path):
-    """Nothing on disk distinguishes a killed run's directory from a finished
-    one. An operator who reads inventory.jsonl gets a silent undercount."""
+def test_a_killed_run_marks_views_stale_until_resume(tmp_path):
     out = _kill_at(tmp_path, "post-commit", target=4)
     assert len(db_state(out)["status"]) == 4
     assert views(out)["inventory.jsonl"] == []
-    pytest.xfail("no dirty marker distinguishes stale views from finished ones")
-
+    assert (out / ".survey.views-stale").is_file()
+    with fake_archive(events(10)):
+        survey(out, workers=2)
+    assert not (out / ".survey.views-stale").exists()
+    assert len(views(out)["inventory.jsonl"]) == 10 * len(FIDS)
+    assert db_state(out)["integrity"] == "ok"
 
 # ========================================================= 3. STALE LOCK ====
 def test_a_stale_lock_file_does_not_strand_the_directory(tmp_path):
@@ -997,17 +997,9 @@ def test_a_1024_replica_event_is_all_or_nothing_under_sigint(tmp_path):
     assert len(views(out)["inventory.jsonl"]) == 1024
 
 
-def test_an_event_with_zero_selected_freq_ids_is_written_off_as_empty(
+def test_an_event_with_zero_selected_freq_ids_has_selection_status(
         tmp_path):
-    """Characterisation of a dangerous edge: an empty freq_id selection yields
-    zero candidates, which the loop cannot distinguish from an archive holding
-    nothing. With an obs_date past --empty-age-days each event is written off
-    on its FIRST sighting and the run reports success.
-
-    _resolve_freq_ids (cadc.py:139-149) returns [] whenever the selection is
-    empty AND the instrument declares no n_channels, so this is reachable from
-    a plain misconfiguration, not only from an explicit empty list.
-    """
+    """No selected files must not imply archive absence."""
     out = tmp_path / "inv"
     with fake_archive(events(3)) as probes:
         log = survey(out, freq_ids=OMIT)
@@ -1015,16 +1007,15 @@ def test_an_event_with_zero_selected_freq_ids_is_written_off_as_empty(
     assert views(out)["inventory.jsonl"] == []
     ledger = [json.loads(line) for line in views(out)["no_files_events.jsonl"]]
     assert len(ledger) == 3
-    assert {entry["reason"] for entry in ledger} == {"aged-out"}
+    assert {entry["reason"] for entry in ledger} == {"no-selected-candidates"}
     assert {entry["n_expected"] for entry in ledger} == {0}
-    assert set(db_state(out)["status"].values()) == {"empty"}
+    assert set(db_state(out)["status"].values()) == {"empty-selection"}
     assert "inventory.jsonl is EMPTY" in log
 
 
-def test_a_zero_candidate_event_is_indistinguishable_from_an_absent_one(
+def test_a_zero_candidate_event_is_distinguished_from_an_absent_one(
         tmp_path):
-    """The two cases above and below differ only in n_expected. Nothing in the
-    survey warns that the SELECTION, not the archive, was empty."""
+    """The ledger records selection and archive absence separately."""
     empty_selection = tmp_path / "selection"
     absent_archive = tmp_path / "absent"
     with fake_archive(events(3)):
@@ -1033,11 +1024,10 @@ def test_a_zero_candidate_event_is_indistinguishable_from_an_absent_one(
         survey(absent_archive, freq_ids=FIDS)
     left = [json.loads(x) for x in views(empty_selection)["no_files_events.jsonl"]]
     right = [json.loads(x) for x in views(absent_archive)["no_files_events.jsonl"]]
-    assert [e["reason"] for e in left] == [e["reason"] for e in right]
+    assert {e["reason"] for e in left} == {"no-selected-candidates"}
+    assert {e["reason"] for e in right} == {"aged-out"}
     assert [e["n_expected"] for e in left] == [0, 0, 0]
     assert [e["n_expected"] for e in right] == [len(FIDS)] * 3
-    pytest.xfail("a zero-candidate selection is not distinguished from an "
-                 "archive with nothing present")
 
 
 def test_an_event_whose_selected_freq_ids_are_all_absent_is_empty_not_clean(
@@ -1125,3 +1115,20 @@ def test_a_terminal_incomplete_event_is_never_re_probed_on_resume(tmp_path):
     assert "resume: 2 events already done" in log
     assert probes.uris == []
     assert (out / "incomplete_events.txt").read_text() == incomplete
+
+
+def test_zero_selection_fails_strict_completeness(tmp_path):
+    source = C.CadcDatatrailSource()
+    with fake_archive(events(3)):
+        source.survey(RunContext(instrument=None, selection=None,
+                                options={"workers": 2}), str(tmp_path))
+    assert source.survey_completeness_issues(str(tmp_path))["incomplete"] == 3
+
+
+def test_enumeration_refuses_inventory_views_marked_stale(tmp_path):
+    path = tmp_path / "inventory.jsonl"
+    path.write_text("")
+    (tmp_path / ".survey.views-stale").write_text("{}")
+    context = RunContext(instrument=None, selection=None, options={"inventory": str(path)})
+    with pytest.raises(SystemExit, match="may be stale"):
+        list(C.CadcDatatrailSource().enumerate(context))

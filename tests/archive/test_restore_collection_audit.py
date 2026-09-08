@@ -127,17 +127,17 @@ def test_narrowness_bare_variants_still_refused(monkeypatch, uri):
     ("data/chime/intensity/raw/2025/01/01/x.h5",
      "cadc:CHIMEFRB/data/chime/intensity/raw/2025/01/01"),
     ("data/../../etc/passwd",
-     "cadc:CHIMEFRB/data/../../etc"),
+     None),
 ])
-def test_broadness_any_data_rooted_string_is_stamped_chimefrb(
+def test_data_root_restoration_requires_a_canonical_path(
         monkeypatch, bare, expect):
-    """The predicate asserts nothing about the archive layout below 'data/':
-    it stamps cadc:CHIMEFRB/ onto ANY string starting with those five bytes,
-    including one that is not a CHIMEFRB artifact and one that is not even a
-    canonical path."""
+    """Restoring a collection never authorizes parent traversal."""
     r = _resolve(monkeypatch, [bare, bare.rsplit("/", 1)[0] + "/other.h5"])
-    assert r[0] == "OK", r
-    assert r[1] == expect, r[1]
+    if expect is None:
+        assert r[0] == "REFUSED" and "canonical path" in r[1]
+    else:
+        assert r[0] == "OK", r
+        assert r[1] == expect, r[1]
 
 
 def test_broadness_pre_patch_refused_the_same_input(monkeypatch):
@@ -156,8 +156,7 @@ def test_triple_slash_survives_the_collapse(monkeypatch):
         "cadc:CHIMEFRB//data/x"
     r = _resolve(monkeypatch, ["cadc:CHIMEFRB///data/chime/a/b_0.h5",
                                "cadc:CHIMEFRB///data/chime/a/b_1.h5"])
-    assert r[0] == "OK", r
-    assert r[1] == "cadc:CHIMEFRB/data/chime/a", r[1]
+    assert r[0] == "REFUSED" and "canonical path" in r[1]
 
 
 def test_doubled_slash_inside_a_bare_path_is_collapsed_then_restored(
@@ -181,29 +180,25 @@ def test_bare_root_only_uri_is_caught_by_the_split_guard(monkeypatch):
     is empty; the no-usable-split guard is what stops it, not the predicate."""
     assert dt._restore_collection("data/") == "cadc:CHIMEFRB/data/"
     r = _resolve(monkeypatch, ["data/"])
-    assert r[0] == "REFUSED" and "no usable common directory/name split" in r[1]
+    assert r[0] == "REFUSED" and "canonical path" in r[1]
 
 
 # =====================================================================
 # 4. THE "spans multiple collections" CHECK
 # =====================================================================
-def test_bare_paths_are_invisible_to_the_span_check(monkeypatch):
-    """The span check runs AFTER restoration, so every restored path votes for
-    cadc:CHIMEFRB/ no matter which collection it really came from. With a
-    second collection in _MINOC_COLLECTIONS the check cannot see a bare
-    replica that belongs to that second collection."""
+def test_bare_paths_with_multiple_collections_are_refused(monkeypatch):
+    """Both bare and mixed replies remain ambiguous with two collections."""
     monkeypatch.setattr(dt, "_MINOC_COLLECTIONS",
                         ("cadc:CHIMEFRB/", "cadc:CHIMEOUTRIGGER/"))
     # both replicas really live in CHIMEOUTRIGGER; both come back bare
     r = _resolve(monkeypatch, ["data/kko/baseband/raw/2025/01/01/a/b_0.h5",
                                "data/kko/baseband/raw/2025/01/01/a/b_1.h5"])
-    assert r[0] == "OK", r
-    assert r[1] == "cadc:CHIMEFRB/data/kko/baseband/raw/2025/01/01/a"  # WRONG
+    assert r[0] == "REFUSED" and "outside the expected collection" in r[1]
     # ...the genuinely mixed case IS still caught, because the prefixed half
     # still votes for its own collection
     r2 = _resolve(monkeypatch, ["cadc:CHIMEOUTRIGGER/data/kko/a/b_0.h5",
                                 "data/chime/a/b_1.h5"])
-    assert r2[0] == "REFUSED" and "span multiple collections" in r2[1], r2
+    assert r2[0] == "REFUSED" and "outside the expected collection" in r2[1], r2
 
 
 # =====================================================================

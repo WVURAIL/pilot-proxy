@@ -87,14 +87,23 @@ def _fake_ps(monkeypatch, uris):
 # 1. The legacy-schema migration story
 #
 # Measured on the real references: the July chime-pilots inventory has no
-# "name" on any of its 161,872 rows, so parse_row rejects 161,872/161,872.
+# "name" on any of its 161,872 rows; the narrow adapter restores it.
 # The July chime-controls inventory does carry "name" and parses 32,614/32,614.
 # ==========================================================================
-def test_parse_row_rejects_every_schema1_pilots_row():
-    """A schema-1 row is refused, and the message names the missing field."""
-    with pytest.raises(SystemExit) as excinfo:
-        parse_row(json.dumps(SCHEMA1_ROW), "inventory.jsonl", 1)
-    assert "missing required field(s) ['name']" in str(excinfo.value)
+def test_parse_row_restores_only_identified_schema1_baseband_rows():
+    parsed = parse_row(json.dumps(SCHEMA1_ROW), "inventory.jsonl", 1)
+    assert parsed["name"] == baseband_filename(SCHEMA1_ROW["event"], 506)
+    assert parsed["inventory_compatibility"] == "chime_baseband_schema1_filename"
+    assert parsed["n_frames_legacy_estimate"] == SCHEMA1_ROW["n_frames"]
+    assert "name" not in SCHEMA1_ROW
+    for change in ({"scope": "other.product"}, {"event": "../escape"},
+                   {"freq_id": True}, {"common_path": "cadc:CHIMEFRB/another_event"}):
+        with pytest.raises(SystemExit, match="missing required"):
+            parse_row(json.dumps(SCHEMA1_ROW | change), "inventory.jsonl", 1)
+    partial = dict(_row("100058001", 506))
+    partial.pop("name")
+    with pytest.raises(SystemExit, match="missing required"):
+        parse_row(json.dumps(partial), "inventory.jsonl", 1)
 
 
 def test_schema1_row_carries_everything_the_upgrade_needs():
@@ -137,12 +146,6 @@ def test_low_estimate_rule_survives_the_n_frames_semantics_change(size):
     assert (size // BYTES_PER_FRAME < 1) == (size / BYTES_PER_FRAME < 1.0)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GAP: README.md:659 and INTEGRATION.md:213 both claim 'Completed "
-    "inventory.jsonl files remain readable.' Measured against the real July "
-    "reference, parse_row rejects 161,872 of 161,872 chime-pilots rows. No "
-    "compatibility shim and no migration command ships. Either the claim or "
-    "the code has to change."))
 def test_completed_legacy_inventory_remains_readable():
     parse_row(json.dumps(SCHEMA1_ROW), "inventory.jsonl", 1)
 
@@ -150,7 +153,7 @@ def test_completed_legacy_inventory_remains_readable():
 @pytest.mark.skipif(not JULY_REFERENCES.is_dir(),
                     reason="July reference inventories not on this host")
 @pytest.mark.parametrize("name,expect_readable", [
-    ("chime-pilots", False),    # schema 1: no "name" column at all
+    ("chime-pilots", True),     # narrow schema-1 filename adapter
     ("chime-controls", True),   # already carries "name"
 ])
 def test_july_reference_readability_is_exactly_as_measured(
@@ -265,14 +268,6 @@ REQUIRED_PROVENANCE = frozenset({
 })
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GAP: inventory.py:118-129 writes only schema/name/telescope/source/"
-    "reader/scope(s)/scope_request/freq_ids/created. None of the toolchain "
-    "identity is recorded, so an inventory cannot be tied to the code, the "
-    "datatrail-cli, or the certificate that produced it. The project already "
-    "records exactly these facts elsewhere -- see the 'software' and "
-    "'certificate_not_after' keys in chime-pilots-v5/pending_resolution.json "
-    "-- so this is an omission in the sidecar, not a missing capability."))
 def test_inventory_meta_records_enough_to_reproduce_the_survey(tmp_path):
     from pilot_proxy.archive.inventory import write_inventory_meta
 
@@ -290,41 +285,26 @@ def test_inventory_meta_records_enough_to_reproduce_the_survey(tmp_path):
         REQUIRED_PROVENANCE - set(meta))
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GAP: survey_manifest.json (survey_state.py:233) records the "
-    "configuration fingerprint -- what was REQUESTED -- but nothing about "
-    "what RAN: no source revision, no datatrail-cli version, no cert "
-    "identity, and no start/end timestamp. Two surveys months apart against a "
-    "drifted archive produce the same fingerprint, so the manifest cannot "
-    "distinguish them."))
-def test_survey_manifest_records_the_toolchain_that_ran():
-    from pilot_proxy.archive.survey_state import build_configuration
-
-    class _Instrument:
-        name = "chime"
-        scopes = ("chime.event.baseband.raw",)
-        f0_mhz = 800.0
-        bandwidth_mhz = 400.0
-        n_channels = 1024
-        descending = True
-        nyquist_zone = 2
-        n_feeds = N_FEEDS
-        nfft = NFFT
-        reader = "chime-baseband"
-
-    class _Ctx:
-        instrument = _Instrument()
-        selection = None
-        options: dict = {}
-
-    class _Shape:
-        survey_schema = 2
-
-    configuration = build_configuration(
-        _Ctx(), ("chime.event.baseband.raw",), [506], _Shape(),
-        False, 30, 1048576, 2)
-    assert REQUIRED_PROVENANCE.issubset(configuration), sorted(
-        REQUIRED_PROVENANCE - set(configuration))
+def test_survey_manifest_records_execution_separately_from_configuration(tmp_path):
+    from pilot_proxy.archive.survey_state import ensure_manifest, SurveyRun
+    configuration = {"schema": 1, "source": "cadc-datatrail"}
+    before = ensure_manifest(tmp_path, configuration)
+    with SurveyRun(tmp_path) as run:
+        (tmp_path / "inventory.jsonl").write_text(json.dumps(_row("100058001", 506)) + "\n")
+        run.views_current()
+    manifest = json.loads((tmp_path / "survey_manifest.json").read_text())
+    assert manifest["configuration"] == configuration
+    assert manifest["fingerprint"] == before["fingerprint"]
+    latest = manifest["latest_run"]
+    assert REQUIRED_PROVENANCE.issubset(latest)
+    assert latest["row_count"] == 1 and latest["inventory_sha256"]
+    assert latest["started"] <= latest["finished"]
+    assert latest["status"] == "finished" and latest["views_current"]
+    first_id = latest["run_id"]
+    with SurveyRun(tmp_path) as run:
+        run.views_current()
+    assert len(list((tmp_path / "survey_runs").glob("*.json"))) == 2
+    assert json.loads((tmp_path / "survey_manifest.json").read_text())["latest_run"]["run_id"] != first_id
 
 
 # ==========================================================================
@@ -362,16 +342,6 @@ def test_restore_collection_stays_narrow(monkeypatch, uri):
         dt.DATATRAIL.files("chime.event.baseband.raw", "1", retries=0)
 
 
-@pytest.mark.xfail(strict=True, reason=(
-    "GAP: _restore_collection() prefixes on a literal 'data/' startswith test "
-    "with no canonicalization, so 'data/../../../etc/x/f.h5' is accepted and "
-    "resolves to common_path 'cadc:CHIMEFRB/data/../../../etc/x'. Measured: "
-    "identical input is REFUSED with the patch reverted. common_path is never "
-    "canonicalized downstream -- cadc_inventory.py:108 checks only that it is "
-    "a non-empty unpadded string, while :114 does apply _safe_archive_name to "
-    "'name' -- and it flows into join_uri() for cadcinfo and cadcget. This is "
-    "a fail-open weakening of a contract whose module docstring says the "
-    "refusal exists so 'the decision is made on evidence, not on silence.'"))
 def test_restore_collection_refuses_paths_that_escape_the_collection_root(
         monkeypatch):
     _fake_ps(monkeypatch, ["data/../../../etc/x/f.h5",
@@ -380,14 +350,8 @@ def test_restore_collection_refuses_paths_that_escape_the_collection_root(
         dt.DATATRAIL.files("chime.event.baseband.raw", "1", retries=0)
 
 
-def test_a_restored_replica_is_indistinguishable_from_a_native_one(monkeypatch):
-    """The audit gap: nothing in the output records that the heuristic fired.
-
-    A bare reply and a prefixed reply produce byte-identical results, so no
-    field of the published inventory tells a reviewer which rows depended on
-    the reconstruction. Auditing the patch's real blast radius against the
-    frozen bundle is therefore impossible after the fact.
-    """
+def test_a_restored_replica_retains_its_origin(monkeypatch):
+    """Reconstructed collection identity remains visible after resolution."""
     bare = ["data/chime/x/astro_1/f.h5", "data/chime/x/astro_1/g.h5"]
     prefixed = ["cadc:CHIMEFRB/" + u for u in bare]
 
@@ -396,6 +360,8 @@ def test_a_restored_replica_is_indistinguishable_from_a_native_one(monkeypatch):
     _fake_ps(monkeypatch, prefixed)
     from_prefixed = dt.DATATRAIL.files("s", "1", retries=0)
     assert from_bare == from_prefixed
+    assert from_bare[0].collection_restored
+    assert not from_prefixed[0].collection_restored
 
 
 # ==========================================================================

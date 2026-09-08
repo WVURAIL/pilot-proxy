@@ -154,6 +154,14 @@ _MINOC_DEFAULT_COLLECTION = "cadc:CHIMEFRB/"
 _BARE_REPLICA_ROOTS = ("data/",)
 
 
+class ArchivePath(str):
+    """A resolved path that retains whether its collection was inferred."""
+    def __new__(cls, value, *, collection_restored=False):
+        result = super().__new__(cls, value)
+        result.collection_restored = bool(collection_restored)
+        return result
+
+
 def _restore_collection(uri: str) -> str:
     """Restore the collection prefix on a bare archive-relative replica path.
 
@@ -162,8 +170,8 @@ def _restore_collection(uri: str) -> str:
     """
     if uri.startswith(_MINOC_COLLECTIONS):
         return uri
-    if uri.startswith(_BARE_REPLICA_ROOTS):
-        return _MINOC_DEFAULT_COLLECTION + uri
+    if uri.startswith(_BARE_REPLICA_ROOTS) and len(_MINOC_COLLECTIONS) == 1:
+        return _MINOC_COLLECTIONS[0] + uri
     return uri
 
 
@@ -403,8 +411,8 @@ class Datatrail:
                 raise DatatrailContractError(
                     f"[datatrail ps {scope} {dataset}] malformed 'minoc' "
                     "replica locations")
-            normalized = [_restore_collection(uri.replace("//", "/"))
-                          for uri in uris]
+            canonical = [uri.replace("//", "/") for uri in uris]
+            normalized = [_restore_collection(uri) for uri in canonical]
             stray = [u for u in normalized
                      if not u.startswith(_MINOC_COLLECTIONS)]
             if stray:
@@ -422,6 +430,11 @@ class Datatrail:
                     "must resolve to one common path")
             prefix = prefixes.pop()
             paths = [uri[len(prefix):] for uri in normalized]
+            from .sources.cadc_inventory import _safe_archive_name
+            if any(not _safe_archive_name(path) for path in paths):
+                raise DatatrailContractError(
+                    f"[datatrail ps {scope} {dataset}] replica path is not "
+                    "a canonical path below the collection root")
             common = os.path.commonprefix(paths)
             if not common.endswith("/"):
                 common = "/".join(common.split("/")[:-1])
@@ -431,7 +444,9 @@ class Datatrail:
                 raise DatatrailContractError(
                     f"[datatrail ps {scope} {dataset}] replica paths have no "
                     "usable common directory/name split")
-            return f"{prefix}{common.lstrip('/')}", names, True
+            return ArchivePath(
+                f"{prefix}{common.lstrip('/')}",
+                collection_restored=normalized != canonical), names, True
         return None, [], False
 
     # -- common-path resolution --------------------------------------------

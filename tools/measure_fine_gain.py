@@ -5,10 +5,11 @@
 The publication claim ("the v2 fine reduction recovers up to
 10 log10(sqrt(W)) ~ 10.5 dB of deflection sensitivity") is measured here
 rather than asserted. The Monte Carlo operates at the row-sum level ---
-the exact field both reductions consume (the bit-exact marginal identity
-guarantees the coarse statistic is a pure function of it) --- at the
-deployed geometry (2048 streams x 128 windows), with integer row sums and
-the deployed statistics:
+the field both reductions consume --- at a configurable stream count
+(default 2048) and 128 windows, with integer row sums and the statistics
+below. The fine transform here uses floating arithmetic; this experiment
+does not measure int4 input quantization, integer weights, or fixed-transform
+representation loss in the production fine path:
 
   coarse:  F = 2 sum|z_t|^2 / (sum|z_r1|^2 + sum|z_r2|^2), exact int64
            sums (null_power_ratio = 1: simulated weight norms are equal by
@@ -19,7 +20,7 @@ the deployed statistics:
 
 The batched reduction used for speed is verified against
 ``pilot_proxy.fine_reduction.fine_reduce`` on random trials by
-``--verify`` (and by ``tests/core/test_measure_fine_gain.py``); the MC
+``--stage verify`` (and by ``tests/core/test_measure_fine_gain.py``); the MC
 runs only the verified-equal path.
 
 Signal model (matches the documented zoom identity): the target-term row
@@ -39,6 +40,8 @@ from __future__ import annotations
 
 import argparse
 import glob
+import hashlib
+import json
 import os
 import pathlib
 import sys
@@ -143,7 +146,9 @@ def run_stage(out, stage, trials, seed, snr_db=None, b0=ANCHOR, streams=STREAMS,
             else f"h1{tag}_{snr_db:+06.2f}dB_s{seed}.npz")
     np.savez_compressed(os.path.join(out, name), coarse=co, fine=fi,
                         snr_db=(np.nan if snr_db is None else snr_db),
-                        b0=b0, streams=streams, sigma=SIGMA, seed=seed)
+                        b0=b0, streams=streams, sigma=SIGMA, seed=seed,
+                        windows=WINDOWS, bins=BINS, anchor=ANCHOR,
+                        designated_bins=WINDOW, statistic_version="row_sum_mc_v1")
     print(f"wrote {name}: {trials} trials "
           f"(coarse med {np.median(co):.5f}, fine med {np.median(fi):.4f})")
 
@@ -151,19 +156,104 @@ def run_stage(out, stage, trials, seed, snr_db=None, b0=ANCHOR, streams=STREAMS,
 def collect(out, pattern):
     cs, fs, meta = [], [], []
     for p in sorted(glob.glob(os.path.join(out, pattern))):
-        z = np.load(p)
-        cs.append(z["coarse"])
-        fs.append(z["fine"])
-        meta.append(float(z["snr_db"]))
+        with np.load(p, allow_pickle=False) as z:
+            cs.append(z["coarse"])
+            fs.append(z["fine"])
+            meta.append(float(z["snr_db"]))
     return (np.concatenate(cs) if cs else np.zeros(0),
             np.concatenate(fs) if fs else np.zeros(0), meta)
 
 
-def report(out, make_figure=True):
-    c0, f0, _ = collect(out, "h0_s*.npz")
-    if c0.size == 0:
+def report_shards(out):
+    """Read one matched experiment; offset metadata, not filenames, labels H1.
+
+    Historical shards predate the explicit transform/statistic fields. Their
+    documented v1 geometry is retained and identified as inferred in provenance.
+    Streams, noise scale and injected offset were always stored and are required.
+    """
+    nulls, populations, sources = [], {"centered": [], "_half": []}, []
+    identity = None
+    seen = set()
+    for path in sorted(pathlib.Path(out).glob("h[01]_*.npz")):
+        with np.load(path, allow_pickle=False) as z:
+            required = {"coarse", "fine", "snr_db", "b0", "streams", "sigma", "seed"}
+            if not required <= set(z.files):
+                raise ValueError(f"{path}: missing shard metadata {sorted(required - set(z.files))}")
+            explicit_geometry = {"windows", "bins", "anchor", "designated_bins", "statistic_version"}
+            supplied_geometry = explicit_geometry & set(z.files)
+            if supplied_geometry and supplied_geometry != explicit_geometry:
+                raise ValueError(f"{path}: incomplete transform/statistic metadata")
+            def scalar(key):
+                value = np.asarray(z[key])
+                if value.shape != ():
+                    raise ValueError(f"{path}: {key} must be scalar")
+                return value.item()
+            streams, sigma, b0 = scalar("streams"), scalar("sigma"), scalar("b0")
+            if (isinstance(streams, bool) or not isinstance(streams, int)
+                    or streams <= 0 or not np.isfinite(sigma) or sigma <= 0
+                    or not np.isfinite(b0)):
+                raise ValueError(f"{path}: invalid streams, sigma or offset")
+            geometry = {
+                "streams": streams, "sigma": float(sigma),
+                "windows": scalar("windows") if "windows" in z else WINDOWS,
+                "bins": scalar("bins") if "bins" in z else BINS,
+                "anchor": scalar("anchor") if "anchor" in z else ANCHOR,
+                "designated_bins": np.asarray(z["designated_bins"]).tolist()
+                    if "designated_bins" in z else WINDOW.tolist(),
+                "statistic_version": scalar("statistic_version")
+                    if "statistic_version" in z else "row_sum_mc_v1",
+            }
+            supported = dict(geometry, windows=WINDOWS, bins=BINS, anchor=ANCHOR,
+                             designated_bins=WINDOW.tolist(), statistic_version="row_sum_mc_v1")
+            if geometry != supported:
+                raise ValueError(f"{path}: unsupported transform/statistic geometry")
+            if identity is not None and geometry != identity:
+                raise ValueError(f"{path}: mixed experimental identities")
+            identity = geometry
+            coarse, fine = np.asarray(z["coarse"]), np.asarray(z["fine"])
+            if (coarse.ndim != 1 or coarse.size == 0 or fine.shape != coarse.shape
+                    or not np.isfinite(coarse).all() or not np.isfinite(fine).all()
+                    or np.any(coarse < 0) or np.any(fine < 0)):
+                raise ValueError(f"{path}: invalid paired trial arrays")
+            snr = float(scalar("snr_db"))
+            if path.name.startswith("h0_"):
+                if not np.isnan(snr):
+                    raise ValueError(f"{path}: H0 shard has a signal SNR")
+                population = "null"
+                nulls.append((coarse, fine))
+            else:
+                if not np.isfinite(snr):
+                    raise ValueError(f"{path}: H1 shard needs a finite SNR")
+                if b0 == ANCHOR:
+                    population = "centered"
+                elif b0 == HALF_BIN:
+                    population = "_half"
+                else:
+                    raise ValueError(f"{path}: unsupported injected offset {b0}")
+                populations[population].append((snr, coarse, fine))
+            seed = scalar("seed")
+            if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
+                raise ValueError(f"{path}: seed must be a nonnegative integer")
+            trial_identity = (population, snr if population != "null" else None, seed)
+            if trial_identity in seen:
+                raise ValueError(f"{path}: duplicate seed/population/SNR shard")
+            seen.add(trial_identity)
+            sources.append({
+                "path": str(path.resolve()), "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "population": population, "b0": float(b0), "trials": int(coarse.size),
+                "legacy_geometry_inferred": "statistic_version" not in z,
+            })
+    return nulls, populations, identity, sources
+
+
+def report(out, make_figure=True, report_dir=None):
+    nulls, populations, identity, sources = report_shards(out)
+    if not nulls:
         print("no H0 shards", file=sys.stderr)
         return 1
+    if not populations["centered"]:
+        raise ValueError("a centered H1 population is required for the gain report")
+    c0, f0 = (np.concatenate([pair[i] for pair in nulls]) for i in (0, 1))
     print(f"H0 trials: {c0.size}")
     thr = {}
     for pfa in PFA_LIST:
@@ -173,14 +263,12 @@ def report(out, make_figure=True):
               f"fine thr {thr[pfa][1]:.4f}")
 
     curves = {}
-    for tag in ("", "_half"):
+    for population, shards in populations.items():
         pts = {}
-        for p in sorted(glob.glob(os.path.join(out, f"h1{tag}_*dB_s*.npz"))):
-            z = np.load(p)
-            s = float(z["snr_db"])
+        for s, coarse, fine in shards:
             pts.setdefault(s, [[], []])
-            pts[s][0].append(z["coarse"])
-            pts[s][1].append(z["fine"])
+            pts[s][0].append(coarse)
+            pts[s][1].append(fine)
         if not pts:
             continue
         snrs = np.array(sorted(pts))
@@ -193,7 +281,7 @@ def report(out, make_figure=True):
                 row[f"pd_coarse_{pfa:g}"] = float((c > thr[pfa][0]).mean())
                 row[f"pd_fine_{pfa:g}"] = float((f > thr[pfa][1]).mean())
             rows.append(row)
-        curves[tag or "centered"] = rows
+        curves[population] = rows
 
     def snr_at(rows, key, target=0.5):
         xs = [r["snr_db"] for r in rows]
@@ -213,16 +301,32 @@ def report(out, make_figure=True):
             gains[pfa] = (s_c, s_f, s_c - s_f)
             print(f"Pfa={pfa:g}: SNR@Pd=0.5 coarse {s_c:+.2f} dB, "
                   f"fine {s_f:+.2f} dB  ->  measured gain {s_c - s_f:.2f} dB")
-    np.savez(os.path.join(out, "gain_report.npz"),
+    destination = pathlib.Path(report_dir if report_dir is not None else out)
+    destination.mkdir(parents=True, exist_ok=True)
+    np.savez(destination / "gain_report.npz",
              thresholds=str(thr), curves=str(curves), gains=str(gains),
              h0_trials=c0.size)
+    # JSON is the inspectable report; retain the NPZ fields for older consumers.
+    def finite_json(value):
+        if isinstance(value, dict):
+            return {str(k): finite_json(v) for k, v in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [finite_json(v) for v in value]
+        return None if isinstance(value, float) and not np.isfinite(value) else value
+    document = {"schema": "fine_gain_report_v2", "experiment": identity,
+                "producer_sha256": hashlib.sha256(pathlib.Path(__file__).read_bytes()).hexdigest(),
+                "sources": sources, "thresholds": thr, "curves": curves,
+                "centered_gains": gains, "h0_trials": int(c0.size),
+                "scope": "integer row-sum Monte Carlo with floating fine transform; no input quantizer or radio-path measurement"}
+    (destination / "gain_report.json").write_text(
+        json.dumps(finite_json(document), indent=2, allow_nan=False) + "\n")
 
     if make_figure and curves:
-        make_fig(out, thr, curves, gains)
+        make_fig(destination, thr, curves, gains, streams=identity["streams"])
     return 0
 
 
-def make_fig(out, thr, curves, gains):
+def make_fig(out, thr, curves, gains, *, streams=STREAMS):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -266,8 +370,8 @@ def make_fig(out, thr, curves, gains):
     ax.set_title(
         f"Coarse vs fine reduction at matched false-alarm rate "
         f"(Pfa = {pfa:g}, empirical H0 thresholds)\n"
-        f"deployed geometry: {STREAMS} streams × {WINDOWS} windows, "
-        f"integer row sums, exact deployed statistics",
+        f"simulated geometry: {streams} streams × {WINDOWS} windows, "
+        f"integer row sums, floating fine transform",
         fontsize=10, color=INK, loc="left")
     fig.tight_layout()
     p = os.path.join(out, "measured_fine_gain.png")
@@ -279,6 +383,8 @@ def make_fig(out, thr, curves, gains):
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--out", default="generated/fine_gain_mc")
+    ap.add_argument("--report-dir",
+                    help="write a report separately from immutable input shards")
     ap.add_argument("--stage", choices=["h0", "sweep", "report", "verify"],
                     required=True)
     # None means "not given": the sweep stages and the verification gate want
@@ -307,7 +413,7 @@ def main():
     seed = 0 if args.seed is None else args.seed
     streams = STREAMS if args.streams is None else args.streams
     if args.stage == "report":
-        return report(args.out)
+        return report(args.out, report_dir=args.report_dir)
     if args.stage == "sweep":
         if args.snr_db is None:
             ap.error("--snr-db required for sweep")

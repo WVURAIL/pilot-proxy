@@ -674,3 +674,8 @@ We provide a machine-readable software citation in
 [`CITATION.cff`](CITATION.cff).
 
 Use `pilot-proxy --version` to report the installed package version.
+
+Survey provenance, legacy compatibility, exclusions and interrupted-run recovery
+are documented in [the survey trust contract](docs/survey_trust.md). The
+[September 8 fine-gain correction](docs/evidence/fine_gain_report_correction_2026-09-08/README.md)
+keeps corrected reports separate from the original evidence.

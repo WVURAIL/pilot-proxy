@@ -13,6 +13,11 @@ import re
 _IDENTIFIER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*\Z")
 
 
+def baseband_filename(event, freq_id) -> str:
+    """Shared archive naming rule, including explicitly identified legacy rows."""
+    return f"baseband_{event}_{freq_id}.h5"
+
+
 def validate_identifier(value: object, *, label: str = "name") -> str:
     """Return an exact filesystem-safe identifier or raise ``ValueError``."""
     text = value.strip() if isinstance(value, str) else ""

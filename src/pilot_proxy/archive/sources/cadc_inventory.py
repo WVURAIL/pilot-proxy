@@ -11,11 +11,13 @@ import json
 from collections.abc import Mapping
 from copy import deepcopy
 from numbers import Integral
+import math
+from ..names import baseband_filename
 
 
 RESERVED_FIELDS = frozenset({
     "scope", "event", "name", "size_bytes", "common_path", "obs_date",
-    "datasets",
+    "datasets", "collection_restored",
 })
 _REQUIRED_FIELDS = frozenset({
     "scope", "event", "name", "size_bytes", "common_path",
@@ -29,10 +31,46 @@ def join_uri(common_path, name) -> str:
 
 def _safe_archive_name(name: str) -> bool:
     """Whether a verified filename is a canonical relative POSIX path."""
-    if (not name or name != name.strip() or "\\" in name or "\x00" in name
+    if (not name or name != name.strip() or "\\" in name or any(ord(c) < 32 for c in name)
             or name.startswith("/")):
         return False
     return all(part not in ("", ".", "..") for part in name.split("/"))
+
+
+def _safe_common_path(value: str) -> bool:
+    # Collection-qualified paths and local test/source identifiers share the
+    # same component contract. Never normalize away a parent traversal.
+    suffix = value.split(":", 1)[-1]
+    return _safe_archive_name(suffix)
+
+
+def _legacy_baseband_row(row):
+    """Restore only the documented schema-1 CHIME baseband filename.
+
+    This is a read-time view, never a rewrite of the inventory. The historical
+    floating size estimate is preserved and is not promoted to a frame count.
+    Partial current rows and unrelated product types still fail validation.
+    """
+    required = {"scope", "event", "freq_id", "size_bytes", "common_path",
+                "obs_date", "datasets", "freq_mhz", "n_frames"}
+    if "name" in row or not required <= set(row):
+        return row
+    scope, event, freq = row["scope"], row["event"], row["freq_id"]
+    if (scope not in ("chime.event.baseband.raw", "chime.scheduled.baseband.raw")
+            or not isinstance(event, str) or not event.isascii() or not event.isdigit()
+            or isinstance(freq, bool) or not isinstance(freq, Integral)
+            or not 0 <= freq < 1024):
+        return row
+    if not isinstance(row["common_path"], str) or not row["common_path"].rstrip("/").endswith("/astro_" + event):
+        return row
+    estimate = row["n_frames"]
+    if (isinstance(estimate, bool) or not isinstance(estimate, (int, float))
+            or not math.isfinite(estimate) or estimate < 0):
+        return row
+    return dict(row, name=baseband_filename(event, freq),
+                common_path=row["common_path"].rstrip("/"),
+                inventory_compatibility="chime_baseband_schema1_filename",
+                n_frames_legacy_estimate=estimate)
 
 
 def candidate_file(item, reader_name: str) -> tuple[str, dict]:
@@ -67,7 +105,7 @@ def candidate_file(item, reader_name: str) -> tuple[str, dict]:
 
 def annotate_row(shape, row: dict, instrument) -> None:
     """Run reader annotation while protecting source-verified identity."""
-    before = {key: deepcopy(row[key]) for key in RESERVED_FIELDS}
+    before = {key: deepcopy(row[key]) for key in RESERVED_FIELDS if key in row}
     shape.annotate_row(row, instrument)
     changed = [key for key, value in before.items()
                if key not in row or row[key] != value]
@@ -101,6 +139,7 @@ def parse_row(text: str, path: str, line_number: int) -> dict:
     if not isinstance(row, dict):
         raise _inventory_error(
             path, line_number, f"expected a JSON object, got {type(row).__name__}")
+    row = _legacy_baseband_row(row)
     missing = sorted(_REQUIRED_FIELDS - set(row))
     if missing:
         raise _inventory_error(path, line_number,
@@ -115,6 +154,9 @@ def parse_row(text: str, path: str, line_number: int) -> dict:
         raise _inventory_error(
             path, line_number,
             "'name' must be a canonical relative path below the common path")
+    if not _safe_common_path(row["common_path"]):
+        raise _inventory_error(path, line_number,
+                               "'common_path' must be canonical below its collection")
     if (isinstance(row["size_bytes"], bool)
             or not isinstance(row["size_bytes"], Integral)
             or row["size_bytes"] <= 0):
