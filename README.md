@@ -133,6 +133,11 @@ of `make test` or `make test-kernel`. The
 `make release-check` target adds CPU C/C++ reference checks, profile and layout
 checks, and runtime-bundle validation. It requires a C++ compiler but not a GPU.
 
+Use `make test-gpu DETECTOR_WINDOW_SAMPLES=128` for the required GPU gate,
+including temporary K=64 and K=128 builds and archive interrupt/resume tests.
+Missing GPU prerequisites fail this gate. See [test coverage](docs/TEST_COVERAGE.md)
+for the component map, GNU Radio checks, and remaining validation limits.
+
 ---
 
 ## Contents

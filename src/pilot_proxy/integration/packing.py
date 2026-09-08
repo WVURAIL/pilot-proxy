@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import operator
 from typing import Any, Sequence
 
 import numpy as np
@@ -32,6 +33,18 @@ from .stream_layout import quantization_metadata
 
 DEFAULT_CLIP_SIGMA = 3.0
 DEFAULT_BLOCK_STEP_MULTIPLIER = 1
+
+
+def _positive_integer(value: object, field: str) -> int:
+    if isinstance(value, (bool, np.bool_)):
+        raise TypeError(f"{field} must be an integer, not a boolean.")
+    try:
+        result = operator.index(value)
+    except TypeError as exc:
+        raise TypeError(f"{field} must be an integer.") from exc
+    if result <= 0:
+        raise ValueError(f"{field} must be positive.")
+    return result
 
 
 @dataclass(frozen=True)
@@ -212,6 +225,11 @@ def pack_channelized_streams_for_detector(
     Combined mode returns one detector row matrix per batch. Per-stream
     diagnostic mode returns a separate row matrix for each input stream.
     """
+    frame_size_samples = _positive_integer(frame_size_samples, "frame_size_samples")
+    detector_window_samples = _positive_integer(detector_window_samples, "detector_window_samples")
+    num_blocks = _positive_integer(num_blocks, "num_blocks")
+    if block_step_samples is not None:
+        block_step_samples = _positive_integer(block_step_samples, "block_step_samples")
     arr = np.asarray(feed_channel_streams)
     if arr.ndim != 3:
         raise ValueError(

@@ -36,6 +36,10 @@ def quantize_complex_numpy(
     """Quantize complex data to packed integer format (NumPy version)."""
     if data.ndim != 2:
         raise ValueError(f"data must be 2D (M, K). Got shape {data.shape}.")
+    if not np.isfinite(scale) or scale <= 0:
+        raise ValueError("quantization scale must be positive and finite.")
+    if not np.all(np.isfinite(data)):
+        raise ValueError("quantization samples must be finite.")
     packed_dtype = packed_dtype_for_component_bits(bits)
     max_int = (1 << (bits - 1)) - 1
     mask = (1 << bits) - 1

@@ -103,7 +103,13 @@ def pilot_excess_db_to_data_shelf_snr_db(
     dtv_bandwidth_hz: float = DTV_BANDWIDTH_HZ,
     pilot_capture_efficiency: float = PILOT_CAPTURE_EFFICIENCY,
 ):
-    """Convert one-bin normalized pilot excess [dB] to data-shelf SNR [dB]."""
+    """Convert pilot excess to the small-shelf screening proxy in dB.
+
+    This is the linear conversion e/A. If e = A*s/(1+g*s), the returned
+    linear proxy is s/(1+g*s), not the full inverse e/(A-g*e). It saturates
+    at high shelf power. The physical inversion requires independently
+    calibrated g and uncertainty treatment near saturation.
+    """
     spreading = (
         spreading_loss_db_from_bin_enbw_hz(
             float(bin_enbw_hz),

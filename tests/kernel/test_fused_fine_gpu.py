@@ -57,7 +57,7 @@ def _import_cupy_or_skip():
 def _kernel_or_skip() -> FStatKernel:
     try:
         kernel = FStatKernel(DEFAULT_LIB_PATH)
-    except Exception:  # pragma: no cover - library not built
+    except FileNotFoundError:  # pragma: no cover - library not built
         pytest.skip("libfstatistic.so is not built")
     if not kernel.supports_fused_fine():
         pytest.skip(

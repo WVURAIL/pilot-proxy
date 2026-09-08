@@ -31,6 +31,8 @@ def _fingerprint(unit: Unit) -> str:
         "size_bytes": metadata.get("size_bytes"),
         "checksum": metadata.get("checksum") or metadata.get("md5"),
     }
+    if metadata.get("sha256"):
+        identity["sha256"] = metadata["sha256"]
     raw = json.dumps(identity, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 

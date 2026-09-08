@@ -38,15 +38,24 @@ def _signal_and_noise_power_for_snr(
     sample_rate_hz: float,
     snr_bandwidth_hz: float,
 ) -> tuple[float, float]:
+    for name, value in (("snr_db", snr_db), ("sample_rate_hz", sample_rate_hz),
+                        ("snr_bandwidth_hz", snr_bandwidth_hz)):
+        if not math.isfinite(value):
+            raise ValueError(f"{name} must be finite.")
     signal_power = float(np.mean(np.abs(clean.astype(np.complex64)) ** 2))
     if not np.isfinite(signal_power) or signal_power <= 0.0:
         raise ValueError("signal power must be positive and finite.")
     if sample_rate_hz <= 0.0 or snr_bandwidth_hz <= 0.0:
         raise ValueError("sample_rate_hz and snr_bandwidth_hz must be positive.")
-    noise_power = signal_power / float(
-        DB_LINEAR_BASE ** (float(snr_db) / DB_POWER_FACTOR)
-    )
-    noise_power *= float(sample_rate_hz) / float(snr_bandwidth_hz)
+    try:
+        noise_power = signal_power / float(
+            DB_LINEAR_BASE ** (float(snr_db) / DB_POWER_FACTOR)
+        )
+        noise_power *= float(sample_rate_hz) / float(snr_bandwidth_hz)
+    except (OverflowError, ZeroDivisionError) as exc:
+        raise ValueError("requested noise power is outside the supported range.") from exc
+    if not math.isfinite(noise_power) or noise_power <= 0:
+        raise ValueError("requested noise power must be positive and finite.")
     return signal_power, noise_power
 
 

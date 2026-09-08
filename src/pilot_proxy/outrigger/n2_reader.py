@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Iterator, Mapping
 
 import h5py
+import numpy as np
 
 try:
     import hdf5plugin  # noqa: F401
@@ -91,6 +92,8 @@ class OutriggerN2Reader(Reader):
                     raise ValueError(
                         "index_map/time must be non-empty and match the vis time axis"
                     )
+                if not np.all(np.isfinite(times)):
+                    raise ValueError("index_map/time must contain finite timestamps")
                 return {
                     "shape": tuple(int(value) for value in shape),
                     "ctime_min": float(times.min()),

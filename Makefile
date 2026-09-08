@@ -1,4 +1,5 @@
 PYTHON ?= python3
+NVCC ?= nvcc
 GNURADIO_PYTHON ?= /usr/bin/python3
 GNURADIO_ENV ?= PYTHONNOUSERSITE=1
 CUDA_CACHE_DIR ?= $(HOME)/.cache/pilot_proxy
@@ -6,7 +7,7 @@ CUDA_LIB := cuda/libfstatistic.so
 CACHED_CUDA_LIB := $(CUDA_CACHE_DIR)/libfstatistic.so
 PYTHON_TEST_ENV := MPLBACKEND=Agg PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 PILOT_PROXY_USE_TEX=0 PYTHONPATH=src
 
-.PHONY: build-kernel test-kernel test-python test lint archive-integration-check generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs docs-specs-check
+.PHONY: build-kernel test-kernel test-python test-gpu test lint archive-integration-check generate-atsc audit-atsc quantize detect evaluate release-check commit-check release-clean freeze-check clean-cache clean docs docs-specs docs-specs-check
 
 build-kernel:
 	$(MAKE) -C cuda
@@ -22,6 +23,10 @@ test-python:
 	$(PYTHON_TEST_ENV) $(PYTHON) -m pytest tests -q
 
 test: test-kernel test-python
+
+test-gpu: test-kernel
+	$(PYTHON_TEST_ENV) NVCC="$(NVCC)" $(PYTHON) -m pytest \
+	    tests/kernel tests/core/test_reference_pfb_gpu.py --require-cuda -q -rs
 
 lint:
 	$(PYTHON) -m ruff check .
