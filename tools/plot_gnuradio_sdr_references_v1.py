@@ -96,7 +96,12 @@ def draw_density(output,mode,observed,simulated,lam):
             "density_bin_edges":edges.tolist(),"radio_density_per_dex":radio_density.tolist(),"gnuradio_density_per_dex":gnu_density.tolist()}
 
 
-def run(manifest_path,calibration_path,gnu_directories,output):
+def run(manifest_path,calibration_path,gnu_directories,output,analysis_core=None):
+    global core,CORE_PATH
+    if analysis_core is not None:
+        CORE_PATH=Path(analysis_core).resolve()
+        module_spec=importlib.util.spec_from_file_location("selected_reference_core",CORE_PATH)
+        core=importlib.util.module_from_spec(module_spec);module_spec.loader.exec_module(core)
     manifest,inputs=core.load_manifest(manifest_path)
     calibration_path=Path(calibration_path).resolve();cal=json.loads(calibration_path.read_text())
     if (cal.get("schema")!="noise-signal-reference-calibration-v1" or cal.get("manifest_sha256")!=core.sha(manifest_path) or
@@ -144,5 +149,6 @@ if __name__=="__main__":
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument("--manifest",type=Path,required=True);p.add_argument("--calibration",type=Path,required=True)
     p.add_argument("--gnu-dir",type=Path,action="append",required=True);p.add_argument("--output",type=Path,required=True)
-    a=p.parse_args();result=run(a.manifest,a.calibration,a.gnu_dir,a.output)
+    p.add_argument("--analysis-core",type=Path,help="explicit separately versioned core; its source hash must match calibration/manifest")
+    a=p.parse_args();result=run(a.manifest,a.calibration,a.gnu_dir,a.output,a.analysis_core)
     print(json.dumps({"schema":result["schema"],"figures":result["figures"],"output":str(a.output.resolve())},indent=2))
