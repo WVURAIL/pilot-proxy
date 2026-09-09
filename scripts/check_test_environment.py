@@ -9,7 +9,7 @@ import importlib
 import sys
 from pathlib import Path
 
-BASE_MODULES = ("h5py", "matplotlib", "yaml")
+BASE_MODULES = ("h5py", "matplotlib", "yaml", "scipy", "cryptography")
 INTEGRATION_MODULES = ("cadcdata", "cadcutils", "dtcli")
 
 

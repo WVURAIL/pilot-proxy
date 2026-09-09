@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 
 REPO = Path(__file__).resolve().parents[2]
-HEADERS = REPO.parent/"results/calibration_progress_2026-09-09/sdr/smoke-build-v3/include"
+HEADERS = REPO / "tests/support/limesuite/include"
 DRIVER = runpy.run_path(str(REPO/"tools/lime_smoke_capture_v3.py"))
 FAKE = r"""
 #include <lime/LimeSuite.h>
