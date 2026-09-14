@@ -969,24 +969,29 @@ def test_one_event_with_1024_replicas_commits_as_a_single_transaction(
     assert elapsed < 20
 
 
-def test_a_1024_replica_event_is_all_or_nothing_under_sigint(tmp_path):
+def test_a_1024_replica_event_is_all_or_nothing_under_sigint(tmp_path, monkeypatch):
     """One event is one transaction, so interrupting it late commits nothing --
     not 1000 of 1024 rows."""
     out = tmp_path / "inv"
     fids = list(range(1024))
     fired = []
 
-    def size_hook(uri, event, name):
-        freq_id = int(name.rsplit("_", 1)[1].split(".")[0])
+    annotate = C.annotate_row
+
+    def interrupt_late_row(shape, row, instrument):
+        annotate(shape, row, instrument)
+        freq_id = int(row["name"].rsplit("_", 1)[1].split(".")[0])
         if freq_id == 1000 and not fired:
             fired.append(True)
-            os.kill(os.getpid(), signal.SIGINT)
-            time.sleep(0.2)
-        return None
+            # Interrupt row assembly independently of probe scheduling.
+            assert threading.current_thread() is threading.main_thread()
+            signal.raise_signal(signal.SIGINT)
 
-    with fake_archive(["100000000"], size_hook=size_hook):
+    monkeypatch.setattr(C, "annotate_row", interrupt_late_row)
+    with fake_archive(["100000000"]):
         with pytest.raises(KeyboardInterrupt):
             survey(out, freq_ids=fids, workers=12)
+    assert fired == [True]
     state = db_state(out)
     assert state["status"] == {}                 # nothing committed at all
     assert state["records"] == {}
