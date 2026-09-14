@@ -30,6 +30,8 @@ constexpr unsigned int CACHE_WEIGHT1_SEED = 3002u;
 constexpr unsigned int CACHE_WEIGHT2_SEED = 3003u;
 constexpr unsigned int BATCH_INPUT_SEED = 4001u;
 constexpr unsigned int BATCH_WEIGHT_SEED = 4002u;
+constexpr unsigned int STREAM_INPUT_SEED = 5001u;
+constexpr unsigned int STREAM_WEIGHT_SEED = 5002u;
 
 constexpr int ROW_COUNT_BELOW_BLOCK_THREADS = FSTAT_BLOCK_THREADS - 1;
 constexpr int ROW_COUNT_EQUAL_BLOCK_THREADS = FSTAT_BLOCK_THREADS;
@@ -187,6 +189,51 @@ void test_rows_exact()
 
         assert(gpu_powers(x, w, rows) == cpu_powers(x, w, rows));
     }
+}
+
+void test_set_stream_matches_default()
+{
+    // A handle bound to a non-blocking stream must produce the same powers as the
+    // default stream, and switching back must re-upload the weights on the new
+    // stream rather than reuse a cache ordered on the old one.
+    const int rows = CACHE_REUSE_ROWS;
+    std::vector<InputType> x(rows * FSTAT_DETECTOR_WINDOW_SAMPLES);
+    std::vector<InputType> w(
+        FSTAT_NUM_WEIGHT_TERMS * FSTAT_DETECTOR_WINDOW_SAMPLES);
+    fill_random_packed(x, STREAM_INPUT_SEED);
+    fill_random_packed(w, STREAM_WEIGHT_SEED);
+    const std::vector<unsigned long long> want = cpu_powers(x, w, rows);
+
+    DeviceBuffer<InputType> d_x(x.size());
+    DeviceBuffer<unsigned long long> d_powers(FSTAT_NUM_WEIGHT_TERMS);
+    d_x.copy_from_host(x);
+    cudaStream_t stream = 0;
+    CUDA_CHECK(cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking));
+
+    void* handle = FStat_Create(d_x.get(), 0, rows);
+    assert(handle != 0);
+    FStat_SetStream(handle, stream);
+    check_last_error_clear();
+    FStat_Compute_Powers_U64(handle, w.data(), d_powers.get());
+    check_last_error_clear();
+    // A non-blocking stream is not ordered before the synchronous copy below.
+    CUDA_CHECK(cudaStreamSynchronize(stream));
+    std::vector<unsigned long long> got;
+    d_powers.copy_to_host(got);
+    assert(got == want);
+
+    FStat_SetStream(handle, 0);
+    check_last_error_clear();
+    FStat_Compute_Powers_U64(handle, w.data(), d_powers.get());
+    check_last_error_clear();
+    d_powers.copy_to_host(got);
+    assert(got == want);
+
+    FStat_SetStream(0, stream);
+    assert(FStat_LastError()[0] != '\0');
+
+    FStat_Destroy(handle);
+    CUDA_CHECK(cudaStreamDestroy(stream));
 }
 
 void test_weight_cache_reuse_and_change()
@@ -540,6 +587,7 @@ int main()
     test_row_sums_exact();
     test_row_sums_batch_exact();
     test_weight_cache_reuse_and_change();
+    test_set_stream_matches_default();
     test_batch_equivalence();
     test_zero_denominator_and_threshold_equality();
     test_deployed_numden_null_output_threshold_cases();

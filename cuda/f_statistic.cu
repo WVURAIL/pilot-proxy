@@ -139,11 +139,11 @@ static bool record_cuda_error(cudaError_t err, const char* file, int line)
 #define CUDA_CHECK_LAST_BOOL() CUDA_CHECK_BOOL(cudaGetLastError())
 
 #ifndef NDEBUG
-#define CUDA_CHECK_SYNC() CUDA_CHECK(cudaDeviceSynchronize())
-#define CUDA_CHECK_SYNC_BOOL() CUDA_CHECK_BOOL(cudaDeviceSynchronize())
+#define CUDA_CHECK_SYNC(stream) CUDA_CHECK(cudaStreamSynchronize(stream))
+#define CUDA_CHECK_SYNC_BOOL(stream) CUDA_CHECK_BOOL(cudaStreamSynchronize(stream))
 #else
-#define CUDA_CHECK_SYNC() do { } while (0)
-#define CUDA_CHECK_SYNC_BOOL() do { } while (0)
+#define CUDA_CHECK_SYNC(stream) do { (void)(stream); } while (0)
+#define CUDA_CHECK_SYNC_BOOL(stream) do { (void)(stream); } while (0)
 #endif
 
 /* ===========================================================================
@@ -1805,6 +1805,7 @@ struct FStatHandle {
     int*       d_weight_lanes; ///< DP4A-path packed weight lanes [num_weight_terms x tap_pairs]
     bool       weights_cached; ///< Host cache validity for avoiding repeated uploads
     InputType  h_weight_cache[FSTAT_WEIGHT_COUNT]; ///< Last packed weights supplied by caller
+    cudaStream_t stream;   ///< Stream for all device work (0 = legacy default stream)
 };
 
 #if FSTAT_USE_DP4A
@@ -1870,7 +1871,8 @@ static bool fstat_upload_weights(FStatHandle* h, const InputType* w_in)
 
     #if FSTAT_USE_DP4A && FSTAT_USE_CONSTANT_WEIGHT_LANES
     // Constant memory is module-global, not per-handle. Always refresh it
-    // before launches to avoid cross-handle stale weight-lane state.
+    // before launches to avoid cross-handle stale weight-lane state. Handles
+    // on different streams must not run concurrently in this configuration.
     const bool weights_changed = true;
     #else
     const bool weights_changed =
@@ -1885,23 +1887,28 @@ static bool fstat_upload_weights(FStatHandle* h, const InputType* w_in)
         int h_weight_lanes[FSTAT_WEIGHT_LANE_COUNT];
         prepack_weight_lanes(w_in, h_weight_lanes);
     #if FSTAT_USE_CONSTANT_WEIGHT_LANES
-        CUDA_CHECK_BOOL(cudaMemcpyToSymbol(
+        CUDA_CHECK_BOOL(cudaMemcpyToSymbolAsync(
             c_weight_lanes,
             h_weight_lanes,
-            FSTAT_WEIGHT_LANE_COUNT * sizeof(int)));
+            FSTAT_WEIGHT_LANE_COUNT * sizeof(int),
+            0,
+            cudaMemcpyHostToDevice,
+            h->stream));
     #else
-        CUDA_CHECK_BOOL(cudaMemcpy(
+        CUDA_CHECK_BOOL(cudaMemcpyAsync(
             h->d_weight_lanes,
             h_weight_lanes,
             FSTAT_WEIGHT_LANE_COUNT * sizeof(int),
-            cudaMemcpyHostToDevice));
+            cudaMemcpyHostToDevice,
+            h->stream));
     #endif
     #else
-        CUDA_CHECK_BOOL(cudaMemcpy(
+        CUDA_CHECK_BOOL(cudaMemcpyAsync(
             h->d_weights,
             w_in,
             FSTAT_WEIGHT_BYTES,
-            cudaMemcpyHostToDevice));
+            cudaMemcpyHostToDevice,
+            h->stream));
     #endif
 
         std::memcpy(h->h_weight_cache, w_in, FSTAT_WEIGHT_BYTES);
@@ -1917,10 +1924,11 @@ static bool fstat_accumulate(FStatHandle* h, const InputType* w_in)
     }
 
     // Clear integer power scratch buffer
-    CUDA_CHECK_BOOL(cudaMemset(
+    CUDA_CHECK_BOOL(cudaMemsetAsync(
         h->d_power_scratch,
         0,
-        h->batch * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long)));
+        h->batch * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long),
+        h->stream));
 
     // Compute grid dimensions
     int grid_size = (h->detector_rows_per_block + FSTAT_BLOCK_THREADS - 1) / FSTAT_BLOCK_THREADS;
@@ -1929,7 +1937,7 @@ static bool fstat_accumulate(FStatHandle* h, const InputType* w_in)
     }
 
     if (h->batch <= 1) {
-        kernel_accumulate_power<<<grid_size, FSTAT_BLOCK_THREADS>>>(
+        kernel_accumulate_power<<<grid_size, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
             h->d_in,
             h->d_weights,
             h->d_weight_lanes,
@@ -1938,7 +1946,7 @@ static bool fstat_accumulate(FStatHandle* h, const InputType* w_in)
         );
     } else {
         dim3 grid(grid_size, h->batch, 1);
-        kernel_accumulate_power_batched<<<grid, FSTAT_BLOCK_THREADS>>>(
+        kernel_accumulate_power_batched<<<grid, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
             h->d_in,
             h->d_weights,
             h->d_weight_lanes,
@@ -1948,7 +1956,7 @@ static bool fstat_accumulate(FStatHandle* h, const InputType* w_in)
         );
     }
     CUDA_CHECK_LAST_BOOL();
-    CUDA_CHECK_SYNC_BOOL();
+    CUDA_CHECK_SYNC_BOOL(h->stream);
     return true;
 }
 
@@ -1964,18 +1972,18 @@ static bool fstat_write_f_statistic(FStatHandle* h)
     }
 
     if (h->batch <= 1) {
-        kernel_compute_f_statistic<<<1, 1>>>(
+        kernel_compute_f_statistic<<<1, 1, 0, h->stream>>>(
             h->d_power_scratch, h->d_out
         );
     } else {
         const int threads = FSTAT_OUTPUT_KERNEL_THREADS;
         const int blocks = (h->batch + threads - 1) / threads;
-        kernel_compute_f_statistic_batched<<<blocks, threads>>>(
+        kernel_compute_f_statistic_batched<<<blocks, threads, 0, h->stream>>>(
             h->d_power_scratch, h->d_out, h->batch
         );
     }
     CUDA_CHECK_LAST_BOOL();
-    CUDA_CHECK_SYNC_BOOL();
+    CUDA_CHECK_SYNC_BOOL(h->stream);
     return true;
 }
 
@@ -2009,15 +2017,16 @@ static bool fstat_write_numden_mask_rational(
         return false;
     }
     if (d_rational_overflow_count != nullptr) {
-        CUDA_CHECK_BOOL(cudaMemset(
+        CUDA_CHECK_BOOL(cudaMemsetAsync(
             d_rational_overflow_count,
             0,
-            sizeof(unsigned int)));
+            sizeof(unsigned int),
+            h->stream));
     }
 
     const int threads = FSTAT_OUTPUT_KERNEL_THREADS;
     const int blocks = (h->batch + threads - 1) / threads;
-    kernel_write_num_den_mask_threshold_half_rational<<<blocks, threads>>>(
+    kernel_write_num_den_mask_threshold_half_rational<<<blocks, threads, 0, h->stream>>>(
         h->d_power_scratch,
         d_num_out,
         d_den_out,
@@ -2027,7 +2036,7 @@ static bool fstat_write_numden_mask_rational(
         h->batch,
         d_rational_overflow_count);
     CUDA_CHECK_LAST_BOOL();
-    CUDA_CHECK_SYNC_BOOL();
+    CUDA_CHECK_SYNC_BOOL(h->stream);
     return true;
 }
 
@@ -2077,6 +2086,7 @@ static FStatHandle* fstat_create(
     h->d_weights = nullptr;
     h->d_weight_lanes = nullptr;
     h->weights_cached = false;
+    h->stream = 0;
 
     if (!record_cuda_error(cudaMalloc(
         &h->d_power_scratch,
@@ -2245,6 +2255,20 @@ void FStat_Destroy(void* handle)
     (void)ok;
 }
 
+void FStat_SetStream(void* handle, cudaStream_t stream)
+{
+    clear_last_error();
+    FStatHandle* h = static_cast<FStatHandle*>(handle);
+    if (!h) {
+        record_api_error("handle is null.");
+        return;
+    }
+    h->stream = stream;
+    // Any cached weight upload was ordered on the previous stream; re-upload on the
+    // new one before the next launch rather than assume the two are ordered.
+    h->weights_cached = false;
+}
+
 void FStat_Compute_DiagnosticFloat(void* handle, const InputType* w_in)
 {
     clear_last_error();
@@ -2367,12 +2391,12 @@ void FStat_Compute_Powers(void* handle, const InputType* w_in)
     const int count = h->batch * FSTAT_NUM_WEIGHT_TERMS;
     const int threads = FSTAT_OUTPUT_KERNEL_THREADS;
     const int blocks = (count + threads - 1) / threads;
-    kernel_convert_power_terms_to_float<<<blocks, threads>>>(
+    kernel_convert_power_terms_to_float<<<blocks, threads, 0, h->stream>>>(
         h->d_power_scratch,
         h->d_out,
         count);
     CUDA_CHECK_LAST();
-    CUDA_CHECK_SYNC();
+    CUDA_CHECK_SYNC(h->stream);
 }
 
 void FStat_Compute_Powers_U64(
@@ -2393,12 +2417,13 @@ void FStat_Compute_Powers_U64(
 
     if (!fstat_accumulate(h, w_in)) return;
 
-    CUDA_CHECK(cudaMemcpy(
+    CUDA_CHECK(cudaMemcpyAsync(
         d_power_out,
         h->d_power_scratch,
         h->batch * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long),
-        cudaMemcpyDeviceToDevice));
-    CUDA_CHECK_SYNC();
+        cudaMemcpyDeviceToDevice,
+        h->stream));
+    CUDA_CHECK_SYNC(h->stream);
 }
 
 /**
@@ -2428,7 +2453,7 @@ void FStat_Compute_RowSums_I32(
     }
 
     if (h->batch <= 1) {
-        kernel_accumulate_row_sums<<<grid_size, FSTAT_BLOCK_THREADS>>>(
+        kernel_accumulate_row_sums<<<grid_size, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
             h->d_in,
             h->d_weights,
             h->d_weight_lanes,
@@ -2437,7 +2462,7 @@ void FStat_Compute_RowSums_I32(
         );
     } else {
         dim3 grid(grid_size, h->batch, 1);
-        kernel_accumulate_row_sums_batched<<<grid, FSTAT_BLOCK_THREADS>>>(
+        kernel_accumulate_row_sums_batched<<<grid, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
             h->d_in,
             h->d_weights,
             h->d_weight_lanes,
@@ -2447,7 +2472,7 @@ void FStat_Compute_RowSums_I32(
         );
     }
     CUDA_CHECK_LAST();
-    CUDA_CHECK_SYNC();
+    CUDA_CHECK_SYNC(h->stream);
 }
 
 int FStat_Supports_RowSums(void)
@@ -2503,6 +2528,8 @@ void FStat_Compute_FinePowers_U64(
     const size_t out_bytes = static_cast<size_t>(batch)
         * FSTAT_NUM_WEIGHT_TERMS * FSTAT_FINE_NUM_BINS
         * sizeof(unsigned long long);
+    /* Handle-less entry: no stream to select, so this stays on the legacy
+     * default stream. */
     CUDA_CHECK(cudaMemset(d_fine_power_out, 0, out_bytes));
 
     const int chunks =
@@ -2514,7 +2541,7 @@ void FStat_Compute_FinePowers_U64(
         num_streams,
         batch);
     CUDA_CHECK_LAST();
-    CUDA_CHECK_SYNC();
+    CUDA_CHECK_SYNC(0);
 }
 
 int FStat_Supports_FinePowers(void)
@@ -2582,11 +2609,11 @@ void FStat_Compute_FusedFine_U64(
         * sizeof(unsigned long long);
     const size_t power_bytes = static_cast<size_t>(h->batch)
         * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long);
-    CUDA_CHECK(cudaMemset(d_fine_power_out, 0, fine_bytes));
-    CUDA_CHECK(cudaMemset(d_power_out, 0, power_bytes));
+    CUDA_CHECK(cudaMemsetAsync(d_fine_power_out, 0, fine_bytes, h->stream));
+    CUDA_CHECK(cudaMemsetAsync(d_power_out, 0, power_bytes, h->stream));
 
     dim3 grid(num_streams, h->batch, 1);
-    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS>>>(
+    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
         h->d_in,
         h->d_weights,
         h->d_weight_lanes,
@@ -2599,7 +2626,7 @@ void FStat_Compute_FusedFine_U64(
         h->detector_rows_per_block,
         h->batch);
     CUDA_CHECK_LAST();
-    CUDA_CHECK_SYNC();
+    CUDA_CHECK_SYNC(h->stream);
 }
 
 int FStat_Supports_FusedFine(void)
@@ -2676,19 +2703,19 @@ void FStat_Compute_FusedFineMask_U64(
     const size_t fine_bytes = static_cast<size_t>(h->batch)
         * FSTAT_NUM_WEIGHT_TERMS * FSTAT_FINE_NUM_BINS
         * sizeof(unsigned long long);
-    CUDA_CHECK(cudaMemset(d_fine_power_out, 0, fine_bytes));
+    CUDA_CHECK(cudaMemsetAsync(d_fine_power_out, 0, fine_bytes, h->stream));
     /* The mask buffer doubles as the completion counter and must start
      * at zero for every launch. */
-    CUDA_CHECK(cudaMemset(
-        d_mask_out, 0, static_cast<size_t>(h->batch) * sizeof(int)));
+    CUDA_CHECK(cudaMemsetAsync(
+        d_mask_out, 0, static_cast<size_t>(h->batch) * sizeof(int), h->stream));
     if (d_power_out != nullptr) {
         const size_t power_bytes = static_cast<size_t>(h->batch)
             * FSTAT_NUM_WEIGHT_TERMS * sizeof(unsigned long long);
-        CUDA_CHECK(cudaMemset(d_power_out, 0, power_bytes));
+        CUDA_CHECK(cudaMemsetAsync(d_power_out, 0, power_bytes, h->stream));
     }
 
     dim3 grid(num_streams, h->batch, 1);
-    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS>>>(
+    kernel_fused_fine<<<grid, FSTAT_BLOCK_THREADS, 0, h->stream>>>(
         h->d_in,
         h->d_weights,
         h->d_weight_lanes,
@@ -2708,7 +2735,7 @@ void FStat_Compute_FusedFineMask_U64(
         h->detector_rows_per_block,
         h->batch);
     CUDA_CHECK_LAST();
-    CUDA_CHECK_SYNC();
+    CUDA_CHECK_SYNC(h->stream);
 }
 
 int FStat_Supports_FusedFineMask(void)

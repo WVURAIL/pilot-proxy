@@ -87,10 +87,13 @@
  * F = 2 * P_target / (P_ref1 + P_ref2).
  *
  * @section execution Execution Policy
- * Handles are device-affine and default-stream only. The caller must set the
- * intended CUDA device before FStat_Create/FStat_Create_Batch and keep the
- * same current device for compute and destroy calls on that handle. One host
- * thread must not use the same handle concurrently.
+ * Handles are device-affine. All device work for a handle (uploads, memsets,
+ * kernel launches) is issued on the handle's CUDA stream, which defaults to
+ * the legacy default stream (0) and may be changed with FStat_SetStream. The
+ * caller must set the intended CUDA device before FStat_Create/
+ * FStat_Create_Batch and keep the same current device for compute and destroy
+ * calls on that handle. One host thread must not use the same handle
+ * concurrently.
  *
  * @author Dylan
  * @date 2025
@@ -99,6 +102,14 @@
 #pragma once
 
 #include "config.h"
+
+/* cudaStream_t without pulling the CUDA runtime headers into plain C/C++
+ * translation units. Matches the definition in <driver_types.h>, which is
+ * used instead when the CUDA runtime headers are already included. */
+#if !defined(__DRIVER_TYPES_H__)
+struct CUstream_st;
+typedef struct CUstream_st* cudaStream_t;
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -354,6 +365,22 @@ void* FStat_Create_Batch(
  *               (NULL is safely ignored).
  */
 void FStat_Destroy(void* handle);
+
+/**
+ * @brief Set the CUDA stream on which the handle's device work is issued.
+ *
+ * Every subsequent FStat_Compute_* call on this handle enqueues its uploads,
+ * memsets and kernel launches on @p stream instead of the legacy default
+ * stream (0), the value a fresh handle starts with. The stream must belong to
+ * the handle's device. Outputs are ready when @p stream has completed; the
+ * caller orders any host or cross-stream consumer with the usual stream/
+ * event primitives. The handle-less FStat_Compute_FinePowers_U64 entry has no
+ * stream and stays on the default stream.
+ *
+ * @param handle Handle created by FStat_Create or FStat_Create_Batch
+ * @param stream CUDA stream, or 0 for the legacy default stream
+ */
+void FStat_SetStream(void* handle, cudaStream_t stream);
 
 /* ===========================================================================
  * COMPUTATION FUNCTIONS

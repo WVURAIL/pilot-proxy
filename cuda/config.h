@@ -50,9 +50,15 @@
  * library remains policy-free in the sense that it compiles in no
  * channel constants. Existing entry points are unchanged;
  * FStat_Compute_FusedFine_U64 output is bit-identical to 2.2.0.
+ *
+ * 2.4.0: adds FStat_SetStream. Every launch, memset and copy a handle
+ * issues runs on the handle's CUDA stream (default 0, the legacy default
+ * stream, so existing callers are unchanged). The handle-less
+ * FStat_Compute_FinePowers_U64 stays on the default stream. Existing
+ * entry points and their output are unchanged.
  */
 #define FSTAT_CORE_VERSION_MAJOR 2
-#define FSTAT_CORE_VERSION_MINOR 3
+#define FSTAT_CORE_VERSION_MINOR 4
 #define FSTAT_CORE_VERSION_PATCH 0
 
 /* ===========================================================================
