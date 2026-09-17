@@ -12,8 +12,11 @@ from pilot_proxy.archive.sources import cadc_transport
 def test_truncated_transfers_are_expected_errors():
     urllib3 = pytest.importorskip("urllib3")
     errors = cadc_transport.expected_errors()
-    assert urllib3.exceptions.ProtocolError in errors
     assert http.client.IncompleteRead in errors
+    # Raw urllib3 failures escape requests when the streamed body breaks
+    # (truncation) or stalls (read timeout); both must be retryable.
+    assert issubclass(urllib3.exceptions.ProtocolError, errors)
+    assert issubclass(urllib3.exceptions.ReadTimeoutError, errors)
     assert OSError in errors
 
 
