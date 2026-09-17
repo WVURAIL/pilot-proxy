@@ -11,6 +11,7 @@ import struct
 import zlib
 from dataclasses import dataclass, replace
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Sequence, cast
 
 import numpy as np
@@ -400,6 +401,7 @@ def target_layout(
     physical_channel: int,
     profile: ReceiverProfile,
     core: DetectorCoreLayout | DetectorCoreProfile,
+    pilot_hz_override: float | None = None,
 ) -> dict[str, Any]:
     # A file-backed core profile must agree with the receiver profile on the
     # deployed window length; select it with with_detector_window_samples
@@ -417,7 +419,18 @@ def target_layout(
                 "(DetectorCoreProfile.with_detector_window_samples)."
             )
     channel = validate_uhf_physical_channel(physical_channel)
-    pilot_hz = physical_channel_to_pilot_hz(channel)
+    nominal_pilot_hz = physical_channel_to_pilot_hz(channel)
+    # A station can run its carrier a few kHz off the ATSC nominal; the
+    # template follows the measured carrier while the manifest keeps the
+    # nominal pilot as the lookup key.
+    pilot_hz = nominal_pilot_hz if pilot_hz_override is None else float(pilot_hz_override)
+    if pilot_hz_override is not None and abs(pilot_hz - nominal_pilot_hz) > float(
+        profile.coarse_channel_width_hz
+    ) / 2.0:
+        raise ValueError(
+            f"measured pilot {pilot_hz:.0f} Hz is more than half a coarse channel from the "
+            f"nominal pilot {nominal_pilot_hz:.0f} Hz of physical channel {channel}"
+        )
     selection = receiver_frequency_to_channel(pilot_hz, profile)
     frame_center, forbidden_dc, frame_mode = _resolve_frame_convention(
         profile, int(selection.coarse_channel_index)
@@ -505,8 +518,10 @@ def target_layout(
         )
     return {
         "physical_channel": channel,
-        "dtv_pilot_hz": float(pilot_hz),
-        "target_frequency_mhz": float(pilot_hz / HZ_PER_MHZ),
+        "dtv_pilot_hz": float(nominal_pilot_hz),
+        "target_frequency_mhz": float(nominal_pilot_hz / HZ_PER_MHZ),
+        "template_pilot_hz": float(pilot_hz),
+        "pilot_offset_hz": float(pilot_hz - nominal_pilot_hz),
         "coarse_channel_index": int(selection.coarse_channel_index),
         "baseband_frame_center_normalized": float(frame_center),
         "baseband_frame_mode": frame_mode,
@@ -634,6 +649,7 @@ def generate_weight_table_from_receiver_profile(
     core: DetectorCoreProfile,
     physical_channels: Sequence[int],
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+    pilot_overrides_hz: Mapping[int, float] | None = None,
 ) -> tuple[np.ndarray, list[dict[str, Any]]]:
     """Return the weight table and manifest target-layout entries."""
     validate_integration_compatibility(profile=profile, detector_core=core)
@@ -674,6 +690,7 @@ def generate_weight_table_from_receiver_profile(
             physical_channel=channel,
             profile=generation_profile,
             core=core,
+            pilot_hz_override=(pilot_overrides_hz or {}).get(int(channel)),
         )
         coarse_index = int(cast(int, layout["coarse_channel_index"]))
         if np.any(table[coarse_index]):
@@ -755,6 +772,7 @@ def write_weight_bank_from_receiver_profile(
     core: DetectorCoreProfile,
     physical_channels: Sequence[int],
     weight_coordinate_system: str = WEIGHT_COORDINATE_POST_SPECTRAL_SENSE,
+    pilot_overrides_hz: Mapping[int, float] | None = None,
 ) -> dict[str, Any]:
     """Write a packed weight bank plus the adjacent manifest and return manifest."""
     validate_integration_compatibility(profile=profile, detector_core=core)
@@ -771,6 +789,7 @@ def write_weight_bank_from_receiver_profile(
         core=core,
         physical_channels=channels,
         weight_coordinate_system=coordinate_system,
+        pilot_overrides_hz=pilot_overrides_hz,
     )
     weights_bytes = table.tobytes(order="C")
     header = _weight_header_bytes(
@@ -783,6 +802,9 @@ def write_weight_bank_from_receiver_profile(
     output.write_bytes(payload)
     manifest = {
         "schema_version": "pilotproxy_weight_manifest_v1",
+        "pilot_overrides_hz": {
+            str(int(ch)): float(hz) for ch, hz in sorted((pilot_overrides_hz or {}).items())
+        },
         "weight_format_version": int(WEIGHT_VERSION),
         "weight_coordinate_system": coordinate_system,
         "input_coordinate_system": input_coordinate_system_for_weight_coordinate(

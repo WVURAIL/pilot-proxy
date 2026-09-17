@@ -710,12 +710,19 @@ def _cmd_make_weights(args: argparse.Namespace) -> None:
         physical_channels=args.physical_channel,
         physical_channel_range=args.physical_channel_range,
     )
+    pilot_overrides_hz: dict[int, float] = {}
+    for item in args.pilot_override or ():
+        channel_text, _, hz_text = item.partition("=")
+        if not hz_text:
+            raise SystemExit(f"--pilot-override expects CH=HZ, got {item!r}")
+        pilot_overrides_hz[int(channel_text)] = float(hz_text)
     manifest = write_weight_bank_from_receiver_profile(
         output_path=args.output,
         profile=profile,
         core=detector_core,
         physical_channels=physical_channels,
         weight_coordinate_system=args.weight_coordinate_system,
+        pilot_overrides_hz=pilot_overrides_hz or None,
     )
     print(f"Wrote {args.output}")
     print(f"Wrote {args.output}.manifest.json")
@@ -1181,6 +1188,14 @@ def build_parser() -> argparse.ArgumentParser:
             "after any spectral-sense normalization, or raw_input_frequency_coordinate "
             "for native receiver-coordinate weights."
         ),
+    )
+    make_weights.add_argument(
+        "--pilot-override",
+        action="append",
+        default=None,
+        metavar="CH=HZ",
+        help="Build a channel's template at a measured carrier instead of the nominal ATSC "
+        "pilot, e.g. 33=584305600. The manifest keeps the nominal pilot as the key. Repeat as needed.",
     )
     make_weights.add_argument("--output", required=True,
                               help="Output path for the packed weight bank "
