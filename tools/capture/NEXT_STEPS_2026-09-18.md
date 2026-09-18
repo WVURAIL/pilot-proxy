@@ -36,8 +36,12 @@ the kernel run directories ../kernel_<event>_k230 and _k230_ch33measured, the ar
 4. Post-upgrade dump (one 1.4 s dump once the upgraded correlator records all channels): trigger_dump.py, then
    process_dump.sh <event>, then steps 1 to 3 above. Closes channel 24 and lets the six pilot bins' masks be read.
    Include a control block outside the DTV band if possible (audit S1).
-5. SDR bench (optional; closes an evidence-matrix cell): ~/rail/output/sdr-bench-2026-09-17/BENCH_RUNBOOK.md and
-   protocol_spec.json; pads must give a fixed 24 dB plus a 0 to 36 dB ladder in 6 dB steps.
+5. SDR bench (optional; closes an evidence-matrix cell). REDESIGNED 2026-09-18 for the kit in hand (LimeSDR Mini,
+   2 terminators, 2 x 30 dB pads, 1 cable): the fine ladder is the commanded tone amplitude in six 6.02 dB steps and
+   the pads move it by a known 30 dB, with two coincidence pairs where the analog and digital routes must agree.
+   Runbook and the six validated rung protocols: ~/rail/output/sdr-bench-2026-09-17/BENCH_RUNBOOK.md and rungs/a0..a5
+   (copy without payloads in tools/capture/sdr-bench-2026-09-18/; regenerate payloads with make_spec_v2.py).
+   36 records, about forty minutes. Nothing in it is tuned after a record.
 6. Future work named in the text: rebuild the RFIsher bank with the as-built CHIME baseline density (RadioFisher CHIME
    layout has Dmin 20 m; audit round 2, R3) so the 10 to 20 m classes are priced; calibrated-gain stacking to lower the
    estimator floor; a per-range uncertainty on the bars.
