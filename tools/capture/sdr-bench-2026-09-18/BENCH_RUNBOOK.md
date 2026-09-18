@@ -67,6 +67,66 @@ six qualified slots for any L between about 0 and 60 dB. That is why this ladder
 is run instead of an analog-only one: with three pad settings alone, at most two
 slots could be qualified and only for a narrow range of L.
 
+## Steps
+
+Interpreter (`$PY`): `/home/djg/rail/output/fisher-fixes-2026-09-08/analysis-venv/bin/python`,
+the analysis venv of the 2026-09-09 run. Set `PYTHONPATH=/home/djg/rail/pilot-proxy/src`
+and the numerical thread variables to 1. Power the radio and wait ten minutes
+before the first record.
+
+Rung amplitudes, passed to the helper as `--tone-component`:
+
+| rung | amplitude | level |
+|---|---|---|
+| a0 | 0.005 | 0 dB |
+| a1 | 0.0025 | -6.02 dB |
+| a2 | 0.00125 | -12.04 dB |
+| a3 | 0.000625 | -18.06 dB |
+| a4 | 0.0003125 | -24.08 dB |
+| a5 | 0.00015625 | -30.10 dB |
+
+1. Create `session/` and `session_log.csv` with columns slot, utc_start, rung,
+   helper_mode, tone_component, commanded_attenuation_db, pad_parts, cable,
+   terminator_ids, room_temperature_c, notes. Photograph the bench once before
+   the first record. Label the parts: cable C1, pads P1 and P2 by their body
+   marks, terminators T1 and T2, and use the same identities in every row.
+2. For each rung k in 0 to 5, read `rungs/a<k>/protocol_spec.json` and work its
+   six slots in `slot_index` order. The first three are the fixed controls
+   (terminated TX-zero, a cabled tone, a terminated null), so two connector
+   changes per rung are spent on them; that order is fixed by the protocol and
+   is not to be rearranged.
+3. Per slot: connect the ports as the slot's `tx_port` and `rx_port` say, fill
+   the log row, then run
+
+       $PY /home/djg/rail/pilot-proxy/tools/lime_reference_capture_v1.py prepare \
+         --output session/a<k>/slot-<NN>-<mode> \
+         --build-manifest /home/djg/rail/results/sdr_reference_transport_2026-09-09/build-v1/build.json \
+         --serial 0x1d423d9108f273 --mode <noise|txzero|tone> \
+         --tone-component <rung amplitude> --record-seconds 2
+
+       $PY /home/djg/rail/pilot-proxy/tools/lime_reference_capture_v1.py capture \
+         --output session/a<k>/slot-<NN>-<mode> --hardware-authorized --rf-confined-authorized
+
+   adding `--transmit` on the txzero and tone slots. Change pads only between
+   records, with the helper not running.
+4. On a failure, read `rx_error` in the slot's `receipt.json`: `RX overload
+   guard` on a tone slot is the predeclared exception, so log it, keep the
+   record, and go on. Anything else stops the session.
+5. After the last slot, `sha256sum` every `receipt.json` and the log into
+   `session/manifest.sha256` before any analysis.
+6. Analyse each successful record with the unchanged function:
+
+       $PY -c "import sys; sys.path.insert(0, '/home/djg/rail/pilot-proxy/tools'); \
+       from analyze_sdr_antenna_controls_v1 import analyze_capture; \
+       analyze_capture('session/a<k>/slot-<NN>-<mode>', 'analysis/a<k>/slot-<NN>-<mode>')"
+
+   Tabulate `natural_mean_frame_term_powers`, `natural_ratio`, `packed_ratio`
+   and `adapter_metadata.sample_quantization.saturated_component_count` from each
+   `record.json`, with the receipt's `rx_peak_component` and `rx_max_chunk_rms`,
+   into `analysis/ladder.csv`: one row per slot, with its rung, pad, commanded
+   level and whether it qualified. The two coincidence pairs and the slope are
+   read off that table.
+
 ## Acceptance criteria (written before the data)
 
 A slot is qualified when its record completes, carries zero clipped samples and
