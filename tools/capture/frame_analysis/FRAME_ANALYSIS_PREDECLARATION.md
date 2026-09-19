@@ -436,3 +436,55 @@ between-epoch coherence of 0.988 to 0.999. Channel 16 is marginal. Every other c
 No rescue exists anywhere. One keep cell survives in the table, channel 23 on the short BAO baselines, and it is a
 credited keep only: at the no-credit rescue test of the asymmetric rule it reads 28.27, which is 14.5 dB over
 tolerance. No channel and no range passes the rescue test.
+
+## Amendment 12 (2026-09-19, after a systematic audit of every amendment against the code that implements it): the corrections the audit confirmed, none of which moves a verdict
+
+Amendment 11 was found by accident. The defect it fixed was of one kind, the predeclaration saying one thing and the
+code doing another, so the whole predeclaration was then checked against the whole implementation, amendment by
+amendment, with every claimed difference verified adversarially against the products. Sixty-eight differences were
+claimed, twenty-four were carried to verification, fifteen survived it and nine were refuted. Not one of the fifteen
+moves a verdict. The six excised channels, every range verdict and every disposition are the same before and after
+this amendment. What follows are the corrections adopted and, as importantly, the ones tested and declined.
+
+1. A bound class enters its range's coherence time at its lower end. Amendment 7 reads a range's coherence time as
+   "the median of the measured east-west class values ...; where a class is bound its lower end is used", and the code
+   admitted a bound class only where every class of the range was bound. Three channels have a bound class on their
+   ruling range, all already excised: channel 17's 78 m class, channel 30's 22 m class and channel 33's 44 m class.
+   Their coherence times become 211, 1136 and 2505 s, from 38, 686 and 1744, and their bars 24.0, 30.8 and 26.5 dB,
+   from 16.5, 28.6 and 24.9. No verdict moves and no channel is added. The status is printed as "measured with a
+   bound class" so the reader can see which rows it touches.
+2. The least trim probe is read at the precision of the coherence time of record. The probes column prints whole
+   seconds and the record value 0.1 s, so a class whose least probe is its primary could report a least probe above
+   its own record value. It is clamped. The largest effect anywhere is 0.03 dB.
+3. The lowest-epoch bound is read on the same polarisation as the rest of the ruling. Amendment 11 item 1 fixed the
+   per-class polarisation for the coherence time and the level; amendment 6's bound still ran its own argmax at each
+   individual epoch, so it could take one polarisation at one epoch and the other at the next. It now uses the
+   per-class polarisation of amendment 11. No verdict moves.
+4. The decibel figure an at-floor row reports is the detection gate, not the floor. The row said "the floor itself is
+   X dB over tolerance" while X was the floor mean plus the three scatters of the detection gate, which is 5.6 to 7.3
+   dB larger. The number is the useful one, being the smallest excess the capture could have detected, so the label is
+   corrected rather than the quantity.
+
+Tested and declined, each with the reason, so that a reader who repeats the audit finds them already answered:
+
+5. The zero floor of the original item 3 is not applied to the class excesses or to the control floor, and stays that
+   way. Censoring at zero biases the control's mean up and its scatter down, which lowers the gate the ruling turns
+   on. Applying it as written was tested: every disposition, range verdict, coherence time and gain is identical, the
+   largest bar shift is 0.17 dB, and exactly two cells cross the gate, neither changing a verdict.
+6. Amendment 5 item 2's parenthetical is wrong and the code is right. On fourteen epochs the 90th-percentile trim
+   drops the top two, not one; the 75 probe drops four and the 95 probe one. Promoting the 95 probe to primary, which
+   is the amendment's literal reading, was tested and gives zero verdict differences, because since amendment 10 item
+   7 the least-probe leg binds and does not depend on which probe is primary.
+7. The ground credit's coherence is read with both polarisations averaged, as the second addendum to amendment 8
+   specifies, and is not moved to the priced polarisation. On channel 16 the priced polarisation's coherence is 0.10
+   against the pol-averaged 0.77, so the change would shrink the credit and raise the bar into an excision. The
+   asymmetric rule excises only with every credit the data can give, so the larger credit is the one the rule
+   requires; the smaller would excise a channel by withdrawing a credit, which is the opposite of the rule.
+8. A refused or constant class is not booked at the sidereal cap. Booking the largest possible gain on a class where
+   the estimator returned nothing would excise on the absence of a measurement. It would excise channel 16 at 17.6 dB
+   and price channel 26, and it is refused for the same reason the persistence fallback was withdrawn by amendment 9.
+
+The ruling under amendments 9 to 12. Six channels are excised: 15 on the short BAO baselines at 19.8 dB, and 17, 30,
+31, 33 and 35 on the long at 24.0, 30.8, 26.4, 26.5 and 17.0 dB. Each clears the allowance at its own least trim
+probe, the bars falling by at most 0.9 dB there, and each would be rescued only by a per-day ground filter reaching a
+between-epoch coherence of 0.991 or more. Channel 16 is marginal. Every other channel is undetermined.

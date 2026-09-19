@@ -69,7 +69,9 @@ for c, f in TAU_FILES.items():
         tau[(ch, c)] = (row["status"], float(row["tau_c_s"]) if row["tau_c_s"] else np.nan)
         # amendment 10 item 7: the least of the channel's own trim probes on this class
         vals = [float(m) for m in re.findall(r"(?:measured|bound|constant)\s+([\d.]+)", row.get("probes", "") or "")]
-        tau_least[(ch, c)] = min(vals) if vals else np.nan
+        tl = min(vals) if vals else np.nan
+        tr = float(row["tau_c_s"]) if row["tau_c_s"] else np.nan
+        tau_least[(ch, c)] = min(tl, tr) if (np.isfinite(tl) and np.isfinite(tr)) else tl
         tau_pol[(ch, c)] = row["pol"]
 # phasor coherence per class (median over the six pairs, in-band)
 rho_v = {}
@@ -109,10 +111,10 @@ def gmed(v):
     return v[n // 2] if n % 2 else float(np.sqrt(v[n // 2 - 1] * v[n // 2]))
 def db(x): return 10 * np.log10(x) if (x is not None and np.isfinite(x) and x > 0) else np.nan
 
-def class_reading(ch, epochs, c):
+def class_reading(ch, epochs, c, fixpol=None):
     """(A_net, measured, floor_mean, floor_sd, pol) on the larger-polarisation reading over the given epochs."""
     best = None
-    for p in (0, 1):
+    for p in ((fixpol,) if fixpol is not None else (0, 1)):
         vals = [ex[(ch, e, c, p)] for e in epochs if (ch, e, c, p) in ex]
         if not vals or (c, p) not in floor: continue
         A = float(np.median(vals)); fm, fs = floor[(c, p)]
@@ -144,10 +146,13 @@ def range_gain(ch, rng, least=False):
     CLASSES = gain_classes(ch, rng)
     meas = [_tau_of(ch, c, least) for c in CLASSES if (ch, c) in tau and tau[(ch, c)][0] == "measured" and np.isfinite(tau[(ch, c)][1])]
     meas = [v for v in meas if np.isfinite(v)]
+    # amendment 12: amendment 7 reads a range's coherence time as the median of its classes,
+    # "where a class is bound its lower end is used", so a bound class enters the aggregate beside
+    # the measured ones rather than only when every class of the range is bound.
     bnd = [_tau_of(ch, c, least) for c in CLASSES if (ch, c) in tau and tau[(ch, c)][0] == "bound" and np.isfinite(tau[(ch, c)][1])]
     bnd = [v for v in bnd if np.isfinite(v)]
     rh = range_rho(ch, rng)
-    if meas: return gmed(meas), "measured", ""
+    if meas: return gmed(meas + bnd), ("measured" if not bnd else "measured with a bound class"), ""
     if bnd: return bnd[0], "bound", ""
     if rng == "bao_long" and (ch, (0, 64)) in tau and tau[(ch, (0, 64))][0] == "measured" and np.isfinite(tau[(ch, (0, 64))][1]):
         return _tau_of(ch, (0, 64), least), "borrowed", f"no measured class on the long range; the channel's own measured coherence time on the 19.5 m class is used (amendment 9 item 3)"
@@ -189,7 +194,7 @@ for ch in sorted({r for r in PILOT}):
             vals = []
             at_floor_epoch = None
             for e in eps14:
-                rd_all = [class_reading(ch, [e], c) for c in classes]; rd = [x for x in rd_all if x and x["measured"]]
+                rd_all = [class_reading(ch, [e], c, POL_OF_CLASS.get((ch, c))) for c in classes]; rd = [x for x in rd_all if x and x["measured"]]
                 if rd: vals.append((float(np.median([x["A_net"] for x in rd])), e))
                 elif any(rd_all): at_floor_epoch = e                        # amendment 9 item 2: an epoch at the floor is the minimum
             if at_floor_epoch is not None: low = dict(A=np.nan, epoch=at_floor_epoch, R_dep=np.nan, R_dep_G1=np.nan, at_floor=True)
@@ -202,7 +207,7 @@ for ch in sorted({r for r in PILOT}):
         if not pols: v = ("undetermined", "no reading")
         elif not anymeas:
             fr = pols["keep_all"]["R_floor"] if "keep_all" in pols else np.nan
-            v = ("at floor", f"not measured above the control floor (the floor itself is {db(fr):.1f} dB over tolerance at G {G:.0f})" if np.isfinite(fr) else "not measured above the control floor (gain unmeasured)")
+            v = ("at floor", f"not measured above the control floor (the detection gate is {db(fr):.1f} dB over tolerance at G {G:.0f})" if np.isfinite(fr) else "not measured above the control floor (gain unmeasured)")
         elif tstat == "unmeasured":
             best_G1 = min(d["R_dep_G1"] for p, d in pols.items() if d["measured"])
             v = ("unpriced", f"measured above the floor but the gain is unmeasured: {db(best_G1):.1f} dB at G = 1, {db(best_G1 * 3600 / TF):.1f} dB at the persistence bound; {tnote}")
@@ -221,7 +226,7 @@ for ch in sorted({r for r in PILOT}):
                 if loosest: v = ("keep", f"{loosest} passes ({db(pols[loosest]['R_dep']):.1f} dB) with both credits at G {G:.0f} ({tstat})")
                 elif not ka_meas:
                     fr = pols["keep_all"]["R_floor"] if "keep_all" in pols else np.nan
-                    v = ("at floor", f"keep-all is not measured above the control floor (the floor itself is {db(fr):.1f} dB over tolerance at G {G:.0f}); the calibrated policies read {bar:.1f} dB over on their kept dumps")
+                    v = ("at floor", f"keep-all is not measured above the control floor (the detection gate is {db(fr):.1f} dB over tolerance at G {G:.0f}); the calibrated policies read {bar:.1f} dB over on their kept dumps")
                 elif bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance under every policy (least: {pbest}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; {db(dbest['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.3f} against the measured {rh:.2f}")
                 elif bar > ALLOW_DB: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}) at G {G:.0f} ({tstat}) but {bar + probe_db:.1f} dB at the least trim probe, inside the {ALLOW_DB:.0f} dB allowance (amendment 10 item 7)")
                 else: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}), within the {ALLOW_DB:.0f} dB allowance, at G {G:.0f} ({tstat})")
