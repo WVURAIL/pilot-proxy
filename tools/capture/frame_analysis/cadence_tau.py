@@ -55,7 +55,7 @@ def level(ep, ch, binset, pol=None):
 
 # amendment 5 options: --level polavg|polmax, --pol-table <table_of_record csv> (per-channel polarisation with the larger A),
 # --trim none|archive (archive: primary 90th-percentile trim of the epoch levels, probes 75/90/95, spread gate 2)
-opts = {"--level": "polavg", "--pol-table": "", "--trim": "none", "--class": "0,1"}
+opts = {"--level": "polavg", "--pol-table": "", "--trim": "none", "--class": "0,1", "--pol": ""}
 args = []
 it = iter(sys.argv[1:])
 for a in it:
@@ -122,7 +122,9 @@ def measure(X, labels, t, ch, binset, trim, record_struct):
 
 for ch in chans:
     pol = POL_OF.get(ch) if opts["--level"] == "polmax" else None
-    if opts["--level"] == "polmax" and ch not in POL_OF:
+    if opts["--pol"] != "":                       # amendment 11: force the polarisation the ruling prices on this class
+        pol = int(opts["--pol"])
+    elif opts["--level"] == "polmax" and ch not in POL_OF:
         med = [np.nanmedian([level(epochs[l], ch, "inband", p)[0] for l in labels]) for p in (0, 1)]
         pol = int(np.nanargmax(med)) if np.isfinite(med).any() else 0
     for binset in ("pilot", "inband"):

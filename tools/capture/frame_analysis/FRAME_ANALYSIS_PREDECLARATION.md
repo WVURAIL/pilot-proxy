@@ -393,3 +393,46 @@ are large because the coherence gain on that range is large, 49,999 and 49,310, 
 detected. The three-scatter gate was fixed in amendment 8, before the ranges were read, and it is not moved now that
 it decides two channels; the margin is disclosed instead, so the collaboration can weigh the two populations
 differently. Nothing here changes a verdict.
+
+Checked and recorded: amendment 10 moves no tolerance number. The lambda_none, lambda_deployed and suppression_db
+columns are identical on all 368 rows before and after it. It changes no estimator, no credit, no gate and no
+threshold. What it changes is which measured ranges are admitted to the ruling, and it adds one test that can only
+move a channel toward undetermined.
+
+## Amendment 11 (2026-09-19, on checking the polarisation of every coherence time against the polarisation whose level it prices; the check was prompted by an adversarial review of the amendment-10 table): the gain must price the residual the level measures
+
+Amendment 5 item 1 reads the cadence level, and therefore the coherence time, "on the polarisation that sets the
+table's A". When amendment 8 made the ruling per baseline class, that became a per-class choice. It was not
+implemented as one. The class files of record (cadence_tau_ns32, ns64, ns128, ns255, ew1, ew2, ew3) were produced
+without the predeclared --pol-table, so cadence_tau.py fell back to a per-class argmax of the raw median level over
+all fourteen epochs, while the ruling prices, per class, the polarisation with the largest excess net of that
+polarisation's own control floor over the four science dumps. Those are different quantities, and on four of the
+seven excised channels they select different polarisations. The product A x G then multiplied one polarisation's
+level by the other polarisation's persistence.
+
+1. The coherence time on a class is read on the polarisation that sets A on that class. The estimator is unchanged
+   and is re-run per class on each polarisation (cadence_tau.py gains a --pol option; the fallback run reproduces the
+   files of record exactly, so the only difference is which polarisation is selected). The ruling then takes the row
+   matching the class's priced polarisation.
+2. A range's gain is aggregated only over the classes whose excess is measured above the control floor. G prices the
+   persistence of the residual that A measures, and a class at the floor has no measured residual to persist. This is
+   the same principle as item 1, applied to classes rather than polarisations.
+
+What it changes. Channel 22 is no longer excised and becomes undetermined. Its only measured class on the ruling
+range is the 9.8 m class on polarisation 0, where the estimator REFUSES (trim spread 471, probes constant 86164 /
+183 / 218). The 2068.2 s that produced its 16.2 dB bar was measured on polarisation 1, whose level on that class
+reads 1.6 floor scatters, that is, at the floor. Channel 33's bar moves from 25.8 to 24.9 dB and channel 35's from
+17.3 to 17.2 dB; 15, 17, 30 and 31 do not move. Item 2 removes the table's only keep cell, channel 18 on the short
+range, whose gain came from a class at the floor; no verdict changes with it.
+
+The direction test. This amendment removes an excision and adds none. Every amendment that only ever adds excisions
+should be suspected of being fitted to the result; this one is a correctness fix, and it costs the ruling a channel.
+
+The ruling under amendments 9 to 11. Six channels are excised: 15 on the short BAO baselines at 19.8 dB, and 17, 30,
+31, 33 and 35 on the long at 16.5, 28.6, 26.4, 24.9 and 17.0 dB. Each clears the allowance at the coherence time of
+record and at its own least trim probe, and each would be rescued only by a per-day ground filter reaching a
+between-epoch coherence of 0.988 to 0.999. Channel 16 is marginal. Every other channel is undetermined.
+
+No rescue exists anywhere. One keep cell survives in the table, channel 23 on the short BAO baselines, and it is a
+credited keep only: at the no-credit rescue test of the asymmetric rule it reads 28.27, which is 14.5 dB over
+tolerance. No channel and no range passes the rescue test.

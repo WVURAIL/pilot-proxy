@@ -1,9 +1,23 @@
 # Where to pick up after 2026-09-18
 
 State of record: dissertation commit 4b14826 on main (github.com/djgormley/dissertation), CI green, 285 pages.
-The ruling: seven DTV channels are excised for the 21 cm BAO measurement with both credits against the least strict
-tolerance. 17, 30, 31, 33 and 35 on the long BAO baselines (bars 16.5, 28.6, 26.4, 25.8, 17.0 dB) and 15 and 22 on the
-short (19.8, 16.2 dB). Channel 16 is marginal. Every other channel is undetermined with its reason; no channel keeps.
+The ruling: six DTV channels are excised for the 21 cm BAO measurement with both credits against the least strict
+tolerance. 17, 30, 31, 33 and 35 on the long BAO baselines (bars 16.5, 28.6, 26.4, 24.9, 17.0 dB) and 15 on the short
+(19.8 dB). Channel 16 is marginal. Every other channel is undetermined with its reason; no channel keeps, and no
+rescue exists anywhere (the one keep cell, channel 23 on the short range, fails the no-credit rescue test by 14.5 dB).
+
+Amendment 11 (2026-09-19) took channel 22 out. Amendment 5 reads a class's coherence time on the polarisation that
+sets its level; after amendment 8 made the ruling per class that became a per-class choice and was never implemented
+as one, because the class files were produced without the predeclared --pol-table, so cadence_tau.py fell back to a
+per-class argmax of the raw median level over all fourteen epochs. On four of the seven then-excised channels that
+picked a different polarisation from the one the ruling prices. Channel 22's only measured class is 9.8 m on
+polarisation 0, where the estimator REFUSES (trim spread 471); the 2068 s behind its 16.2 dB bar came from
+polarisation 1, whose level there is 1.6 floor scatters, at the control floor. cadence_tau.py now takes --pol 0|1 and
+is run per class on each polarisation (the fallback run reproduces the files of record exactly); ruling_baseline.py
+reads the row matching the class's priced polarisation. Item 2 aggregates a range's gain only over classes whose
+excess is measured above the floor, which removed the table's only keep cell (channel 18). The amendment removes an
+excision and adds none. That direction test is the thing to quote if anyone asks whether the amendments were fitted
+to the result.
 
 Amendment 10 (2026-09-18) is why the count moved from five to seven, and it matters for anyone re-reading the record.
 Audit finding R3, and amendment 9 which acted on it, claimed the forecast prices no baseline below 20 m and withdrew
@@ -17,7 +31,7 @@ excised row, the coherence a per-day ground filter would have to reach to save t
 measured 0.34 to 0.84. Read the disclosure at the end of the predeclaration before quoting the two short-range rows:
 they clear the three-scatter detection gate by 0.1 to 1.1 scatters, where the five long-range rows clear it by 19 to 320.
 
-Amendments 1 to 10 and both adversarial audits are in
+Amendments 1 to 11 and both adversarial audits are in
 tools/capture/frame_analysis/ (FRAME_ANALYSIS_PREDECLARATION.md, RULING_AUDIT_*.md) and in the dissertation's
 chapter 9 record section. The repository notes HANDOFF.md, RESULTS_PLAN.md and archive_completion_checklist.md in the
 dissertation carry a "State of record, 2026-09-18" section.
@@ -29,13 +43,16 @@ dissertation carry a "State of record, 2026-09-18" section.
 - Reduced dump products: ~/rail/datasets/pilot_reduce_<event>/ (14 events) and on frb-analysis under
   /data/user-data/dgormley/pilot_reduce/. Raw dumps are on the CHIME archive (datatrail, baseband_<event>).
 - Channel 33 rescan products: author_actions/ch33_rescan/products/ (and OneDrive ch33_rescan/).
-- Table of record: frame_analysis/table_of_record.csv (sha256 939546f4...; the amendment-9 table is kept as table_of_record_before_amendment10.csv, sha256 8f1a510b), vendored in the dissertation as
+- Table of record: frame_analysis/table_of_record.csv (sha256 2095449f...; the amendment-9 table is kept as table_of_record_before_amendment10.csv, sha256 8f1a510b, and the amendment-10 table as table_of_record_before_amendment11.csv, sha256 939546f4), vendored in the dissertation as
   figure_src/data/record/table_of_record.csv; fragments regenerate with
   `~/.venvs/dissertation/bin/python scripts/table_of_record_tex.py figure_src/data/record/table_of_record.csv`.
 
 ## To rebuild the ruling (in frame_analysis/, venv ~/rail/venvs/archive-local)
 1. python ruling_baseline.py table_of_record_before_amendment8.csv table_of_record.csv ../../../ch33_rescan/products
-   (reproduces sha256 939546f4 exactly; check that before trusting any re-run)
+   (reproduces sha256 2095449f exactly; check that before trusting any re-run)
+   If cadence_tau_*_pol{0,1}.csv are missing, regenerate them first:
+     for C in 0,1 0,32 0,64 0,128 0,255 1,0 2,0 3,0; do for P in 0 1; do
+       python cadence_tau.py --level polmax --trim archive --class $C --pol $P <out>.csv <label>=<dir> ... ; done; done
 2. python robustness_v8.py; python cadence_report.py CADENCE_REPORT.md cadence_tau.csv lag_coherence_14.csv table_of_record.csv cadence_tau_a3.csv
 3. In the dissertation: copy the CSVs to figure_src/data/record/, run the two generators, then
    `make manifest PYTHON=~/.venvs/dissertation/bin/python`, commit, push (main is Overleaf-linked: never rebase).

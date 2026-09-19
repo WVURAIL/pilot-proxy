@@ -34,16 +34,43 @@ fl = {}
 for r in csv.DictReader(open(os.path.join(FA, "class_floor_bins.csv"))):
     if r["epoch"] in SCIENCE: fl.setdefault(((int(r["ew"]), int(r["ns"])), int(r["pol"])), []).append(float(r["excess"]))
 floor = {k: (float(np.mean(v)), float(np.std(v, ddof=1))) for k, v in fl.items()}
-# coherence times per class
+# amendment 11: the polarisation that sets A on each class over the four science dumps. Amendment 5 item 1 reads the
+# cadence level "on the polarisation that sets the table's A"; after amendment 8 made the ruling per class, that is a
+# per-class choice, and the class files of record were produced on a per-class argmax of the raw level over all
+# fourteen epochs instead, which is a different quantity. G prices the persistence of the residual A measures, so the
+# two must be the same polarisation.
+POL_OF_CLASS = {}
+for ch in PILOT:
+    for c in CLS_NAME:
+        best = None
+        for p in (0, 1):
+            vals = [ex[(ch, e, c, p)] for e in SCIENCE if (ch, e, c, p) in ex]
+            if not vals or (c, p) not in floor: continue
+            an = float(np.median(vals)) - floor[(c, p)][0]
+            if best is None or an > best[1]: best = (p, an)
+        if best is not None: POL_OF_CLASS[(ch, c)] = best[0]
+
+# coherence times per class, read on the polarisation that sets A there (amendment 11)
 tau = {}
 tau_least = {}
+tau_pol = {}
 for c, f in TAU_FILES.items():
+    byp = {}
+    for p in (0, 1):
+        fp = os.path.join(FA, f[:-4] + f"_pol{p}.csv")
+        if not os.path.exists(fp): continue
+        for r in csv.DictReader(open(fp)):
+            if r["bins"] == "inband": byp[(int(r["channel"]), p)] = r
     for r in csv.DictReader(open(os.path.join(FA, f))):
-        if r["bins"] == "inband":
-            tau[(int(r["channel"]), c)] = (r["status"], float(r["tau_c_s"]) if r["tau_c_s"] else np.nan)
-            # amendment 10 item 7: the least of the channel's own trim probes on this class
-            vals = [float(m) for m in re.findall(r"(?:measured|bound|constant)\s+([\d.]+)", r.get("probes", "") or "")]
-            tau_least[(int(r["channel"]), c)] = min(vals) if vals else np.nan
+        if r["bins"] != "inband": continue
+        ch = int(r["channel"])
+        p = POL_OF_CLASS.get((ch, c))
+        row = byp.get((ch, p), r) if p is not None else r
+        tau[(ch, c)] = (row["status"], float(row["tau_c_s"]) if row["tau_c_s"] else np.nan)
+        # amendment 10 item 7: the least of the channel's own trim probes on this class
+        vals = [float(m) for m in re.findall(r"(?:measured|bound|constant)\s+([\d.]+)", row.get("probes", "") or "")]
+        tau_least[(ch, c)] = min(vals) if vals else np.nan
+        tau_pol[(ch, c)] = row["pol"]
 # phasor coherence per class (median over the six pairs, in-band)
 rho_v = {}
 for r in csv.DictReader(open(os.path.join(FA, "lag_coherence_tenclasses_D.csv"))):
@@ -106,10 +133,18 @@ def rescue_rho(bar_db, rh):
     rem = (1.0 - rh ** 2) * 10 ** ((ALLOW_DB - bar_db) / 10.0)
     return float(np.sqrt(1.0 - rem)) if 0.0 < rem < 1.0 else np.nan
 
+def gain_classes(ch, rng):
+    """Amendment 11 item 2: a range's gain is read only on classes whose excess is measured above the
+    control floor. G prices the persistence of the residual A measures, and a class at the floor has no
+    measured residual to persist."""
+    out = [c for c in RANGES[rng] if (lambda r: bool(r) and r["measured"])(class_reading(ch, list(SCIENCE), c))]
+    return out or RANGES[rng]
+
 def range_gain(ch, rng, least=False):
-    meas = [_tau_of(ch, c, least) for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "measured" and np.isfinite(tau[(ch, c)][1])]
+    CLASSES = gain_classes(ch, rng)
+    meas = [_tau_of(ch, c, least) for c in CLASSES if (ch, c) in tau and tau[(ch, c)][0] == "measured" and np.isfinite(tau[(ch, c)][1])]
     meas = [v for v in meas if np.isfinite(v)]
-    bnd = [_tau_of(ch, c, least) for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "bound" and np.isfinite(tau[(ch, c)][1])]
+    bnd = [_tau_of(ch, c, least) for c in CLASSES if (ch, c) in tau and tau[(ch, c)][0] == "bound" and np.isfinite(tau[(ch, c)][1])]
     bnd = [v for v in bnd if np.isfinite(v)]
     rh = range_rho(ch, rng)
     if meas: return gmed(meas), "measured", ""
