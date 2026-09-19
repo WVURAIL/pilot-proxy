@@ -676,3 +676,33 @@ imprecision never reaches the decision.
 6. The direction test. This amendment adds no excision and removes none. It converts one blind cell
    into a decided one, in the direction of not excisable, and every wider form of it that would have
    added excisions was tested and rejected.
+
+## Amendment 16 (2026-09-19, closing an undeclared convention the second audit asked for on 2026-09-18 and which was not logged): the even-count aggregation of a range's coherence time
+
+Amendment 7 says a range's coherence time is "the median of the measured class values". Where a range
+has an EVEN number of contributing classes the median is not defined by that sentence, and the code
+has always taken the geometric mean of the two middle values (ruling_baseline.py, gmed at line 113,
+applied at line 159). The word "geometric" appears nowhere in this predeclaration. Audit R8 asked a
+day ago for the convention to be logged as a numbered amendment and it was not. It is logged here,
+with its sensitivity, because it is load-bearing on the published bars and a reviewer who finds an
+undeclared convention will assume the worst about it.
+
+The convention stands as the code has always applied it: the geometric mean of the two middle values.
+It is the right choice for a quantity that enters the ruling logarithmically, a coherence time whose
+bar is proportional to its decibels, and it is the choice that was in force before any range was read.
+
+What it is worth, every other input held fixed:
+
+| aggregation | 15 | 17 | 30 | 31 | 33 | 35 | excised |
+|---|---|---|---|---|---|---|---|
+| geometric mean, as ruled | 19.8 | 24.0 | 30.8 | 26.4 | 26.5 | 17.0 | all six |
+| arithmetic mean | 19.8 | 28.6 | 31.4 | 26.4 | 26.7 | 17.0 | all six |
+| lower of the two middle | 19.8 | 16.5 | 28.6 | 26.4 | 24.9 | 17.0 | all six |
+| upper of the two middle | 19.8 | 31.4 | 33.0 | 26.4 | 28.0 | 17.0 | all six |
+
+The convention is worth up to 14.9 dB of published bar on channel 17 and 4.4 dB on channel 30, and
+nothing at all on channels 15, 31 and 35, whose ranges contribute an odd number of classes. It
+changes no verdict: the excised set is identical under all four conventions, and under the most
+conservative of them, the lower of the two middle values, the six bars are 19.8, 16.5, 28.6, 26.4,
+24.9 and 17.0 dB, every one clear of the 3 dB allowance. That invariance is the point of logging it.
+The manuscript quotes the ruling's own figures and states the conservative alternative beside them.
