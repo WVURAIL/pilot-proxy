@@ -216,7 +216,7 @@ for ch in sorted({r for r in PILOT}):
                 v = ("at floor", f"the lowest epoch ({low['epoch']}) is not measured above the control floor on any class of the range, so the bound is at the floor and cannot excise (amendment 9)")
             elif not has_pilot[ch] and low is not None and np.isfinite(low["R_dep"]):
                 bar = db(low["R_dep"]); pbest = "lowest-epoch bound"
-                if bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; no policy can pass; {db(low['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.3f} against the measured {rh:.2f}")
+                if bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; no policy can pass; {db(low['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.4f} against the measured {rh:.2f}")
                 elif bar > ALLOW_DB: v = ("marginal", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) but {bar + probe_db:.1f} dB at the least trim probe, inside the {ALLOW_DB:.0f} dB allowance (amendment 10 item 7)")
                 else: v = ("undetermined", f"lowest-epoch bound {bar:.1f} dB, within the allowance; mask not evaluable")
             elif cand:
@@ -227,7 +227,7 @@ for ch in sorted({r for r in PILOT}):
                 elif not ka_meas:
                     fr = pols["keep_all"]["R_floor"] if "keep_all" in pols else np.nan
                     v = ("at floor", f"keep-all is not measured above the control floor (the detection gate is {db(fr):.1f} dB over tolerance at G {G:.0f}); the calibrated policies read {bar:.1f} dB over on their kept dumps")
-                elif bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance under every policy (least: {pbest}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; {db(dbest['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.3f} against the measured {rh:.2f}")
+                elif bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance under every policy (least: {pbest}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; {db(dbest['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.4f} against the measured {rh:.2f}")
                 elif bar > ALLOW_DB: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}) at G {G:.0f} ({tstat}) but {bar + probe_db:.1f} dB at the least trim probe, inside the {ALLOW_DB:.0f} dB allowance (amendment 10 item 7)")
                 else: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}), within the {ALLOW_DB:.0f} dB allowance, at G {G:.0f} ({tstat})")
             else: v = ("undetermined", "measured on no evaluable policy")
@@ -279,7 +279,7 @@ with open(outp, "w") as fh:
             o[f"{rng}_verdict"] = p["verdict"][0]
             mb = re.search(r"([-\d.]+) dB over tolerance", p["verdict"][1])
             rr = rescue_rho(float(mb.group(1)), p["rho"]) if mb else np.nan
-            o[f"{rng}_rescue_rho"] = f"{rr:.3f}" if np.isfinite(rr) else ""
+            o[f"{rng}_rescue_rho"] = f"{rr:.4f}" if np.isfinite(rr) else ""
         w.writerow(o)
 print("ch  summary        | shortest              | short BAO              | long BAO")
 for ch in sorted(results):
