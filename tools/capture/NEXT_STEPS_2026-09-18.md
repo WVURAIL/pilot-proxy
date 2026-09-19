@@ -81,12 +81,14 @@ Inputs the ruling reads: class_excess_epochs.csv, class_floor_bins.csv (class_ex
 (cadence_tau.py --class ew,ns --level polmax --trim archive), lag_coherence_tenclasses_D.csv (cadence_lags_tenclasses.py),
 the kernel run directories ../kernel_<event>_k230 and _k230_ch33measured, the archive per-pilot products.
 
-## The cadence campaign: DESIGNED AND NOT RECOMMENDED
+## The cadence campaign: DESIGNED, AND THE DECISION IS REOPENED
 
-Do not fly it. Full reasoning in tools/capture/CAMPAIGN_DECISION_2026-09-19.md. The short version:
-a new campaign REPLACES rather than augments the record, because every record-to-new pair exceeds a
-sidereal day and is discarded at cadence_tau.py:92; the record's 150 frames across 14 epochs would be
-traded for ~100 frames of 5-frame dumps. The refusal ceiling is structural: at ZERO measurement noise
+Do NOT act on either answer yet. Full reasoning in tools/capture/CAMPAIGN_DECISION_2026-09-19.md. The short version:
+the claim that a new campaign REPLACES the record is FALSE and has been withdrawn. The estimator pairs
+over every epoch supplied and discards only cross-campaign pairs, so combining gives 280 pairs against
+the record's 90, and the record's full 15 lag classes are retained. The campaign AUGMENTS. The record's
+ten cadence dumps are 4 frames, so 5-frame dumps are slightly DEEPER than what the short-lag classes
+already use; the only real depth exposure is the plateau, fixable by firing waves C and D at 1.39 s. The refusal ceiling is structural: at ZERO measurement noise
 35 to 41 per cent of the target rows still refuse, and depth buys ~5 points between 5 frames and
 infinite depth. And my own framing was wrong: filling the 1200-7178 s gap decides NO channel, because
 every decision threshold in the target set is 24.7 to 620.4 s, all below 1200 s. The blockers are the

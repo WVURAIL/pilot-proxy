@@ -65,3 +65,50 @@ Also checked and refuted: that channel 28 could return a keep. Its long range is
 keep-all reading being at the control floor, so no keep can be formed there at all; a keep reached
 through a calibrated policy while keep-all sits at the floor is the artifact amendment 11 item 2
 removed for channel 18. No channel keeps, and no achievable campaign changes that.
+
+---
+
+## CORRECTION, same day: the first reason above is false, and the decision is reopened
+
+The decision recorded above rests on five reasons. On checking the logic rather than the arithmetic,
+the first is wrong, and two of the others weaken with it.
+
+**"It replaces the existing measurement rather than adding to it" is FALSE.** The estimator forms
+pairs over every epoch it is given (cadence_tau.py lines 88 to 93) and discards only those separated
+by a sidereal day or more. The record's own pairs are all below that and are retained. Simulated:
+
+| | epochs | pairs kept | classes below 7200 s | plateau pairs |
+|---|---|---|---|---|
+| record alone | 14 | 90 | 15 | 43 |
+| new campaign alone | 20 | 190 | 11 | 112 |
+| combined | 34 | 280 | 15 | 155 |
+
+Combining keeps the record's full fifteen classes, not the campaign's eleven, and roughly triples the
+pairs. The campaign AUGMENTS the record. Only the cross-campaign pairs are lost, and those carry no
+information the estimator could use anyway.
+
+**The grid-bias reason weakens with it.** The objection was that the campaign's eleven classes put
+seven off-centre and return 0.899 of the true coherence time at channel 16's threshold. That is a
+property of the campaign run alone. Combined, the grid is the record's fifteen classes, whose
+centring the same audit measured at a median of 1.03 and a maximum of 1.50.
+
+**The depth reason is narrower than stated, and points the other way on most classes.** The record is
+not fourteen deep epochs: it is one 11-frame pilot, three 33-frame science dumps and ten 4-frame
+cadence dumps, 150 frames in all. The campaign's 5-frame dumps are therefore slightly DEEPER than the
+ten epochs that populate the record's short-lag classes, not shallower. Measured over the combined
+set, the share of each class carried by new pairs and the share it would carry under inverse-variance
+weighting differ by at most five points, because the depths are comparable. The genuine exposure is
+the plateau alone, where the record's 43 pairs involve the 33-frame science dumps and the campaign
+would add 112 pairs at 5 frames; under the estimator's plain mean those would dominate. That is
+fixable, either by firing waves C and D at the full 1.39 s instead of 0.215 s, or by inverse-variance
+weighting the class means, which an earlier audit already identified as a predeclarable amendment.
+
+**What survives.** The structural refusal ceiling, which I have not verified independently and which
+is a property of the 75/90/95 trim rather than of the geometry; and the practical costs, which are
+real: the firing script hard-codes a fixed offset ladder, about 90 GiB must be reclaimed against
+73 GiB free, and the transfer holds a shared link for half a day.
+
+**Status: the decision is reopened, not reversed.** Two of the five reasons for declining have
+failed, so the recommendation is no longer supported by its own argument. It should be re-derived
+against the combined analysis, with the plateau depth fixed, before anyone acts on either answer.
+Nothing has been submitted and nothing should be until that is done.
