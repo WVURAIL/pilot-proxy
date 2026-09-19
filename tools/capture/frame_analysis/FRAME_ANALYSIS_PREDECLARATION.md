@@ -635,3 +635,44 @@ and one a claim that did not survive.
 3. Also refuted: that the 2020 cohort could supply a floor for the floor-limited channels. It cannot,
    for the same reason, and its non-detections are in any case at 8 frames per epoch against the 2026
    capture's 33.
+
+## Amendment 15 (2026-09-19, on the author's instruction to seek a confident decision channel by channel even where the estimator refuses): the trim probes may show that a channel cannot be excised, never that it can
+
+Nine channels are blocked because the coherence estimator returns nothing on the class carrying their
+measured excess. But the estimator publishes three trim probes per class and refuses when they spread
+by more than a factor of two. A refusal says the coherence time is imprecise. It does not by itself
+say the VERDICT is undetermined: if the bar is inside the allowance even at the greatest coherence
+time the probes admit, then no coherence time the estimator admits can excise the channel, and the
+imprecision never reaches the decision.
+
+1. The rule. Where a range has no measured and no bound class, and no borrow under amendment 9 item
+   3, it is priced at the greatest of the measured and bound trim probes of its classes that are
+   measured above the control floor. If the bar there is inside the 3 dB allowance, the range is not
+   excisable, and the row says so with the probe it was tested at. If the bar there is outside the
+   allowance, NOTHING is concluded and the range stays unpriced.
+2. The asymmetry, which is the whole content of the rule. The greatest probe is the largest gain and
+   therefore the least favourable reading for the channel, so surviving it is evidence. The converse
+   is not: failing it would be an excision on a gain the estimator declined to measure, which is what
+   amendment 12 item 8 refused when it declined to book a refused class at the sidereal cap. A probe
+   that returns "constant" is the estimator returning nothing and is excluded from the set entirely.
+3. Why this scoping and no wider. The rule was first written to admit probes into the range gain
+   generally, and that was tested and rejected. Admitting them generally moves the bars of the banked
+   excisions: channel 31 falls from 26.4 dB to between 14.9 and 7.0, channel 35 from 17.0 to between
+   15.0 and 13.5, channel 33 from 26.5 to between 24.9 and 20.1. Booking the least rather than the
+   greatest probe creates three keep cells and breaks the no-keep result. Booking the greatest probe
+   into the verdict generally ADDS four excisions, on channels 14, 18, 22 and 26, several of them at
+   the sidereal cap, which is the defect amendment 12 item 8 exists to prevent. Only the scoping
+   above is safe, and it was arrived at by testing the wider forms and discarding them, not by
+   choosing the one with the best outcome.
+4. What it changes. Channel 27's short BAO range moves from unpriced to not excisable: at its
+   greatest admitted probe, 368 s, the bar is 0.8 dB, inside the allowance, against a threshold of
+   617 s. Nothing else moves. The six excised channels keep identical bars, no new keep cell appears,
+   and no channel disposition changes. Channel 27's summary remains undetermined, because its long
+   range is at the control floor, but the reason is now a measurement rather than a blank.
+5. Recorded beside it, verified independently: channel 25's short range is already priced and reads
+   inside the allowance at every one of its probes, 1.1 dB at 66 s, 1.2 dB at 68 s and 2.7 dB at
+   95 s, against a threshold of 102 s. It was already marginal and stays so; the probe invariance is
+   what makes that verdict robust rather than incidental.
+6. The direction test. This amendment adds no excision and removes none. It converts one blind cell
+   into a decided one, in the direction of not excisable, and every wider form of it that would have
+   added excisions was tested and rejected.

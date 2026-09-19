@@ -53,6 +53,7 @@ for ch in PILOT:
 # coherence times per class, read on the polarisation that sets A there (amendment 11)
 tau = {}
 tau_least = {}
+tau_probe_meas = {}
 tau_pol = {}
 for c, f in TAU_FILES.items():
     byp = {}
@@ -72,6 +73,9 @@ for c, f in TAU_FILES.items():
         tl = min(vals) if vals else np.nan
         tr = float(row["tau_c_s"]) if row["tau_c_s"] else np.nan
         tau_least[(ch, c)] = min(tl, tr) if (np.isfinite(tl) and np.isfinite(tr)) else tl
+        # amendment 15: the measured and bound probe values, excluding "constant", which is the
+        # estimator returning nothing and which amendment 12 item 8 forbids booking at the cap.
+        tau_probe_meas[(ch, c)] = [float(m) for m in re.findall(r"(?:measured|bound)\s+([\d.]+)", row.get("probes", "") or "")]
         tau_pol[(ch, c)] = row["pol"]
 # phasor coherence per class (median over the six pairs, in-band)
 rho_v = {}
@@ -212,6 +216,21 @@ for ch in sorted({r for r in PILOT}):
             fr = pols["keep_all"]["R_floor"] if "keep_all" in pols else np.nan
             v = ("at floor", f"not measured above the control floor (the detection gate is {db(fr):.1f} dB over tolerance at G {G:.0f})" if np.isfinite(fr) else "not measured above the control floor (gain unmeasured)")
         elif tstat == "unmeasured":
+            # amendment 15: where a range has no measured and no bound class, its own trim probes may
+            # establish that the channel CANNOT be excised, never that it can. Price at the greatest
+            # probe the estimator admits, the least favourable reading for the channel; if the bar is
+            # inside the allowance even there, no coherence time the estimator admits can excise it.
+            # If it is outside, nothing is concluded, because excising on a gain the estimator refused
+            # to measure is what amendment 12 item 8 forbids.
+            pv = [v for c_ in gain_classes(ch, rng) for v in tau_probe_meas.get((ch, c_), [])]
+            if pv:
+                gmax = min(max(pv), CAP) / TF
+                worst = min(d["R_dep_G1"] for p, d in pols.items() if d["measured"]) * gmax
+                if db(worst) <= ALLOW_DB:
+                    v = ("not excisable", f"{db(worst):.1f} dB over tolerance at the greatest trim probe the estimator admits ({max(pv):.0f} s, G {gmax:.0f}), inside the {ALLOW_DB:.0f} dB allowance, so no coherence time the estimator admits can excise it (amendment 15)")
+                    per[rng] = dict(tau=t, tstat=tstat, tnote=tnote, G=G, tau_least=tL, G_least=GL, probe_db=probe_db, rho=rh,
+                                    credit_db=-db(credit) if credit > 0 else np.nan, pols=pols, low=low, verdict=v)
+                    continue
             best_G1 = min(d["R_dep_G1"] for p, d in pols.items() if d["measured"])
             v = ("unpriced", f"measured above the floor but the gain is unmeasured: {db(best_G1):.1f} dB at G = 1, {db(best_G1 * 3600 / TF):.1f} dB at the persistence bound; {tnote}")
         else:
