@@ -488,3 +488,48 @@ The ruling under amendments 9 to 12. Six channels are excised: 15 on the short B
 31, 33 and 35 on the long at 24.0, 30.8, 26.4, 26.5 and 17.0 dB. Each clears the allowance at its own least trim
 probe, the bars falling by at most 0.9 dB there, and each would be rescued only by a per-day ground filter reaching a
 between-epoch coherence of 0.991 or more. Channel 16 is marginal. Every other channel is undetermined.
+
+## Amendment 13 (2026-09-19, on the author's decision after the campaign study): channel 24 is ruled on a separate basis, the 2020 cohort is published as a positive control, and every undetermined row carries a number
+
+The ruling left seventeen channels undetermined. One of them, channel 24, was undetermined for want
+of data rather than for want of a measurement: no live node records freq_id 676 to 691, so the 2026
+capture has no products for it at all. The other sixteen were measured and could not be decided.
+This amendment addresses the first directly, and makes the second say what it measured.
+
+1. Channel 24 on the 2020 full-array basis. The CANFAR per-pilot baseband cohort
+   (~/rail/datasets/baseband/canfar_pilots_10s, one directory per DTV pilot bin, 23 in all) covers
+   channel 24 at freq_id 690 over sixteen epochs in 2020. Read through the same estimator on the
+   same long BAO classes, channel 24's excess is 1.509e-02, which is 48.6 scatters above channel 35,
+   whose transmitter was off until 2021-10 and which therefore supplies a transmitter-off null in
+   the same frames. With the delay cut at 11.4 dB and the ground credit at its 0.95 ceiling, the
+   most generous the rule allows, and on the worst case of the pilot-bin to in-band correction
+   measured on the eighteen channels the 2026 capture does record (median -1.03 dB, worst case
+   -3.55 dB), channel 24 is over tolerance by 30.4 dB at its own archive-measured correlation time
+   of 7777 s, and by 3.2 dB even at 15 s, the shortest coherence time amendment 5 states any channel
+   can have. It is therefore over tolerance at every coherence time the estimator can return.
+   The condition, stated as a condition: the transmitter must still be on. The archive ledger
+   (ch24_fid690.json) records it transmitting continuously from 2018-12 to 2026-04 with no declared
+   off epoch, zero off frames and 9,470 frames flagged transmitter-on, its bin ceasing on
+   2026-04-16 because no live node covers it and not because it went quiet.
+   This row is NOT merged into the table of record and does not change any 2026 disposition. The
+   2020 cohort has no channel 37 bin, carries one coarse bin per file rather than the in-band shelf
+   the ruling reads, and has 8 frames per epoch against 33. Its verdict is carried separately, with
+   its own control, its own correction and its own caveat, and is reproduced by
+   ch24_2020_basis.py in the campaign directory.
+2. The 2020 cohort as a positive control. The same estimator on the same baselines detects every
+   transmitter known to have been on in 2020 and does not detect the one known to have been off.
+   Channel 35, off until 2021-10, reads 0.3 scatters BELOW its own null. Channels 26, 27 and 32 are
+   detected at 23.0, 59.0 and 112.5 scatters in 2020 and read at the control floor in the 2026
+   capture, which is what a transmitter that has since been switched off looks like and matches the
+   dating from the archive pilot series. Those three are therefore undetermined for a stated
+   physical reason, not for a failure to measure. This is a control on the method, not an excision:
+   their 2020 emission is a transmitter that no longer exists.
+3. Every row publishes its bound. An undetermined-at-the-floor row now carries the detection gate
+   in decibels over tolerance as a column of its own, {range}_gate_db, rather than only inside its
+   reason string. Twelve channels acquire a long-range bound, from -1.3 dB on channel 27 and 5.3 dB
+   on channel 29 up to 23.8 dB on channel 32. Five (14, 22, 24, 28 and channel 23 on the long range)
+   carry none, because they are blocked on the gain rather than on the floor and no gate can be
+   formed without a coherence time; their rows say so. Two of the published bounds are negative,
+   channel 27's long range at -1.3 dB and channel 23's short at -2.0 dB, which means the capture's
+   detection threshold there lies below tolerance and those ranges have a real acceptance region.
+   No verdict changes: the column is a report of a quantity the ruling already computed.

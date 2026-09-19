@@ -253,7 +253,7 @@ for ch, per in results.items():
     summary[ch] = (disp, reason)
 # write: keep the input columns, replace disposition and reason for data rows, append range columns
 newcols = []
-for rng in RANGES: newcols += [f"{rng}_A_net", f"{rng}_measured", f"{rng}_floor_level", f"{rng}_tau_s", f"{rng}_tau_status", f"{rng}_tau_least_s", f"{rng}_probe_db", f"{rng}_rescue_rho", f"{rng}_G", f"{rng}_rho", f"{rng}_ground_credit_db", f"{rng}_R_deployed", f"{rng}_R_none", f"{rng}_verdict"]
+for rng in RANGES: newcols += [f"{rng}_A_net", f"{rng}_measured", f"{rng}_floor_level", f"{rng}_tau_s", f"{rng}_tau_status", f"{rng}_tau_least_s", f"{rng}_probe_db", f"{rng}_rescue_rho", f"{rng}_gate_db", f"{rng}_G", f"{rng}_rho", f"{rng}_ground_credit_db", f"{rng}_R_deployed", f"{rng}_R_none", f"{rng}_verdict"]
 fields = list(rows_in[0].keys()) + newcols
 with open(outp, "w") as fh:
     w = csv.DictWriter(fh, fieldnames=fields); w.writeheader()
@@ -277,6 +277,8 @@ with open(outp, "w") as fh:
             o[f"{rng}_R_deployed"] = f"{ka.get('R_dep', np.nan):.4g}" if ka and np.isfinite(ka.get("R_dep", np.nan)) else ""
             o[f"{rng}_R_none"] = f"{ka.get('R_none', np.nan):.4g}" if ka and np.isfinite(ka.get("R_none", np.nan)) else ""
             o[f"{rng}_verdict"] = p["verdict"][0]
+            gr = ka.get("R_floor", np.nan) if ka else np.nan
+            o[f"{rng}_gate_db"] = f"{db(gr):.1f}" if np.isfinite(gr) else ""
             mb = re.search(r"([-\d.]+) dB over tolerance", p["verdict"][1])
             rr = rescue_rho(float(mb.group(1)), p["rho"]) if mb else np.nan
             o[f"{rng}_rescue_rho"] = f"{rr:.4f}" if np.isfinite(rr) else ""

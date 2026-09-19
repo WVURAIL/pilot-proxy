@@ -37,10 +37,22 @@ per-class polarisation; the at-floor decibel figure renamed the detection gate).
 recorded, including per-polarisation rho, which would excise channel 16 by WITHDRAWING a credit and so is barred
 by the asymmetric rule. If anyone asks whether the ruling is fitted, this audit is the answer.
 
+Amendment 13 (2026-09-19) finally rules channel 24, the one channel that had no data at all. The 2020
+CANFAR per-pilot baseband cohort (~/rail/datasets/baseband/canfar_pilots_10s) covers its band. Through
+the same estimator on the same long BAO classes it is 48.6 scatters above channel 35, whose transmitter
+was off until 2021-10 and so gives a transmitter-off null IN THE SAME FRAMES. Over tolerance by 30.4 dB
+at its archive-measured 7777 s, and by 3.2 dB even at 15 s. CONDITIONAL on the transmitter still being
+on: the archive has no declared off epoch through 2026-04 and its bin stopped on 2026-04-16 because the
+node went away. It is NOT merged into the 2026 table (no ch37 bin in the cohort, one coarse bin per
+file, 8 frames vs 33). Reproduce: ch24_2020_basis.py, also in ~/rail/output/channel-ruling-campaign-2026-09-19/.
+The same cohort is a positive control and dates the silence of 26, 27 and 32. And every undetermined row
+now publishes its detection gate in dB over tolerance as {range}_gate_db, so undetermined is a measured
+sensitivity limit with a number, not a blank.
+
 Read the disclosure at the end of the predeclaration before quoting the two short-range rows:
 they clear the three-scatter detection gate by 0.1 to 1.1 scatters, where the five long-range rows clear it by 19 to 320.
 
-Amendments 1 to 12 and both adversarial audits are in
+Amendments 1 to 13 and both adversarial audits are in
 tools/capture/frame_analysis/ (FRAME_ANALYSIS_PREDECLARATION.md, RULING_AUDIT_*.md) and in the dissertation's
 chapter 9 record section. The repository notes HANDOFF.md, RESULTS_PLAN.md and archive_completion_checklist.md in the
 dissertation carry a "State of record, 2026-09-18" section.
@@ -52,13 +64,13 @@ dissertation carry a "State of record, 2026-09-18" section.
 - Reduced dump products: ~/rail/datasets/pilot_reduce_<event>/ (14 events) and on frb-analysis under
   /data/user-data/dgormley/pilot_reduce/. Raw dumps are on the CHIME archive (datatrail, baseband_<event>).
 - Channel 33 rescan products: author_actions/ch33_rescan/products/ (and OneDrive ch33_rescan/).
-- Table of record: frame_analysis/table_of_record.csv (sha256 c0caaf2b...; the amendment-9 table is kept as table_of_record_before_amendment10.csv, sha256 8f1a510b, and the amendment-10 table as table_of_record_before_amendment11.csv, sha256 939546f4), vendored in the dissertation as
+- Table of record: frame_analysis/table_of_record.csv (sha256 16d93770...; the amendment-9 table is kept as table_of_record_before_amendment10.csv, sha256 8f1a510b, and the amendment-10 table as table_of_record_before_amendment11.csv, sha256 939546f4), vendored in the dissertation as
   figure_src/data/record/table_of_record.csv; fragments regenerate with
   `~/.venvs/dissertation/bin/python scripts/table_of_record_tex.py figure_src/data/record/table_of_record.csv`.
 
 ## To rebuild the ruling (in frame_analysis/, venv ~/rail/venvs/archive-local)
 1. python ruling_baseline.py table_of_record_before_amendment8.csv table_of_record.csv ../../../ch33_rescan/products
-   (reproduces sha256 c0caaf2b exactly; check that before trusting any re-run)
+   (reproduces sha256 16d93770 exactly; check that before trusting any re-run)
    If cadence_tau_*_pol{0,1}.csv are missing, regenerate them first:
      for C in 0,1 0,32 0,64 0,128 0,255 1,0 2,0 3,0; do for P in 0 1; do
        python cadence_tau.py --level polmax --trim archive --class $C --pol $P <out>.csv <label>=<dir> ... ; done; done
