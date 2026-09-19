@@ -16,7 +16,7 @@ POLICIES = ["cal_q0.1", "cal_q0.5", "cal_q0.9", "keep_all"]; QS = {"cal_q0.1": 0
 SCIENCE = {"20260916162300": "pilot", "20260917040230": "D1", "20260917090230": "D2", "20260917140230": "D3"}
 TF = 16384 * 2.56e-6; CAP = 86164.0905; ALLOW_DB = 3.0; NSIG = 3.0
 RANGES = {"shortest": [(0, 1)], "bao_short": [(0, 32), (0, 64)], "bao_long": [(0, 128), (0, 255), (1, 0), (2, 0), (3, 0)]}
-RANGE_TEXT = {"shortest": "the 0.3 m baseline", "bao_short": "the 9.8 and 19.5 m classes below the forecast's baseline cut", "bao_long": "the long BAO baselines (39 and 78 m north-south, 22 to 66 m east-west)"}
+RANGE_TEXT = {"shortest": "the 0.3 m baseline", "bao_short": "the short BAO baselines (9.8 and 19.5 m north-south)", "bao_long": "the long BAO baselines (39 and 78 m north-south, 22 to 66 m east-west)"}
 TAU_FILES = {(0, 1): "cadence_tau.csv", (0, 32): "cadence_tau_ns32.csv", (0, 64): "cadence_tau_ns64.csv", (0, 128): "cadence_tau_ns128.csv", (0, 255): "cadence_tau_ns255.csv", (1, 0): "cadence_tau_ew1.csv", (2, 0): "cadence_tau_ew2.csv", (3, 0): "cadence_tau_ew3.csv"}
 CLS_NAME = {(0, 1): "ns1", (0, 8): "ns8", (0, 32): "ns32", (0, 64): "ns64", (0, 128): "ns128", (0, 255): "ns255", (1, 0): "ew1", (1, 32): "ew1ns32", (2, 0): "ew2", (3, 0): "ew3"}
 inp, outp = sys.argv[1], sys.argv[2]
@@ -36,9 +36,14 @@ for r in csv.DictReader(open(os.path.join(FA, "class_floor_bins.csv"))):
 floor = {k: (float(np.mean(v)), float(np.std(v, ddof=1))) for k, v in fl.items()}
 # coherence times per class
 tau = {}
+tau_least = {}
 for c, f in TAU_FILES.items():
     for r in csv.DictReader(open(os.path.join(FA, f))):
-        if r["bins"] == "inband": tau[(int(r["channel"]), c)] = (r["status"], float(r["tau_c_s"]) if r["tau_c_s"] else np.nan)
+        if r["bins"] == "inband":
+            tau[(int(r["channel"]), c)] = (r["status"], float(r["tau_c_s"]) if r["tau_c_s"] else np.nan)
+            # amendment 10 item 7: the least of the channel's own trim probes on this class
+            vals = [float(m) for m in re.findall(r"(?:measured|bound|constant)\s+([\d.]+)", r.get("probes", "") or "")]
+            tau_least[(int(r["channel"]), c)] = min(vals) if vals else np.nan
 # phasor coherence per class (median over the six pairs, in-band)
 rho_v = {}
 for r in csv.DictReader(open(os.path.join(FA, "lag_coherence_tenclasses_D.csv"))):
@@ -88,14 +93,29 @@ def class_reading(ch, epochs, c):
         if best is None or cand["A_net"] > best["A_net"]: best = cand
     return best
 
-def range_gain(ch, rng):
-    meas = [tau[(ch, c)][1] for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "measured" and np.isfinite(tau[(ch, c)][1])]
-    bnd = [tau[(ch, c)][1] for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "bound" and np.isfinite(tau[(ch, c)][1])]
+def _tau_of(ch, c, least):
+    """The class's coherence time, or under least= the smallest of its trim probes."""
+    if least:
+        v = tau_least.get((ch, c), np.nan)
+        if np.isfinite(v): return v
+    return tau[(ch, c)][1]
+
+def rescue_rho(bar_db, rh):
+    """The coherence a ground filter must reach to bring bar_db inside the allowance."""
+    if not np.isfinite(bar_db) or bar_db <= ALLOW_DB: return np.nan
+    rem = (1.0 - rh ** 2) * 10 ** ((ALLOW_DB - bar_db) / 10.0)
+    return float(np.sqrt(1.0 - rem)) if 0.0 < rem < 1.0 else np.nan
+
+def range_gain(ch, rng, least=False):
+    meas = [_tau_of(ch, c, least) for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "measured" and np.isfinite(tau[(ch, c)][1])]
+    meas = [v for v in meas if np.isfinite(v)]
+    bnd = [_tau_of(ch, c, least) for c in RANGES[rng] if (ch, c) in tau and tau[(ch, c)][0] == "bound" and np.isfinite(tau[(ch, c)][1])]
+    bnd = [v for v in bnd if np.isfinite(v)]
     rh = range_rho(ch, rng)
     if meas: return gmed(meas), "measured", ""
     if bnd: return bnd[0], "bound", ""
     if rng == "bao_long" and (ch, (0, 64)) in tau and tau[(ch, (0, 64))][0] == "measured" and np.isfinite(tau[(ch, (0, 64))][1]):
-        return tau[(ch, (0, 64))][1], "borrowed", f"no measured class on the long range; the channel's own measured coherence time on the 19.5 m class is used (amendment 9 item 3)"
+        return _tau_of(ch, (0, 64), least), "borrowed", f"no measured class on the long range; the channel's own measured coherence time on the 19.5 m class is used (amendment 9 item 3)"
     return np.nan, "unmeasured", "no measured class on the range and no borrowed measurement (amendment 9 item 3)"
 def range_rho(ch, rng):
     v = [rho[(ch, CLS_NAME[c])] for c in RANGES[rng] if (ch, CLS_NAME[c]) in rho]
@@ -109,6 +129,8 @@ for ch in sorted({r for r in PILOT}):
     per = {}
     for rng, classes in RANGES.items():
         t, tstat, tnote = range_gain(ch, rng); G = min(t, CAP) / TF if np.isfinite(t) else np.nan
+        tL, _, _ = range_gain(ch, rng, least=True); GL = min(tL, CAP) / TF if np.isfinite(tL) else np.nan
+        probe_db = db(GL / G) if (np.isfinite(G) and np.isfinite(GL) and G > 0) else 0.0
         rh = range_rho(ch, rng); credit = 1 - rh ** 2
         pols = {}
         for pol in POLICIES:
@@ -138,7 +160,7 @@ for ch in sorted({r for r in PILOT}):
             if at_floor_epoch is not None: low = dict(A=np.nan, epoch=at_floor_epoch, R_dep=np.nan, R_dep_G1=np.nan, at_floor=True)
             elif vals:
                 a, e = min(vals); low = dict(A=a, epoch=e, R_dep=(a * S * credit * G / ld) if np.isfinite(G) else np.nan, R_dep_G1=a * S * credit / ld, at_floor=False)
-        per[rng] = dict(tau=t, tstat=tstat, tnote=tnote, G=G, rho=rh, credit_db=-db(credit) if credit > 0 else np.nan, pols=pols, low=low)
+        per[rng] = dict(tau=t, tstat=tstat, tnote=tnote, G=G, tau_least=tL, G_least=GL, probe_db=probe_db, rho=rh, credit_db=-db(credit) if credit > 0 else np.nan, pols=pols, low=low)
         # verdict on the range
         cand = [(p, d) for p, d in pols.items() if d["measured"] and np.isfinite(d["R_dep"])]
         anymeas = any(d["measured"] for d in pols.values())
@@ -154,7 +176,8 @@ for ch in sorted({r for r in PILOT}):
                 v = ("at floor", f"the lowest epoch ({low['epoch']}) is not measured above the control floor on any class of the range, so the bound is at the floor and cannot excise (amendment 9)")
             elif not has_pilot[ch] and low is not None and np.isfinite(low["R_dep"]):
                 bar = db(low["R_dep"]); pbest = "lowest-epoch bound"
-                if bar > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) with both credits at G {G:.0f} ({tstat}); no policy can pass; {db(low['R_dep_G1']):.1f} dB at G = 1")
+                if bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; no policy can pass; {db(low['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.3f} against the measured {rh:.2f}")
+                elif bar > ALLOW_DB: v = ("marginal", f"{bar:.1f} dB over tolerance on the lowest epoch ({low['epoch']}) but {bar + probe_db:.1f} dB at the least trim probe, inside the {ALLOW_DB:.0f} dB allowance (amendment 10 item 7)")
                 else: v = ("undetermined", f"lowest-epoch bound {bar:.1f} dB, within the allowance; mask not evaluable")
             elif cand:
                 pbest, dbest = min(cand, key=lambda x: x[1]["R_dep"]); bar = db(dbest["R_dep"])
@@ -164,8 +187,9 @@ for ch in sorted({r for r in PILOT}):
                 elif not ka_meas:
                     fr = pols["keep_all"]["R_floor"] if "keep_all" in pols else np.nan
                     v = ("at floor", f"keep-all is not measured above the control floor (the floor itself is {db(fr):.1f} dB over tolerance at G {G:.0f}); the calibrated policies read {bar:.1f} dB over on their kept dumps")
-                elif bar > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance under every policy (least: {pbest}) with both credits at G {G:.0f} ({tstat}); {db(dbest['R_dep_G1']):.1f} dB at G = 1")
-                else: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}), within the 3 dB allowance, at G {G:.0f} ({tstat})")
+                elif bar > ALLOW_DB and bar + probe_db > ALLOW_DB: v = ("excise", f"{bar:.1f} dB over tolerance under every policy (least: {pbest}) with both credits at G {G:.0f} ({tstat}), {bar + probe_db:.1f} dB at the least trim probe; {db(dbest['R_dep_G1']):.1f} dB at G = 1; rescued only by a ground filter reaching coherence {rescue_rho(bar, rh):.3f} against the measured {rh:.2f}")
+                elif bar > ALLOW_DB: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}) at G {G:.0f} ({tstat}) but {bar + probe_db:.1f} dB at the least trim probe, inside the {ALLOW_DB:.0f} dB allowance (amendment 10 item 7)")
+                else: v = ("marginal", f"{bar:.1f} dB over tolerance ({pbest}), within the {ALLOW_DB:.0f} dB allowance, at G {G:.0f} ({tstat})")
             else: v = ("undetermined", "measured on no evaluable policy")
         per[rng]["verdict"] = v
     results[ch] = per
@@ -177,7 +201,7 @@ for ch, per in results.items():
     if L[0] == "excise":
         disp, reason = "excise", f"excised on {RANGE_TEXT['bao_long']}: {L[1]}; on the short BAO baselines: {Sh[0]} ({Sh[1]}); worst case on the 0.3 m baseline: {W[0]} ({W[1]}); subtraction bar {bartxt(L)} dB, {re.search(r'([-\d.]+) dB at G = 1', L[1]).group(1) if re.search(r'([-\d.]+) dB at G = 1', L[1]) else ''} dB even at G=1"
     elif Sh[0] == "excise":
-        disp, reason = "undetermined", f"below the forecast's baseline cut: measured above the floor on the 9.8 and 19.5 m classes ({Sh[1]}), which the forecast does not price (amendment 9); on the long BAO baselines: {L[0]} ({L[1]}); worst case on the 0.3 m baseline: {W[0]} ({W[1]})"
+        disp, reason = "excise", f"excised on {RANGE_TEXT['bao_short']}: {Sh[1]}; on the long BAO baselines: {L[0]} ({L[1]}); worst case on the 0.3 m baseline: {W[0]} ({W[1]}); subtraction bar {bartxt(Sh)} dB, {re.search(r'([-\d.]+) dB at G = 1', Sh[1]).group(1) if re.search(r'([-\d.]+) dB at G = 1', Sh[1]) else ''} dB even at G=1"
     elif L[0] == "keep" and Sh[0] in ("keep", "at floor"):
         disp, reason = "keep", f"keeps on the BAO baselines: long, {L[1]}; short, {Sh[0]} ({Sh[1]}); worst case on the 0.3 m baseline: {W[0]} ({W[1]})"
     elif L[0] == "unpriced" or Sh[0] == "unpriced":
@@ -189,7 +213,7 @@ for ch, per in results.items():
     summary[ch] = (disp, reason)
 # write: keep the input columns, replace disposition and reason for data rows, append range columns
 newcols = []
-for rng in RANGES: newcols += [f"{rng}_A_net", f"{rng}_measured", f"{rng}_floor_level", f"{rng}_tau_s", f"{rng}_tau_status", f"{rng}_G", f"{rng}_rho", f"{rng}_ground_credit_db", f"{rng}_R_deployed", f"{rng}_R_none", f"{rng}_verdict"]
+for rng in RANGES: newcols += [f"{rng}_A_net", f"{rng}_measured", f"{rng}_floor_level", f"{rng}_tau_s", f"{rng}_tau_status", f"{rng}_tau_least_s", f"{rng}_probe_db", f"{rng}_rescue_rho", f"{rng}_G", f"{rng}_rho", f"{rng}_ground_credit_db", f"{rng}_R_deployed", f"{rng}_R_none", f"{rng}_verdict"]
 fields = list(rows_in[0].keys()) + newcols
 with open(outp, "w") as fh:
     w = csv.DictWriter(fh, fieldnames=fields); w.writeheader()
@@ -208,10 +232,14 @@ with open(outp, "w") as fh:
             o[f"{rng}_measured"] = str(ka.get("measured", "")) if ka else ""
             o[f"{rng}_floor_level"] = f"{ka.get('floor_level', np.nan):.3e}" if ka and np.isfinite(ka.get("floor_level", np.nan)) else ""
             o[f"{rng}_tau_s"] = f"{p['tau']:.0f}" if np.isfinite(p["tau"]) else ""; o[f"{rng}_tau_status"] = p["tstat"]
+            o[f"{rng}_tau_least_s"] = f"{p['tau_least']:.0f}" if np.isfinite(p["tau_least"]) else ""; o[f"{rng}_probe_db"] = f"{p['probe_db']:+.1f}"
             o[f"{rng}_G"] = f"{p['G']:.0f}" if np.isfinite(p["G"]) else ""; o[f"{rng}_rho"] = f"{p['rho']:.2f}"; o[f"{rng}_ground_credit_db"] = f"{p['credit_db']:.1f}" if np.isfinite(p["credit_db"]) else ""
             o[f"{rng}_R_deployed"] = f"{ka.get('R_dep', np.nan):.4g}" if ka and np.isfinite(ka.get("R_dep", np.nan)) else ""
             o[f"{rng}_R_none"] = f"{ka.get('R_none', np.nan):.4g}" if ka and np.isfinite(ka.get("R_none", np.nan)) else ""
             o[f"{rng}_verdict"] = p["verdict"][0]
+            mb = re.search(r"([-\d.]+) dB over tolerance", p["verdict"][1])
+            rr = rescue_rho(float(mb.group(1)), p["rho"]) if mb else np.nan
+            o[f"{rng}_rescue_rho"] = f"{rr:.3f}" if np.isfinite(rr) else ""
         w.writerow(o)
 print("ch  summary        | shortest              | short BAO              | long BAO")
 for ch in sorted(results):

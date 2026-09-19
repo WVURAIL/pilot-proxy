@@ -319,3 +319,77 @@ direction; the bar on an excised row is reported with both credits, and the cred
 The count this leaves is the one both audits support: the channels excised for the 21 cm BAO measurement are those
 measured above the control floor on the long range and over the least strict tolerance there with both credits;
 every other channel is undetermined, with its measured excess below the cut reported for the collaboration.
+
+## Amendment 10 (2026-09-18, 19:40 UTC, on re-deriving the forecast's baseline domain from the response banks themselves rather than from the bank meta's label; evidence in forecast_baseline_domain.py and FORECAST_BASELINE_DOMAIN.txt): item 1 of amendment 9 is void, and the short BAO range rules
+
+Amendment 9 item 1 withdrew the 9.8 and 19.5 m north-south range from the ruling on the ground, taken from audit
+finding R3, that the forecast of record is the RadioFisher CHIME layout with baselines from 20 to 128 m and a
+synthetic baseline density with zero weight below 20 m. That ground is false, and the finding is refuted.
+
+1. What the banks were built on. The two tolerance worlds are read from four response banks in
+   results/canfar_reanalysis_2026-09-09/archive/response-banks: the world none tolerance from
+   fisher_bank_chime2022_pres_dense.npz, and the deployed world from the three kfg_fac banks at 22, 44 and 80. All
+   four carry config chime2022, whose experiment dictionary is CHIME's as-built one from
+   RadioFisher/chime2021/experiments_CHIME.py, with Dmin 0.305 m, Dmax 102 m, and the as-built baseline density
+   chime2021/array_config/nx_CHIME_800.dat. The density's sha256 recorded in each bank matches the file on disk at
+   b6c8c109. Its support runs from 0.176 to 101.8 m, and 11.0 per cent of its integral lies below 20 m over 57
+   nonzero rows.
+2. Where the audit went wrong. Every bank's meta carries the string "CHIME (RadioFisher 'yCHIME', mode icyl)". That
+   string is a hardcoded literal at fisherbank.py line 517, written into the meta of every bank whatever the config.
+   The audit read the label and inferred the generic RadioFisher CHIME dictionary, Dmin 20 m and Dmax 128 m, and the
+   synthetic table nx_CHIME_800_synth.dat. The settings block recorded a few lines below the label in the same meta
+   is what was actually built, and it names the as-built density. The synthetic table is the default of
+   survey.chime_experiment, which is the bull2015 path; the ruling's tolerances do not come from it.
+3. Why Dmin and Dmax do not confine the domain. In RadioFisher's interferometer_response, a supplied n(x) table is
+   interpolated directly and Dmin and Dmax are never consulted; they gate only the uniform-density fallback taken
+   when no table is given. The priced domain is therefore the support of the table, 0.18 to 102 m, and modes outside
+   it are given 1/INF_NOISE and carry no weight. Every baseline class the ruling reads is inside the support, with
+   density from 4.1e5 at 78 m to 1.8e8 at 0.3 m; the short classes carry the larger density, as a close-packed
+   cylinder array requires.
+4. What changes. Item 1 of amendment 9 is void. The 9.8 and 19.5 m north-south range is priced by the forecast of
+   record, is renamed the short BAO baselines again, and rules as the long range does, under the same rule: excised
+   when measured above the control floor and over the least strict tolerance with both credits. Items 2, 3 and 4 of
+   amendment 9 stand unchanged, and no other rule, estimator, credit or threshold moves.
+5. What does not change. The 0.3 and 2.4 m classes are also priced, and this is now stated rather than denied, but
+   they continue to be reported and not to rule. Two reasons. The rule has always ruled on ranges rather than single
+   classes, and the shortest range is one class; and under the asymmetric ruling rule, declining to rule on a class
+   that shows large excess is the conservative direction, since it can only move a channel toward undetermined and
+   never toward excision. Their readings are carried on every row for the collaboration.
+6. Standing. No rebuild of the Fisher bank is needed or contemplated. The bank of record already is the as-built
+   density, so the future work named in amendment 9 item 1 is discharged by this amendment, not by a computation.
+7. Probe robustness becomes a rule (closes audit finding R4). Restoring the short range put channel 16 over the
+   allowance at 4.1 dB on a class whose own three trim probes place it between 2.8 and 4.5 dB, straddling the
+   allowance. The asymmetric ruling rule excises only with every credit the data can give, so a bar that falls inside
+   the allowance at the channel's own least trim probe is not an excision. From here a range excises only if the bar
+   exceeds the allowance both at the coherence time of record and at the least of the measured class's trim probes;
+   otherwise it is marginal. Every row carries the least-probe coherence time and the decibels it costs. The rule was
+   written before the result was read, and it demotes exactly one channel, 16, to marginal. The five excisions
+   standing before this amendment survive it with 15.9 dB or more, which is the check that it is a rule and not a
+   choice.
+8. The rescue coherence is stated on every excised row (closes audit finding R7). The ground credit is 1 - rho^2 in
+   the channel's measured between-epoch phasor coherence, capped at rho = 0.95. That cap is a stipulation, and an
+   excision that depends on it is an excision resting on a number the collaboration did not agree to. Rather than
+   defend the cap, every excised row now carries the rescue coherence: the coherence a per-day ground filter would
+   have to reach for the bar to fall inside the allowance. It is computed from the same bar and the same measured rho
+   that produced the verdict, as rho_rescue = sqrt(1 - (1 - rho^2) 10^((allowance - bar)/10)). This replaces an
+   argument about a ceiling with a condition the collaboration can test.
+
+### The ruling under amendments 9 and 10
+
+Seven channels are excised: 15, 17, 22, 30, 31, 33 and 35. Five (17, 30, 31, 33, 35) are excised on the long BAO
+baselines, as before; two (15, 22) on the short BAO baselines, which amendment 10 returns to the ruling. Each is
+measured above the control floor, over the least strict tolerance with both credits, at the coherence time of record
+and at its own least trim probe, and each would be rescued only by a per-day ground filter reaching a between-epoch
+coherence of 0.982 to 0.999 against a measured 0.34 to 0.84. Channel 16 is marginal. Every other channel is
+undetermined, with its measured excess reported.
+
+### Disclosure on the two short-range excisions (not a rule change)
+
+The seven are not one population. The five excised on the long BAO baselines are measured above the control floor by 19
+to 320 floor scatters, on both polarisations and on every class of the range. The two excised on the short range are
+measured by 3.1 to 4.1 scatters against a gate of three: channel 15 on the 9.8 m class of one polarisation and the
+19.5 m class of the other, at 3.1 and 3.2; channel 22 on the 9.8 m class of one polarisation alone, at 4.1. Their bars
+are large because the coherence gain on that range is large, 49,999 and 49,310, not because the excess is strongly
+detected. The three-scatter gate was fixed in amendment 8, before the ranges were read, and it is not moved now that
+it decides two channels; the margin is disclosed instead, so the collaboration can weigh the two populations
+differently. Nothing here changes a verdict.
