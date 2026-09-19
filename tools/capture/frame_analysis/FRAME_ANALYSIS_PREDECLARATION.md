@@ -533,3 +533,36 @@ This amendment addresses the first directly, and makes the second say what it me
    channel 27's long range at -1.3 dB and channel 23's short at -2.0 dB, which means the capture's
    detection threshold there lies below tolerance and those ranges have a real acceptance region.
    No verdict changes: the column is a report of a quantity the ruling already computed.
+
+### Addendum to amendment 13 (2026-09-19, on re-deriving the pilot-bin to in-band correction from the products): the correction was larger than stated and channel 24's excision is conditional on its coherence time as well as its transmitter
+
+Amendment 13 carried a pilot-bin to in-band correction of median -1.03 dB and worst case -3.55 dB,
+taken from a file produced during the campaign study. That file could not be reproduced: its four
+values per channel do not match the pilot and in-band levels computed from the reduced products with
+the ruling's own estimator, on any ordering of its columns, on any class tested. It is withdrawn.
+
+The correction is now measured directly and reproducibly by pilot_to_inband.py, which writes
+pilot_to_inband.csv: for each of the eighteen channels the 2026 capture records with both, the
+median over the four science dumps and the five long BAO classes of the larger-polarisation excess
+on the pilot bin and on the in-band median, with the same sky reference and the same estimator the
+ruling uses. Over all eighteen the correction is -1.66 dB median and -5.70 dB worst. It tracks
+transmitter strength, as it must: a channel at the control floor reads the same on its pilot bin and
+in band, so a weak channel's ratio is near unity and carries no information. Over the four strong
+transmitters, the population channel 24 belongs to, it is -4.55 dB median and -5.66 dB worst, and
+that is the figure carried.
+
+What changes. On the worst case for a strong transmitter, channel 24 is over tolerance by 28.3 dB at
+its own archive-measured correlation time of 7777 s, not the 30.4 dB amendment 13 stated. More
+importantly, amendment 13's claim that it is over tolerance "at every coherence time the estimator
+can return" is WITHDRAWN. At 15 s, the campaign-wide floor of amendment 5, the bar is 1.1 dB, inside
+the allowance. The excision requires a coherence time above 23.2 s. The archive measures 7777 s on
+this channel, a factor of 336 above that threshold, so the excision stands with a large margin, but
+it rests on this channel's own measured correlation time and not on the campaign floor alone, and
+must be stated as conditional on both the transmitter and the coherence time.
+
+Why this is recorded rather than quietly fixed. The error was of the kind this project has now been
+bitten by three times: a derived quantity taken from an intermediate file whose construction was not
+checked. It was found by re-deriving the quantity from the products rather than by reading the file
+again. The lesson is in the method, and the method is now in the tree: every number the ruling
+carries should be reproducible from the products by a script in this directory, and the two scripts
+this addendum adds, pilot_to_inband.py and ch24_2020_basis.py, are.

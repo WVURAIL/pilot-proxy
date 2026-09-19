@@ -45,15 +45,21 @@ print("2020, reads below its own null. The estimator therefore detects transmitt
 print("and does not detect one that was off, on the baselines the ruling rules on.\n")
 
 print("== channel 24 on the 2020 basis ==")
-rat = []
-for ch, v in pv.items():
-    if len(v) != 4: continue
-    pil, inb = max(v[0], v[1]), max(v[2], v[3])
-    if pil > 0 and inb > 0: rat.append(10 * np.log10(inb / pil))
-med_corr, worst_corr = float(np.median(rat)), float(min(rat))
-print(f"pilot-bin to in-band correction, measured on the {len(rat)} channels the 2026 capture records:")
-print(f"  median {med_corr:+.2f} dB, worst case {worst_corr:+.2f} dB. It is never measured on channel 24")
-print("  itself, whose band is absent from every 2026 dump; that is the chief caveat on this row.\n")
+import csv as _csv
+corr_rows = [r for r in _csv.DictReader(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pilot_to_inband.csv"))) if r["correction_db"]]
+all_db = [float(r["correction_db"]) for r in corr_rows]
+strong_db = [float(r["correction_db"]) for r in corr_rows if r["strong"] == "True"]
+med_corr, worst_corr = float(np.median(strong_db)), float(min(strong_db))
+print(f"pilot-bin to in-band correction, measured on the 2026 capture over the four science dumps and")
+print(f"the five long BAO classes with the ruling's own estimator and larger-polarisation rule")
+print(f"(pilot_to_inband.py, pilot_to_inband.csv):")
+print(f"  all {len(all_db)} usable channels: median {np.median(all_db):+.2f} dB, worst {min(all_db):+.2f} dB")
+print(f"  the {len(strong_db)} strong transmitters: median {med_corr:+.2f} dB, worst {worst_corr:+.2f} dB")
+print("  A channel at the floor reads the same on its pilot bin and in band, so a weak channel's ratio")
+print("  is near unity and carries no information. Channel 24 is a strong transmitter, so the strong")
+print("  subset is the relevant population and its worst case is the figure carried below. The")
+print("  correction is never measured on channel 24 itself, whose band is absent from every 2026 dump;")
+print("  that is the chief caveat on this row.\n")
 
 lam = None
 import csv
@@ -66,7 +72,7 @@ print(f"A on the pilot bin {A_pilot:.3e}; lambda_deployed {lam:.4g}; delay cut {
 print(f"ground credit at the 0.95 ceiling {-10*np.log10(credit):.1f} dB (the most generous the rule allows).\n")
 print(f"{'correction':>16} {'A':>11} {'tau_c':>9} {'G':>9} {'bar':>9}")
 rows = []
-for name, corr in (("median", med_corr), ("worst case", worst_corr)):
+for name, corr in (("strong median", med_corr), ("strong worst case", worst_corr)):
     A = A_pilot * 10 ** (corr / 10)
     for tau in (TAU_ARCHIVE, 1200.0, TAU_FLOOR):
         G = min(tau, CAP) / TF
@@ -75,14 +81,19 @@ for name, corr in (("median", med_corr), ("worst case", worst_corr)):
         print(f"{name:>16} {A:>11.3e} {tau:>9.1f} {G:>9.0f} {bar:>+8.2f} dB")
     thresh = (10 ** (ALLOW / 10)) * lam / (A * S * credit) * TF
     print(f"{name:>16} crosses the {ALLOW:.0f} dB allowance at tau_c = {thresh:.1f} s\n")
-worst_at_floor = [b for n, c, t, g, b in rows if n == "worst case" and t == TAU_FLOOR][0]
-worst_at_arch = [b for n, c, t, g, b in rows if n == "worst case" and t == TAU_ARCHIVE][0]
+worst_at_floor = [b for n, c, t, g, b in rows if n == "strong worst case" and t == TAU_FLOOR][0]
+worst_at_arch = [b for n, c, t, g, b in rows if n == "strong worst case" and t == TAU_ARCHIVE][0]
+thresh_worst = (10 ** (ALLOW / 10)) * lam / (A_pilot * 10 ** (worst_corr / 10) * S * credit) * TF
 print("VERDICT (2020 basis, stated conditionally):")
 print(f"  Channel 24 is over tolerance by {worst_at_arch:+.1f} dB at its own archive-measured correlation")
-print(f"  time of {TAU_ARCHIVE:.0f} s, and by {worst_at_floor:+.1f} dB even at {TAU_FLOOR:.0f} s, the shortest coherence time")
-print("  amendment 5 states any channel can have. It is over tolerance at every coherence time the")
-print("  estimator can return, on the worst-case pilot-to-in-band correction, with every credit.")
-print("  The condition is that the transmitter is still on. The archive ledger records channel 24")
-print("  transmitting continuously from 2018-12 to 2026-04 with no declared off epoch, zero off")
-print("  frames and 9,470 frames flagged transmitter-on; its bin ceased to be recorded on")
-print("  2026-04-16 because no live node covers it, not because it went quiet.")
+print(f"  time of {TAU_ARCHIVE:.0f} s, on the worst-case correction for a strong transmitter and with every")
+print("  credit the rule allows.")
+print(f"  The excision requires a coherence time above {thresh_worst:.1f} s. The archive measures {TAU_ARCHIVE:.0f} s on")
+print(f"  this channel, a factor of {TAU_ARCHIVE/thresh_worst:.0f} above the threshold. At {TAU_FLOOR:.0f} s, the campaign-wide")
+print(f"  floor of amendment 5, the bar is {worst_at_floor:+.1f} dB, INSIDE the 3 dB allowance, so the excision")
+print("  rests on this channel's own measured correlation time and not on the floor alone. State it")
+print("  that way: it is conditional on the coherence time as well as on the transmitter.")
+print("  The transmitter condition: the archive ledger records channel 24 transmitting continuously")
+print("  from 2018-12 to 2026-04 with no declared off epoch, zero off frames and 9,470 frames flagged")
+print("  transmitter-on; its bin ceased on 2026-04-16 because no live node covers it, not because it")
+print("  went quiet.")

@@ -36,30 +36,41 @@ which is what a transmitter that has since been switched off looks like. Channel
 and does not detect one that was off, on the baselines the ruling rules on.
 
 == channel 24 on the 2020 basis ==
-pilot-bin to in-band correction, measured on the 18 channels the 2026 capture records:
-  median -1.03 dB, worst case -3.55 dB. It is never measured on channel 24
-  itself, whose band is absent from every 2026 dump; that is the chief caveat on this row.
+pilot-bin to in-band correction, measured on the 2026 capture over the four science dumps and
+the five long BAO classes with the ruling's own estimator and larger-polarisation rule
+(pilot_to_inband.py, pilot_to_inband.csv):
+  all 18 usable channels: median -1.66 dB, worst -5.70 dB
+  the 4 strong transmitters: median -4.55 dB, worst -5.66 dB
+  A channel at the floor reads the same on its pilot bin and in band, so a weak channel's ratio
+  is near unity and carries no information. Channel 24 is a strong transmitter, so the strong
+  subset is the relevant population and its worst case is the figure carried below. The
+  correction is never measured on channel 24 itself, whose band is absent from every 2026 dump;
+  that is the chief caveat on this row.
 
 A on the pilot bin 1.509e-02; lambda_deployed 0.008021; delay cut 11.4 dB;
 ground credit at the 0.95 ceiling 10.1 dB (the most generous the rule allows).
 
       correction           A     tau_c         G       bar
-          median   1.190e-02    7777.0    185418   +32.89 dB
-          median   1.190e-02    1200.0     28610   +24.77 dB
-          median   1.190e-02      15.0       358    +5.74 dB
-          median crosses the 3 dB allowance at tau_c = 8.0 s
+   strong median   5.297e-03    7777.0    185418   +29.37 dB
+   strong median   5.297e-03    1200.0     28610   +21.25 dB
+   strong median   5.297e-03      15.0       358    +2.22 dB
+   strong median crosses the 3 dB allowance at tau_c = 17.9 s
 
-      worst case   6.668e-03    7777.0    185418   +30.37 dB
-      worst case   6.668e-03    1200.0     28610   +22.25 dB
-      worst case   6.668e-03      15.0       358    +3.22 dB
-      worst case crosses the 3 dB allowance at tau_c = 14.3 s
+strong worst case   4.104e-03    7777.0    185418   +28.26 dB
+strong worst case   4.104e-03    1200.0     28610   +20.15 dB
+strong worst case   4.104e-03      15.0       358    +1.11 dB
+strong worst case crosses the 3 dB allowance at tau_c = 23.2 s
 
 VERDICT (2020 basis, stated conditionally):
-  Channel 24 is over tolerance by +30.4 dB at its own archive-measured correlation
-  time of 7777 s, and by +3.2 dB even at 15 s, the shortest coherence time
-  amendment 5 states any channel can have. It is over tolerance at every coherence time the
-  estimator can return, on the worst-case pilot-to-in-band correction, with every credit.
-  The condition is that the transmitter is still on. The archive ledger records channel 24
-  transmitting continuously from 2018-12 to 2026-04 with no declared off epoch, zero off
-  frames and 9,470 frames flagged transmitter-on; its bin ceased to be recorded on
-  2026-04-16 because no live node covers it, not because it went quiet.
+  Channel 24 is over tolerance by +28.3 dB at its own archive-measured correlation
+  time of 7777 s, on the worst-case correction for a strong transmitter and with every
+  credit the rule allows.
+  The excision requires a coherence time above 23.2 s. The archive measures 7777 s on
+  this channel, a factor of 336 above the threshold. At 15 s, the campaign-wide
+  floor of amendment 5, the bar is +1.1 dB, INSIDE the 3 dB allowance, so the excision
+  rests on this channel's own measured correlation time and not on the floor alone. State it
+  that way: it is conditional on the coherence time as well as on the transmitter.
+  The transmitter condition: the archive ledger records channel 24 transmitting continuously
+  from 2018-12 to 2026-04 with no declared off epoch, zero off frames and 9,470 frames flagged
+  transmitter-on; its bin ceased on 2026-04-16 because no live node covers it, not because it
+  went quiet.
