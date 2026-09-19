@@ -180,7 +180,10 @@ for ch in sorted({r for r in PILOT}):
             measured = [x for x in readings if x["measured"]]
             if not readings: continue
             A_net = float(np.median([x["A_net"] for x in measured])) if measured else np.nan
-            floor_level = float(np.median([x["fm"] + NSIG * x["fs"] for x in readings]))
+            # amendment 14: the published gate is a threshold on A_net, which is already net of the
+            # floor mean, so it is NSIG scatters and not the floor mean plus NSIG scatters; and a range
+            # is detected when ANY class clears, so the binding threshold is the least class's.
+            floor_level = float(min(NSIG * x["fs"] for x in readings))
             pols[pol] = dict(A_net=A_net, measured=bool(measured), n_measured=len(measured), floor_level=floor_level,
                              R_dep=(A_net * S * credit * G / ld) if (measured and np.isfinite(G)) else np.nan,
                              R_none=(A_net * G / ln) if (measured and np.isfinite(G) and np.isfinite(ln)) else np.nan,

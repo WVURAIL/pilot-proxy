@@ -566,3 +566,48 @@ checked. It was found by re-deriving the quantity from the products rather than 
 again. The lesson is in the method, and the method is now in the tree: every number the ruling
 carries should be reproducible from the products by a script in this directory, and the two scripts
 this addendum adds, pilot_to_inband.py and ch24_2020_basis.py, are.
+
+## Amendment 14 (2026-09-19, after a six-lens adversarial audit of the banked position, which had never been applied to amendment 13): the published bound is corrected, and the positive control is stated at its true strength
+
+Amendments 1 to 12 had been through three audits; amendment 13 had been through none. It was audited,
+and ten defects survived adversarial verification. None moves a verdict: the six excisions on the 2026
+capture, channel 24's excision on the 2020 basis, and every disposition are unchanged, and the table
+reproduces. All ten are reporting or wording, and they are corrected here.
+
+1. The published bound was the wrong quantity. Amendment 13 item 3 published the detection gate as
+   the median over a range's classes of the floor mean plus three scatters, priced through the
+   ruling. But the quantity that enters R is A_net, the excess already NET of the floor mean, so the
+   threshold on it is three scatters, not the floor mean plus three scatters. And a range is detected
+   when any one class clears, so the binding threshold is the LEAST class's, not the median. The
+   column is redefined as the least class's three scatters, priced at the range's gain. Every
+   published bound falls, by 2.6 to 5.8 dB: the long-range bounds now run from -4.0 dB on channel 27
+   to 19.3 dB on channel 32, and channel 29, the closest to detectable, needs 1.6 dB rather than the
+   5.3 dB previously published. No verdict moves, because the detection test itself was always
+   computed correctly on A against the floor mean plus three scatters; only the reported bound was
+   priced from the wrong threshold.
+2. The negative half of the positive control is withdrawn as vacuous. Amendment 13 item 2 offered
+   "channel 35, off air in 2020, reads 0.3 scatters below its own null" as evidence. It is arithmetic:
+   channel 35 IS the null, the gate being its own mean plus three of its own scatters, and a sample
+   median cannot exceed that. It demonstrates nothing and is struck. The positive half stands: the
+   estimator detects the transmitters the archive records as on.
+3. The control is weaker than amendment 13 claimed, and is restated. Its detection set depends on
+   which channel is chosen as the null, and channel 35 is the most favourable of the twelve
+   candidates; rebuilding the same gate on other nulls changes which channels are detected on nine of
+   eleven. And the truth table is not independent of the statistic being tested, since the cohort and
+   the archive pilot reading use the same coarse bin of the same files at the same sixteen epochs.
+   What the cohort supports is therefore narrower than a blind control: the estimator, run on 2020
+   full-array data, recovers the transmitters the archive independently records as transmitting, and
+   channel 24 is among the loudest of them. That is what is claimed from here.
+4. "Channels 26, 27 and 32 read at the control floor now" is false for two of the three. On the long
+   BAO range all three are at the floor. On the SHORT range channels 26 and 27 are measured above it,
+   at 4.16 and 4.67 floor scatters against the three-scatter gate, which is why they sit in the
+   group whose coherence time is unmeasured rather than in the at-floor group. The dating claim is
+   narrowed accordingly: their long-range excess has fallen to the control floor since 2020,
+   consistent with the archive's transmitter dating, while a short-range excess remains that this
+   capture cannot price. Only channel 32 is at the floor on both ranges.
+5. Four stale passages in the record section, left behind by amendments 10 to 12 and corrected here:
+   a sentence still describing an excise row as dropped "on baselines of 20 m and longer", which
+   amendment 10 superseded; the short-range coherence-time list, still carrying pre-amendment-11
+   values and the withdrawn phrase "below the forecast's cut"; a seven-channel grouping of the
+   unmeasured-gain population, which amendment 11 reduced to four; and five places reading "sixteen
+   channels" over tolerance on the 0.3 m worst case, which amendment 11 made seventeen.
