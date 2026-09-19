@@ -36,7 +36,17 @@ the kernel run directories ../kernel_<event>_k230 and _k230_ch33measured, the ar
 4. Post-upgrade dump (one 1.4 s dump once the upgraded correlator records all channels): trigger_dump.py, then
    process_dump.sh <event>, then steps 1 to 3 above. Closes channel 24 and lets the six pilot bins' masks be read.
    Include a control block outside the DTV band if possible (audit S1).
-5. SDR bench (optional; closes an evidence-matrix cell). REDESIGNED 2026-09-18 for the kit in hand (LimeSDR Mini,
+5. SDR bench: RUN AND CLOSED, 2026-09-19. Result: tools/capture/sdr-bench-2026-09-18/RESULT_2026-09-19.md.
+   The commanded-amplitude ladder failed (that knob is a quantization floor below 0.005 on this device, measured);
+   amendment 2 replaced it with a transmit-gain ladder, which passes its predeclared criteria: slope 0.941 dB per dB,
+   residual scatter 0.19 dB over 24 dB, bracket -0.27 dB, two independent passes. Floor stable to 0.2 dB, cabled
+   floor equal to the terminated floor within 0.1 dB (no ambient contamination), TX-on minus TX-off 0.09 dB, the two
+   pads equal within 0.2 dB. THE REMAINING ACTION is to carry this into the dissertation: the evidence matrix cell
+   "single-input noise and steady-signal references: physical reference pending" is now closed, and appA, the SDR
+   paragraphs of ch02/ch06 and STUBS.md should say so, with the amplitude-ladder failure reported as its own finding
+   and the slope's 6 percent shortfall stated as inseparable between the device gain table and the estimator.
+   After editing: make manifest, commit, push, CI (the usual dissertation loop).
+   PRIOR DESIGN, superseded: redesigned 2026-09-18 for the kit in hand (LimeSDR Mini,
    2 terminators, 2 x 30 dB pads, 1 cable): the fine ladder is the commanded tone amplitude in six 6.02 dB steps and
    the pads move it by a known 30 dB, with two coincidence pairs where the analog and digital routes must agree.
    Runbook and the six validated rung protocols: ~/rail/output/sdr-bench-2026-09-17/BENCH_RUNBOOK.md and rungs/a0..a5

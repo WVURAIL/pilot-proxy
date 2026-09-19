@@ -31,7 +31,7 @@ RECORD_SAMPLES = 4_000_000            # 2 s: the geometry the unchanged analyzer
 BASE_AMPLITUDE = .005                 # the 2026-09-09 tone amplitude, the top rung
 N_RUNGS = 6                           # 6.02 dB apart: 0 to -30.1 dB
 PADS_DB = [0, 30, 60]                 # cable only, one pad, both pads
-BUILD = "/home/djg/rail/results/sdr_reference_transport_2026-09-09/build-v1/build.json"
+BUILD = "/home/djg/rail/output/sdr-bench-2026-09-17/build-v2.json"
 
 
 def ref(path):

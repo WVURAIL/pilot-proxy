@@ -142,7 +142,12 @@ above the terminated null recorded in the same rung.
    last agree within 0.5 dB.
 4. Guards: zero clipped samples and zero saturated components on every qualified
    slot; an overloaded slot is recorded, kept, counted as attempted and excluded
-   from analysis, and the session continues. Any other failure stops the session.
+   from analysis, and the session continues. A qualified-RX underrun, overrun or
+   drop is a transport fault under AMENDMENT_1_transport_faults.md (2026-09-19,
+   written before any retry): the record is kept and marked, re-recorded once in
+   the same wiring, and the session stops if the repeat also fails; the fault and
+   repeat counts are reported with the result. Any other failure stops the
+   session.
 
 Nothing is tuned after a record. If the slope or a coincidence fails, that is the
 result and it is reported as measured, not as passed.
