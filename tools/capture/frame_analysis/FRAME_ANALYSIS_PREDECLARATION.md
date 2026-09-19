@@ -611,3 +611,27 @@ reproduces. All ten are reporting or wording, and they are corrected here.
    values and the withdrawn phrase "below the forecast's cut"; a seven-channel grouping of the
    unmeasured-gain population, which amendment 11 reduced to four; and five places reading "sixteen
    channels" over tolerance on the 0.3 m worst case, which amendment 11 made seventeen.
+
+### Addendum to amendment 14 (2026-09-19): the gate sensitivity of each excision, and two audit claims refuted on checking
+
+Two further things were established while acting on the audit, one a disclosure the reader is owed
+and one a claim that did not survive.
+
+1. The gate sensitivity, measured. The detection gate is three floor scatters, fixed by amendment 8
+   before any range was read. Re-running the ruling at gates of 3.00, 3.16, 3.30, 3.50 and 4.00
+   scatters, changing nothing else, gives: at 3.00 the excised set is 15, 17, 30, 31, 33 and 35; at
+   every value from 3.16 upward it is 17, 30, 31, 33 and 35. Five of the six excisions are therefore
+   insensitive to the gate over a third of its own value, and channel 15 alone depends on it, being
+   removed by a gate 5 per cent higher than the predeclared one. This is stated because channel 15 is
+   the one excision a reader can remove with a defensible change of a single constant, and they should
+   learn it here rather than find it. The gate is not moved: it was predeclared, and moving it after
+   the result is known is the fault the whole amendment ledger exists to prevent.
+2. Refuted on checking: the audit proposed that channel 24's coherence time could be measured inside
+   the 2020 cohort, citing an epoch pair 4448 s apart. No such pair exists. Channel 24's sixteen
+   epochs give a shortest pair of 8658 s, above the 7200 s plateau start, so the cohort has zero pairs
+   below the plateau and can supply no crossing at all. The channel 24 row therefore keeps its
+   dependence on the archive's own measured correlation time of 7777 s, as the addendum to amendment
+   13 states, and the conditional stands as written.
+3. Also refuted: that the 2020 cohort could supply a floor for the floor-limited channels. It cannot,
+   for the same reason, and its non-detections are in any case at 8 frames per epoch against the 2026
+   capture's 33.
