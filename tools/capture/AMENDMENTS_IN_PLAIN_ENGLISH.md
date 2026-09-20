@@ -14,12 +14,24 @@ coherent, which sets how much a mask would have to remove).
 
 ## The ones you made while the data arrived (1 to 8)
 
-**1. Keep-all is a rung on the ladder.** A channel is tested against "mask nothing" as well as the
-three calibrated masking policies. Without it a channel could look fine only because the mask threw
-away most of the data.
+**1. The keep pathway for channels with no transmitter.** This is the one I described wrongly the
+first time. It says there is no separate "clean" verdict: a channel with no transmitter of its own
+simply passes at keep-all. Two conditions. (a) Its era carries no pilot. (b) Its in-band excess is
+below tolerance. And the rider you wrote yourself: if (a) holds and (b) fails, something radiates in
+band without a pilot and the channel goes down the ladder like any other. Named candidates: 34,
+which never had a pilot, and the switched-off 19, 26, 27 and 32.
 
-**2. 33 frames per dump.** Housekeeping: fixed the frame count per science dump on reading the first
-product metadata.
+**Where that stands now.** Four of the five fail (b): 19, 26 and 27 are measured above the control
+floor in band despite having no pilot, and 32 reads 18.0 dB over on the 0.3 m class. That is exactly
+the case the rider anticipates. Channel 34 fails neither condition and is undetermined only because
+the capture cannot establish (b) on any channel: the tightest bound on channel 34's excess is 7.7 dB
+above tolerance with every credit and 16.2 dB above with none. The keep route is open and unreached,
+and sensitivity is what closes it, not contamination. The thesis now says this explicitly instead of
+reporting no keeps without explaining that a route existed.
+
+**2. 33 frames per dump.** Housekeeping, and you are right that it did not need to be an amendment.
+The dump cap is 546,875 samples so a science dump holds 33 frames, not the 71 the predeclaration
+assumed. No estimator changed. It belongs in a footnote.
 
 **3. How the coherence time is measured.** Defined the estimator: a structure function of the
 per-epoch level, with the coherence time read where it reaches 1 - 1/e of its plateau. This is the

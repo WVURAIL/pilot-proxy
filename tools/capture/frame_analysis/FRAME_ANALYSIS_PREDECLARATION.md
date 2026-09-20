@@ -60,28 +60,48 @@ No threshold in this document is tuned after seeing the data; changes are logged
 ## Status of the amendments, as of 2026-09-19
 
 This document is chronological, so a linear reader meets superseded text before learning it was
-superseded. This table is the index. Anything marked SUPERSEDED below is retained because the record
-of what was decided and then reversed is part of the evidence, not because it is in force.
+superseded. These tables are the index. They also separate the two kinds of entry, because sixteen
+undifferentiated amendments read as sixteen changes of mind, and that is not what happened: six are
+design decisions taken as the data arrived, one is housekeeping, and the rest are corrections of
+defects found by audit, several of them defects in the analysis rather than in the design.
 
-| # | in force? | what it settled | excised after |
+### The decisions. These are the method, and they are what a reader should judge.
+
+| # | when | the decision | still in force |
 |---|---|---|---|
-| 1 to 5 | yes | the estimators: keep-all as a rung, frames per dump, the coherence time, the level on the larger polarisation, the archive's trim probes | - |
-| 6 | yes | the lowest-epoch bound for channels with no live pilot node | - |
-| 7 | yes | rule on the baselines that carry the BAO measurement; the 3 dB allowance | - |
-| 8 | yes | the channel 37 control floor and the per-range ruling | 5 |
-| 9 | **item 1 SUPERSEDED by amendment 10**; items 2 to 4 in force | withdrew the short baselines on a false premise | 5 |
-| 10 | yes | restored the short baselines; the least-probe test; the rescue coherence | 7 |
-| 11 | yes | the coherence time is read on the polarisation that sets the level | 6 |
-| 12 | yes | corrections from the predeclaration-versus-code audit | 6 |
-| 13 | **its pilot-to-in-band correction SUPERSEDED by its own addendum**; the rest in force | channel 24 on the 2020 basis; the 2020 control; published bounds | 6 + channel 24 |
-| 14 | yes | corrected the published bound; restated the 2020 control at its true strength | 6 + channel 24 |
-| 15 | yes | trim probes may show a channel cannot be excised, never that it can | 6 + channel 24 |
-| 16 | yes | declared the even-count aggregation | 6 + channel 24 |
+| 1 | before any science product was opened | Keep-all is the top rung of the policy ladder, and a channel with no transmitter of its own simply passes at keep-all. Two conditions: (a) the era carries no pilot, and (b) the in-band excess is below tolerance. If (a) holds and (b) fails, something radiates without a pilot and the channel goes down the ladder. | yes |
+| 3 | before any cadence product was opened | The coherence time is the lag at which the structure function of the per-epoch level reaches 1 - 1/e of its plateau. This sets the gain and is the most consequential definition in the ruling. | yes |
+| 4 | on the manuscript review | The level is the larger of the two same-polarisation readings, because a residual is a bound and a rescue must survive the worse feed. | yes |
+| 5 | after a preview of eleven epochs | The coherence time is read on the polarisation that sets the level, and the archive's trim probes are mirrored, after a burst on channel 27 faked a short coherence time. | yes |
+| 6 | after the measured-gain table | The lowest-epoch bound for channels with no live pilot node: if even the quietest of fourteen epochs fails, no mask could have saved it. This is what excises 30 and 31. | yes |
+| 7 | after the audit checks | Rule on the baselines that carry the BAO measurement, keeping the 0.3 m reading as a reported worst case, with a 3 dB allowance. | yes |
+| 8 | after the first adversarial audit | Channel 37 is the control: an excess counts only where it exceeds what the estimator returns on a channel with no allocation. This made the ruling conservative and removed many apparent excisions. | yes |
 
-Two things a reader should take from this table rather than discover. Amendment 9 acted on an audit
-finding that was false and was not verified before being applied; amendment 10 reversed it. And the
-whole 10-to-16 sequence exists because that failure prompted checking everything else, which is how
-the polarisation defect of amendment 11 and the undeclared convention of amendment 16 were found.
+Two later entries are also decisions rather than corrections: amendment 13's admission of the 2020
+full-array cohort as a separate basis for channel 24, and amendment 15's rule that a range's own
+trim probes may show a channel cannot be excised though never that it can.
+
+### Housekeeping
+
+| # | what |
+|---|---|
+| 2 | The dump cap is 546,875 samples, so a science dump holds 33 frames and not the 71 the predeclaration assumed. A metadata correction; no estimator changed. |
+
+### The corrections. These are defects found after the fact, most of them mine.
+
+| # | what was wrong | direction | count after |
+|---|---|---|---|
+| 9 | Acted on an audit finding that the forecast prices no baseline below 20 m. The finding was false and was not verified before being applied. | removed 8 excisions wrongly | 5 |
+| 10 | Reversed 9. The audit had read a hardcoded label in the forecast bank's metadata instead of the settings beside it. | restored them | 7 |
+| 11 | A class's coherence time was read on a different polarisation from the level it priced. Channel 22 was excised on a coherence time belonging to a polarisation sitting at the noise floor. | removed 1 excision | 6 |
+| 12 | A systematic audit of every amendment against its code. 68 differences claimed, 15 survived, none moved a verdict. | none | 6 |
+| 13 addendum | The pilot-to-in-band correction came from a file that could not be reproduced. Withdrawn and measured properly. | weakened channel 24's claim | 6 + 24 |
+| 14 | The published bound was priced from the wrong threshold; the positive control's negative half was circular. | none | 6 + 24 |
+| 16 | The even-count aggregation was never declared. Worth up to 14.9 dB of published bar, and identical verdicts under all four conventions. | none | 6 + 24 |
+
+The honest summary of the corrections: one of them, amendment 9, was itself a mistake, and the rest
+of the sequence exists because reversing it prompted checking everything else. That is how the
+polarisation defect and the undeclared convention were found. No correction after 11 moved a verdict.
 
 The ruling as it stands: six channels excised on the 2026 capture, 15 on the short BAO baselines and
 17, 30, 31, 33 and 35 on the long; channel 24 excised on the separate 2020 basis, conditionally; no
