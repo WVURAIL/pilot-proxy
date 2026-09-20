@@ -52,7 +52,7 @@ sensitivity limit with a number, not a blank.
 Read the disclosure at the end of the predeclaration before quoting the two short-range rows:
 they clear the three-scatter detection gate by 0.1 to 1.1 scatters, where the five long-range rows clear it by 19 to 320.
 
-Amendments 1 to 14 and both adversarial audits are in
+Amendments 1 to 16 and four adversarial audits are in
 tools/capture/frame_analysis/ (FRAME_ANALYSIS_PREDECLARATION.md, RULING_AUDIT_*.md) and in the dissertation's
 chapter 9 record section. The repository notes HANDOFF.md, RESULTS_PLAN.md and archive_completion_checklist.md in the
 dissertation carry a "State of record, 2026-09-18" section.

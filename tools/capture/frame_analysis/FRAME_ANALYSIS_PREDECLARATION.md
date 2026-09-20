@@ -57,6 +57,37 @@ tolerance and proceeds to the floor gate and covariance route. Everything else i
 
 No threshold in this document is tuned after seeing the data; changes are logged as amendments.
 
+## Status of the amendments, as of 2026-09-19
+
+This document is chronological, so a linear reader meets superseded text before learning it was
+superseded. This table is the index. Anything marked SUPERSEDED below is retained because the record
+of what was decided and then reversed is part of the evidence, not because it is in force.
+
+| # | in force? | what it settled | excised after |
+|---|---|---|---|
+| 1 to 5 | yes | the estimators: keep-all as a rung, frames per dump, the coherence time, the level on the larger polarisation, the archive's trim probes | - |
+| 6 | yes | the lowest-epoch bound for channels with no live pilot node | - |
+| 7 | yes | rule on the baselines that carry the BAO measurement; the 3 dB allowance | - |
+| 8 | yes | the channel 37 control floor and the per-range ruling | 5 |
+| 9 | **item 1 SUPERSEDED by amendment 10**; items 2 to 4 in force | withdrew the short baselines on a false premise | 5 |
+| 10 | yes | restored the short baselines; the least-probe test; the rescue coherence | 7 |
+| 11 | yes | the coherence time is read on the polarisation that sets the level | 6 |
+| 12 | yes | corrections from the predeclaration-versus-code audit | 6 |
+| 13 | **its pilot-to-in-band correction SUPERSEDED by its own addendum**; the rest in force | channel 24 on the 2020 basis; the 2020 control; published bounds | 6 + channel 24 |
+| 14 | yes | corrected the published bound; restated the 2020 control at its true strength | 6 + channel 24 |
+| 15 | yes | trim probes may show a channel cannot be excised, never that it can | 6 + channel 24 |
+| 16 | yes | declared the even-count aggregation | 6 + channel 24 |
+
+Two things a reader should take from this table rather than discover. Amendment 9 acted on an audit
+finding that was false and was not verified before being applied; amendment 10 reversed it. And the
+whole 10-to-16 sequence exists because that failure prompted checking everything else, which is how
+the polarisation defect of amendment 11 and the undeclared convention of amendment 16 were found.
+
+The ruling as it stands: six channels excised on the 2026 capture, 15 on the short BAO baselines and
+17, 30, 31, 33 and 35 on the long; channel 24 excised on the separate 2020 basis, conditionally; no
+channel keeps anywhere; twelve channels carry a published bound; channels 25 and 27 are shown not
+excisable; channel 16 is marginal.
+
 ## Amendment 1 (author, 2026-09-16 evening local, revised the same night before any science-dump product was opened): the keep-all policy
 
 Every channel is judged by the most forgiving mask policy that passes tolerance. The top rung of that ladder is
@@ -297,7 +328,7 @@ which a residual constant within a day is removed whatever it does day to day): 
 quantity in the deployed world; the ratio with no credit at all remains the world-none column for the rescue
 direction; the bar on an excised row is reported with both credits, and the credit itself is printed.
 
-## Amendment 9 (2026-09-18, 05:30 UTC, after the second adversarial audit of the committed ruling, RULING_AUDIT_ROUND2_2026-09-18.md, findings R1 to R4; author's standing instruction that the ruling must survive every objection): the ruling is confined to the forecast's baseline domain and to measured coherence times
+## Amendment 9 [ITEM 1 SUPERSEDED BY AMENDMENT 10] (2026-09-18, 05:30 UTC, after the second adversarial audit of the committed ruling, RULING_AUDIT_ROUND2_2026-09-18.md, findings R1 to R4; author's standing instruction that the ruling must survive every objection): the ruling is confined to the forecast's baseline domain and to measured coherence times
 
 1. The forecast's baseline domain (R3). The forecast of record is the RadioFisher CHIME layout with baselines from
    20 to 128 m and a synthetic baseline density with zero weight below 20 m. Its tolerance therefore prices no
@@ -489,7 +520,7 @@ The ruling under amendments 9 to 12. Six channels are excised: 15 on the short B
 probe, the bars falling by at most 0.9 dB there, and each would be rescued only by a per-day ground filter reaching a
 between-epoch coherence of 0.991 or more. Channel 16 is marginal. Every other channel is undetermined.
 
-## Amendment 13 (2026-09-19, on the author's decision after the campaign study): channel 24 is ruled on a separate basis, the 2020 cohort is published as a positive control, and every undetermined row carries a number
+## Amendment 13 [ITS CORRECTION FIGURE SUPERSEDED BY ITS OWN ADDENDUM] (2026-09-19, on the author's decision after the campaign study): channel 24 is ruled on a separate basis, the 2020 cohort is published as a positive control, and every undetermined row carries a number
 
 The ruling left seventeen channels undetermined. One of them, channel 24, was undetermined for want
 of data rather than for want of a measurement: no live node records freq_id 676 to 691, so the 2026
