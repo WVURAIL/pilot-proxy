@@ -122,7 +122,7 @@ def threshold_rows(path, channel):
     return rows
 
 
-def read_detector(run_dir, channel, archive_dir, provenance):
+def read_detector(run_dir, channel, archive_dir, provenance, *, expected_bank=None):
     config_path, manifest_path = run_dir / 'run_config.json', run_dir / 'input_manifest.json'
     config, manifest = json.loads(config_path.read_text()), json.loads(manifest_path.read_text())
     if config.get('frame_size_samples') != NFFT or config.get('absolute_time_used') is not False:
@@ -160,21 +160,29 @@ def read_detector(run_dir, channel, archive_dir, provenance):
     if not np.array_equal(indices, np.arange(indices.size)) or (indices.size * NFFT > shape[0]):
         raise Refusal('detector frame indices exceed manifest input')
     nt, nr = int(arrays['target_norm_sq'][j]), int(arrays['reference_norm_sum_sq'][j])
-    archive_path = archive_dir / f'{PILOT[channel]}.npz'
-    with np.load(archive_path, allow_pickle=False) as z:
-        archive = {k: z[k] for k in ('physical_channel', 'pilot_frequency_hz', 'target_norm_sq',
-                   'reference_norm_sum_sq', 'weight_bank_sha256', 'nfft')}
-    if (int(archive['physical_channel'][0]) != channel or int(archive['nfft']) != NFFT
-        or float(archive['pilot_frequency_hz'][0]) != float(arrays['pilot_frequency_hz'][j])
-        or nt != int(archive['target_norm_sq'][0]) or nr != int(archive['reference_norm_sum_sq'][0])
-        or str(archive['weight_bank_sha256']) != config['weights_sha256']):
-        raise Refusal('capture bank differs from frozen archive bank')
+    bank_fields = ('physical_channel', 'pilot_frequency_hz', 'target_norm_sq',
+                   'reference_norm_sum_sq', 'weight_bank_sha256', 'nfft')
+    if expected_bank is None:
+        archive_path = archive_dir / f'{PILOT[channel]}.npz'
+        with np.load(archive_path, allow_pickle=False) as z:
+            archive = {k: z[k] for k in bank_fields}
+        bank = {k: a.item() for k, a in archive.items()}
+        bank_source = dict(archive_path=str(archive_path),
+                           archive_consumed_fields_sha256=array_digest(archive))
+    else:
+        bank = {k: expected_bank[k] for k in bank_fields}
+        bank_source = dict(expected_bank_contract=bank)
+    if (bank['physical_channel'] != channel or bank['nfft'] != NFFT
+        or bank['pilot_frequency_hz'] != float(arrays['pilot_frequency_hz'][j])
+        or nt != bank['target_norm_sq'] or nr != bank['reference_norm_sum_sq']
+        or bank['weight_bank_sha256'] != config['weights_sha256']):
+        raise Refusal('capture bank differs from expected bank contract')
     if float(arrays['chime_frequency_hz'][j]) != (800 - PILOT[channel] * .390625) * 1e6:
         raise Refusal('detector coarse frequency mismatch')
     entry = dict(run=str(run_dir), channel=channel, config_sha256=sha(config_path),
         input_manifest_sha256=sha(manifest_path), detector_sha256=sha(product_path),
         raw_path=str(raw), raw_header=attrs, raw_shape=list(shape), input_map_sha256=input_map_digest,
-        raw_payload_rehashed=False, archive_path=str(archive_path), archive_consumed_fields_sha256=array_digest(archive))
+        raw_payload_rehashed=False, **bank_source)
     provenance.append(entry)
     return dict(fpga=attrs['time0_fpga_count'] + indices * NFFT, epoch=attrs['event_id'],
                 target=arrays['p_target_u64'][:, j], reference=arrays['p_ref_sum_u64'][:, j],
@@ -182,12 +190,25 @@ def read_detector(run_dir, channel, archive_dir, provenance):
                 pilot_frequency_hz=float(arrays['pilot_frequency_hz'][j]), source=entry)
 
 
-def read_visibility(path, channel, provenance):
+def read_visibility(path, channel, provenance, *, expected_epoch, detector=None):
     with np.load(path, allow_pickle=False) as z:
         a = {k: z[k] for k in ('meta', 'frame_fpga0', 'keys', 'count', 'stacks', 'autos')}
     m = json.loads(str(a['meta']))
     ids = unique_ids(a['frame_fpga0'])
     fid = int(path.stem)
+    if m.get('file') != f'baseband_{expected_epoch}_{fid}.h5':
+        raise Refusal('visibility source event differs from capture directory')
+    if not isinstance(m.get('time0_ctime'), (int, float)) or not np.isfinite(m['time0_ctime']):
+        raise Refusal('visibility lacks a finite UTC origin')
+    if detector is not None:
+        raw = detector['source']['raw_header']
+        if int(raw['event_id']) != int(expected_epoch):
+            raise Refusal('detector event differs from capture directory')
+        utc_offset = m['time0_ctime'] - raw['time0_ctime']
+        fpga_offset = (m['time0_fpga'] - raw['time0_fpga_count']) * DT
+        # Allow UTC rounding below one 2.56-microsecond sample.
+        if not np.isfinite(utc_offset) or abs(utc_offset - fpga_offset) > 1e-6:
+            raise Refusal('visibility and detector UTC/FPGA origins disagree')
     if (m['nfft'] != NFFT or m['delta_time'] != DT or m['freq_id'] != fid
         or abs(m['freq_mhz'] - (800 - fid * .390625)) > 1e-9 or fid not in allocation_bins(channel)):
         raise Refusal('visibility timing, frequency, or allocation metadata mismatch')
@@ -266,14 +287,12 @@ def run(root, output, channels):
                 refusals.append(dict(channel=channel, epoch=epoch, freq_id=PILOT[channel], reason=str(exc)))
             expected = allocation_bins(channel)
             present = [fid for fid in expected if (product_dir / f'{fid}.npz').exists()]
-            coverage.append(dict(channel=channel, epoch=epoch, expected_bins=len(expected), available_bins=len(present),
-                available_bandwidth_mhz=sum(expected[fid] for fid in present),
-                missing_freq_ids=';'.join(str(fid) for fid in expected if fid not in present),
-                pilot_policy_available=bool(detector and thresholds),
-                complete_allocation_coverage=len(present) == len(expected)))
+            validated = []
             for fid in present:
                 try:
-                    v = read_visibility(product_dir / f'{fid}.npz', channel, provenance)
+                    v = read_visibility(product_dir / f'{fid}.npz', channel, provenance,
+                                        expected_epoch=epoch, detector=detector)
+                    bin_moments = []
                     selections = {'keep_all': np.ones(v['ids'].size, bool)}
                     if detector and thresholds:
                         ix = align_ids(v['ids'], detector['fpga'])
@@ -290,9 +309,19 @@ def run(root, output, channels):
                                 selected_live_total_power=power, live_inputs=v['n_live'],
                                 normalized_mean_abs=st['mean_abs'] / power if power else None)
                             row.update(st)
-                            moments.append(row)
+                            bin_moments.append(row)
+                    moments.extend(bin_moments)
+                    validated.append(fid)
                 except (Refusal, OSError, KeyError) as exc:
                     refusals.append(dict(channel=channel, epoch=epoch, freq_id=fid, reason=str(exc)))
+            coverage.append(dict(channel=channel, epoch=epoch, expected_bins=len(expected),
+                present_bins=len(present), available_bins=len(validated),
+                available_bandwidth_mhz=sum(expected[fid] for fid in validated),
+                absent_freq_ids=';'.join(str(fid) for fid in expected if fid not in present),
+                refused_freq_ids=';'.join(str(fid) for fid in present if fid not in validated),
+                missing_freq_ids=';'.join(str(fid) for fid in expected if fid not in validated),
+                pilot_policy_available=bool(detector and thresholds and validated),
+                complete_allocation_coverage=len(validated) == len(expected)))
         print(f'channel {channel}: {len(moments)} moment rows', flush=True)
     policy_summary = [dict(channel=c, policy=p, **s, retained_fraction=s['kept'] / s['frames'],
         nominal_uniform_information_time_multiplier=s['frames'] / s['kept'] if s['kept'] else None,

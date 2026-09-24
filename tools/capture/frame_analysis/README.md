@@ -3,7 +3,8 @@
 `frame_policy_v1.py` applies the frozen current-era calibration thresholds from
 the September 9 coarse release to individual capture frames. It uses exact
 integer comparisons and joins the detector and correlation products by FPGA
-sample identity within each event. Missing pilot data, incompatible banks,
+sample identity within each event, with the source event and UTC/FPGA origins
+checked before selection. Missing pilot data, incompatible banks,
 missing timing metadata, and unmatched frames refuse the affected comparison.
 
 ```sh
@@ -17,7 +18,20 @@ the three saved calibration quantiles and keep-all. The quantiles are not
 refitted to the captures or recomputed across the full archive. The nominal
 channel-33 bank remains a separate diagnostic; its off-target response cannot
 support an optimal-detector claim. A corrected-bank policy needs its own
-calibration population, thresholds, and disjoint evaluation records.
+calibration population, thresholds, and disjoint evaluation records. The
+detector loader can validate an explicit bank contract for a separate replay;
+that caller must establish the contract and threshold provenance. The default
+command always uses the archived nominal bank.
+
+The completed nominal capture release is
+`output/dissertation-implementation-2026-09-19/frame-policies/all-channels-v2`
+under the workspace root; its compact import and audit are in
+`frame-policies/guard-validation-v2`. Nineteen regression tests pass. The
+separate `corrected-ch33-calibration-v1` and `corrected-ch33-replay-v1`
+releases use 11,784 matched calibration records and retain 0/0/33 of 150
+capture frames under q0.1/q0.5/q0.9. They are exploratory: the inherited
+nominal-bank era still needs qualification, and the capture used to choose
+the corrected bank is not held-out evidence.
 
 `complex_moments.csv` retains the frequency, baseline class, polarization,
 event, and policy. Complex means are in quantized voltage-product units per
@@ -49,7 +63,9 @@ contiguous integration; none is relabeled as a measured 10-second visibility.
 The inverse retained fraction is explicitly a uniform-information arithmetic
 diagnostic, not a validated observing-time prediction. The producer reports
 every coarse bin intersecting the six-megahertz allocation, including partial
-edge overlaps, and lists missing frequency coverage.
+edge overlaps, and lists missing frequency coverage. Coverage counts only bins
+whose products and frame joins passed validation. Present but refused files are
+reported separately, and a refused bin contributes no partial moment rows.
 
 The receipt hashes the exact threshold files, detector files, configuration,
 input manifests, and the consumed arrays of visibility products. Large unused
