@@ -247,7 +247,7 @@ def csv_write(path, rows):
 def run(root, output, channels):
     output.mkdir(parents=True, exist_ok=False)
     capture = root / 'output/channel-ruling-execution-2026-09-14/rebuild/author_actions/capture-runbook/reduce'
-    coarse = root / 'results/canfar_reanalysis_2026-09-09/coarse'
+    coarse = root / 'results/archive_author_eras_2026-09-23/coarse'
     archive = root / 'products/chime_pilots_rebuild_20260829/products/_per_pilot'
     decisions, moments, coverage, refusals, provenance, threshold_provenance = [], [], [], [], [], []
     summaries = {}

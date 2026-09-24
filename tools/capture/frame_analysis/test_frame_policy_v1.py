@@ -181,7 +181,7 @@ class VisibilityValidationTests(unittest.TestCase):
             products = root / 'datasets' / f'pilot_reduce_{self.epoch}'
             products.mkdir(parents=True)
             self.visibility_file(products)
-            coarse = root / 'results/canfar_reanalysis_2026-09-09/coarse'
+            coarse = root / 'results/archive_author_eras_2026-09-23/coarse'
             coarse.mkdir(parents=True)
             (coarse / 'ch35.json').write_text('{}')
             thresholds = {p: dict(policy=p, eta=1., eta_integer_ratio=[1, 1]) for p in POLICIES}
