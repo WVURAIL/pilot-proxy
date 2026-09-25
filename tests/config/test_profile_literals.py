@@ -468,6 +468,28 @@ def _evaluate_pure(node: ast.AST):
     return eval(code, {"__builtins__": dict(_PURE_BUILTINS)})  # noqa: S307
 
 
+def _module_assignment(path: Path, name: str):
+    """The module-level value node assigned to ``name`` in ``path``, or None.
+
+    A record script may use syntax newer than this interpreter (the capture
+    ruling's PEP 701 f-strings need Python 3.12). Its constants sit on one-line
+    top-level statements, so those lines are parsed on their own instead.
+    """
+    text = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError:
+        assignment = re.compile(rf"^(?:[^#]*;\s*)?{re.escape(name)}\s*=")
+        lines = [line for line in text.splitlines() if assignment.match(line)]
+        tree = ast.parse("\n".join(lines), filename=str(path))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    return node.value
+    return None
+
+
 def test_pinned_code_rows_are_found():
     names = {key for key, _, _ in _pinned_code_rows()}
     assert {"detector_window", "fine_bins", "reference_bandwidth", "hdf5_coarse_width",
@@ -483,9 +505,9 @@ def test_pinned_row_matches_the_code(key, relative, name):
     if root is None:
         pytest.skip("needs a source checkout")
     location, _status, literal, _ = LITERALS[key]
-    assigned = _assigned_literals(root / relative)
-    assert name in assigned, f"{location}: {name} is not assigned at module level"
-    value = _evaluate_pure(assigned[name])
+    node = _module_assignment(root / relative, name)
+    assert node is not None, f"{location}: {name} is not assigned at module level"
+    value = _evaluate_pure(node)
     assert type(value) is type(literal) and value == literal, (location, value, literal)
     if isinstance(literal, float):
         assert value.hex() == literal.hex(), location
