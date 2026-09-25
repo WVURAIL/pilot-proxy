@@ -89,6 +89,11 @@ jobs:
                   "weights/chord_dtv_weights_k64.bin.manifest.json",
               }
           )
+          expected.update(
+              path.as_posix()
+              for path in Path("projects").rglob("*")
+              if path.is_file() and path.suffix in {".yaml", ".json"}
+          )
           wheel = next(Path("dist").glob("*.whl"))
           sdist = next(Path("dist").glob("*.tar.gz"))
           with zipfile.ZipFile(wheel) as archive:
@@ -134,6 +139,10 @@ jobs:
               bank = DetectorWeightBank(explicit_path=path)
               assert bank.K == expected_k
               assert bank.supported_physical_channels() == list(range(14, 37))
+          from pilot_proxy.config.project import default_project
+
+          project = default_project().load_all()
+          assert project.directory.parent.parent == CONFIGS_DIR.parent, project.directory
           rng = np.random.default_rng(20260816)
           iq = (rng.standard_normal(4096) + 1j * rng.standard_normal(4096)).astype(np.complex64)
           iq.tofile("relative-input.cfile")
