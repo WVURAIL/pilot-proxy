@@ -17,6 +17,7 @@ from __future__ import annotations
 import ast
 import json
 import math
+import re
 from pathlib import Path
 
 import pytest
@@ -166,7 +167,8 @@ LITERALS = {
         "pilot-proxy src/pilot_proxy/chime/runner.py:342 390_625.0",
         "pinned", 390_625.0, lambda: P.instrument.sample_rate_hz),
     "cleaning_tradeoff_width_mhz": (
-        "pilot-proxy src/pilot_proxy/chime/cleaning_tradeoff.py:37 400.0 / 1024.0",
+        "pilot-proxy src/pilot_proxy/chime/cleaning_tradeoff.py:37 "
+        "CHIME_COARSE_CHANNEL_BANDWIDTH_MHZ",
         "pinned", 400.0 / 1024.0, lambda: P.instrument.bandwidth_mhz / P.instrument.n_channels),
     "reference_bandwidth": (
         "pilot-proxy src/pilot_proxy/dtv_units.py:24 REFERENCE_BANDWIDTH_HZ (detector)",
@@ -178,7 +180,7 @@ LITERALS = {
         "pilot-proxy src/pilot_proxy/config/instrument.py DEFAULT_NFFT (loader fallback)",
         "pinned", 16384, lambda: P.instrument.nfft),
     "generate_results_coarse_mhz": (
-        "pilot-proxy scripts/generate_results.py:90 CHIME_COARSE_MHZ",
+        "pilot-proxy scripts/generate_results.py:89 CHIME_COARSE_MHZ",
         "pinned", 400.0 / 1024.0, lambda: P.instrument.bandwidth_mhz / P.instrument.n_channels),
     "audit_hz_per_channel": (
         "pilot-proxy tools/audit_per_pilot.py:34 CHIME_HZ_PER_CHANNEL",
@@ -212,7 +214,7 @@ LITERALS = {
         "pilot-proxy src/pilot_proxy/fine_decision.py:78 FINE_BINS (detector)",
         "pinned", 256, lambda: P.detector_config.fine_bins),
     "generate_results_fine_bin_hz": (
-        "pilot-proxy scripts/generate_results.py:91 FINE_BIN_HZ",
+        "pilot-proxy scripts/generate_results.py:90 FINE_BIN_HZ",
         "pinned", 390625.0 / 128.0, lambda: P.detector_config.detector_bin_hz(P.instrument)),
     "rfisher_products_nfft": (
         "RFIsher src/rfisher_results/archive/products.py:36 NFFT",
@@ -434,3 +436,56 @@ def test_register_copies_the_detector_entries_value_for_value():
     marker = P.interference.marker
     assert transfer == {"transfer.nominal_pilot_below_shelf_db": marker.marker_to_band_db,
                         "transfer.pilot_capture_efficiency": marker.capture_efficiency}
+
+
+# A pinned pilot-proxy row that names a module-level constant is also held to the
+# code: the name must still be assigned that literal where the row says it is.
+# (Rows citing an inline literal, RFIsher or a record file are checked by the
+# golden files and the rows above.)
+_PINNED_NAME = re.compile(r"^pilot-proxy (\S+?)(?::\d+(?:,\d+)*)? ([A-Z][A-Z0-9_]*)\b")
+_PURE_BUILTINS = {"dict": dict, "enumerate": enumerate, "range": range, "set": set,
+                  "tuple": tuple, "zip": zip}
+
+
+def _pinned_code_rows():
+    rows = []
+    for key, (location, status, _literal, _) in sorted(LITERALS.items()):
+        match = _PINNED_NAME.match(location)
+        if status == "pinned" and match:
+            rows.append((key, match.group(1), match.group(2)))
+    return rows
+
+
+def _evaluate_pure(node: ast.AST):
+    """Evaluate an assignment built only from literals and pure builtins."""
+    loop_names = {sub.id for comp in ast.walk(node) if isinstance(comp, ast.comprehension)
+                  for sub in ast.walk(comp.target) if isinstance(sub, ast.Name)}
+    free = {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+    free -= loop_names | set(_PURE_BUILTINS)
+    if free:
+        pytest.fail(f"not a pure literal ({sorted(free)}): {ast.unparse(node)}")
+    code = compile(ast.Expression(node), "<pinned>", "eval")
+    return eval(code, {"__builtins__": dict(_PURE_BUILTINS)})  # noqa: S307
+
+
+def test_pinned_code_rows_are_found():
+    names = {key for key, _, _ in _pinned_code_rows()}
+    assert {"detector_window", "fine_bins", "reference_bandwidth", "hdf5_coarse_width",
+            "quantize_default_pilot_hz", "audit_freq_table", "frame_policy_pilot_freq_ids",
+            "ruling_cap", "mask_frontier_floor_percentile",
+            "cleaning_tradeoff_width_mhz", "loader_default_nfft"} <= names
+
+
+@pytest.mark.parametrize("key,relative,name", _pinned_code_rows(),
+                         ids=[row[0] for row in _pinned_code_rows()])
+def test_pinned_row_matches_the_code(key, relative, name):
+    root = paths.SOURCE_CHECKOUT_ROOT
+    if root is None:
+        pytest.skip("needs a source checkout")
+    location, _status, literal, _ = LITERALS[key]
+    assigned = _assigned_literals(root / relative)
+    assert name in assigned, f"{location}: {name} is not assigned at module level"
+    value = _evaluate_pure(assigned[name])
+    assert type(value) is type(literal) and value == literal, (location, value, literal)
+    if isinstance(literal, float):
+        assert value.hex() == literal.hex(), location
