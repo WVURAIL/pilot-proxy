@@ -15,6 +15,15 @@ def _runtime_resource_files() -> list[str]:
         path.relative_to(PROJECT_ROOT).as_posix()
         for path in (PROJECT_ROOT / "configs").glob("*/*.json")
     )
+    # Project profiles (projects/<name>/...) travel with a wheel so that an
+    # installed package has its default project. A checkout reads them in place.
+    files.extend(
+        sorted(
+            path.relative_to(PROJECT_ROOT).as_posix()
+            for path in (PROJECT_ROOT / "projects").rglob("*")
+            if path.is_file() and path.suffix in {".yaml", ".json"}
+        )
+    )
     files.extend(
         [
             "weights/chime_dtv_weights_k128.bin",
