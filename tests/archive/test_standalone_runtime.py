@@ -237,7 +237,7 @@ def test_wheel_contains_loadable_instrument_definitions(tmp_path) -> None:
     wheels = list(wheel_dir.glob("*.whl"))
     assert len(wheels) == 1
     expected = {
-        f"pilot_proxy/archive/instruments/{name}.yaml"
+        f"pilot_proxy/instruments/{name}.yaml"
         for name in INSTRUMENT_NAMES
     }
     with zipfile.ZipFile(wheels[0]) as archive:

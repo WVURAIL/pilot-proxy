@@ -70,7 +70,7 @@ pilot-proxy = "pilot_proxy.cli:main"
 package-dir = {"" = "src"}
 
 [tool.setuptools.package-data]
-"pilot_proxy.archive" = ["instruments/*.yaml"]
+"pilot_proxy.instruments" = ["*.yaml"]
 
 [tool.setuptools.dynamic]
 version = {attr = "pilot_proxy._version.__version__"}
