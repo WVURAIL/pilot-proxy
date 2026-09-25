@@ -2,6 +2,7 @@
 """Table of record: one row per freq_id 477..844, built from the dumps.
 
 usage: table_of_record.py <out csv> <dump label>=<frame_residual csv>:<chime-run dir> [more dumps ...] [gain=<cadence_tau csv>] [lowbound=<frame_residual csv>,...] [bao=<gain_bao csv>]
+       [channels=<channels.csv>] [worlds=<coarse-world-sensitivity.csv>] [board=<board_final.csv>] [archive=<per-pilot product dir>]
 
 Per channel and policy (cal_q0.1, cal_q0.5, cal_q0.9, keep_all): the dumps that policy keeps (dump median Q at or
 below the archive's eta_q for that channel, see ladder_place.py), the physical A = in-band median excess on the
@@ -9,33 +10,77 @@ shortest same-polarisation north-south baseline over those dumps (all frames of 
 and R = A * S_world * G / lambda_world in the world without credit and in the deployed 200 ns world (S_world the
 table's suppression on the DTV shelf). Disposition follows the predeclaration: keep with the loosest passing policy,
 excise when no policy passes with the deployed credit and G = 1 (bar = dB over tolerance), pilot for the detector bin.
+
+Inputs of record. These are CHIME collaboration products and are not published with this script. Each one is taken
+from its <key>=<path> argument, else its environment variable, else its name under $TABLE_OF_RECORD_INPUTS:
+  channels=  TOR_CHANNELS_CSV  channels.csv                  tolerance without credit per channel
+  worlds=    TOR_WORLDS_CSV    coarse-world-sensitivity.csv  deployed-world tolerance and suppression
+  board=     TOR_BOARD_CSV     board_final.csv               archive gain bound G_nocredit and tau bound
+  archive=   TOR_ARCHIVE_DIR   _per_pilot                    archive per-pilot detector products <freq_id>.npz
+The sha256, size, time and provenance of every file read (these, the dump inputs and this script) are written to
+<out csv without extension>.inputs.json. How an input is located does not change the table.
 """
-import csv, json, os, sys
+import csv, datetime, hashlib, json, os, sys
 import numpy as np
 NFFT = 16384; W = 0.390625
 PILOT = {14:844,15:829,16:813,17:798,18:783,19:767,20:752,21:736,22:721,23:706,24:690,25:675,26:660,27:644,28:629,29:614,30:598,31:583,32:568,33:552,34:537,35:521,36:506,37:491}
-ARCH = "/home/djg/rail/products/chime_pilots_rebuild_20260829/products/_per_pilot"
+# ---- inputs of record: key -> (environment variable, name under TABLE_OF_RECORD_INPUTS, what it is and where the
+# record's copy came from). Resolved before anything is read; the provenance of every file read is kept in PROV.
+INPUTS = {
+    "channels": ("TOR_CHANNELS_CSV", "channels.csv", "conditional_reference_amplitude per channel (world none); forecast-convergence release 2026-09-09, exact-time-reference/channels.csv"),
+    "worlds": ("TOR_WORLDS_CSV", "coarse-world-sensitivity.csv", "base_tolerance_zeta1 and suppression_db (deployed world, dilation, zeta 1.0, primary basis); CANFAR reanalysis 2026-09-09, coarse-worlds/coarse-world-sensitivity.csv"),
+    "board": ("TOR_BOARD_CSV", "board_final.csv", "G_nocredit, tau_quality and tau_booked_s per channel; channel-ruling execution 2026-09-14, rebuild/ruling/final/board_final.csv"),
+    "archive": ("TOR_ARCHIVE_DIR", "_per_pilot", "archive per-pilot detector products <freq_id>.npz (ladder thresholds eta_q); chime_pilots_rebuild_20260829/products/_per_pilot"),
+}
+given = {}; ARGS = []
+for arg in sys.argv[2:]:
+    k, _, v = arg.partition("=")
+    if k in INPUTS and v: given[k] = v
+    else: ARGS.append(arg)
+def resolve(key):
+    env, name, _ = INPUTS[key]
+    if key in given: return given[key], f"argument {key}="
+    if os.environ.get(env): return os.environ[env], f"environment {env}"
+    if os.environ.get("TABLE_OF_RECORD_INPUTS"): return os.path.join(os.environ["TABLE_OF_RECORD_INPUTS"], name), f"TABLE_OF_RECORD_INPUTS/{name}"
+    sys.exit(f"input {key!r} is not set: pass {key}=<path>, set {env}, or set TABLE_OF_RECORD_INPUTS to a directory holding {name}")
+SRC = {k: resolve(k) for k in INPUTS}
+if not os.path.isdir(SRC["archive"][0]): sys.exit(f"archive input {SRC['archive'][0]} is not a directory")
+PROV = []
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for b in iter(lambda: fh.read(1 << 20), b""): h.update(b)
+    return h.hexdigest()
+def record(role, path, resolved_by, provenance):
+    st = os.stat(path)
+    PROV.append(dict(role=role, path=os.path.abspath(path), realpath=os.path.realpath(path), resolved_by=resolved_by, provenance=provenance, sha256=sha256(path), bytes=st.st_size,
+                     mtime_utc=datetime.datetime.fromtimestamp(st.st_mtime, datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")))
+    return path
+def keyed(key, name=None):
+    path, how = SRC[key]
+    return record(key if name is None else f"{key}:{name}", path if name is None else os.path.join(path, name), how, INPUTS[key][2])
+ARCH = SRC["archive"][0]
 POLICIES = ["cal_q0.1", "cal_q0.5", "cal_q0.9", "keep_all"]; QS = {"cal_q0.1": 0.1, "cal_q0.5": 0.5, "cal_q0.9": 0.9}
 def channel_of(fid):
     f = 800.0 - fid * W; return 14 + int((f - 470.0) // 6.0)
 # tolerances per world
 lam_none = {}; 
-for r in csv.DictReader(open("/home/djg/rail/output/forecast-convergence-2026-09-09/exact-time-reference/channels.csv")):
+for r in csv.DictReader(open(keyed("channels"))):
     if r["channel"].isdigit(): lam_none[int(r["channel"])] = float(r["conditional_reference_amplitude"])
 lam_dep = {}; sup_dep = {}
-for r in csv.DictReader(open("/home/djg/rail/results/canfar_reanalysis_2026-09-09/coarse-worlds/coarse-world-sensitivity.csv")):
+for r in csv.DictReader(open(keyed("worlds"))):
     if r["world"] == "deployed" and r["science_group"] == "dilation" and r["zeta"] == "1.0" and r["tolerance_basis"] == "primary" and r["base_tolerance_zeta1"]:
         lam_dep[int(r["channel"])] = float(r["base_tolerance_zeta1"]); sup_dep[int(r["channel"])] = float(r["suppression_db"])
 # the archive's gain bound per channel (board_final.csv: G_nocredit = min(tau bound, cap) / T_frame)
 G_arch = {}; tau_arch = {}
-for r in csv.DictReader(open("/home/djg/rail/output/channel-ruling-execution-2026-09-14/rebuild/ruling/final/board_final.csv")):
+for r in csv.DictReader(open(keyed("board"))):
     G_arch[int(r["channel"])] = float(r["G_nocredit"]); tau_arch[int(r["channel"])] = r["tau_quality"] + " " + r["tau_booked_s"]
 # archive ladder thresholds
 eta = {}
 for ch, fid in PILOT.items():
     p = f"{ARCH}/{fid}.npz"
     if not os.path.exists(p): continue
-    z = np.load(p, allow_pickle=True); v = z["valid"][:, 0].astype(bool)
+    z = np.load(keyed("archive", f"{fid}.npz"), allow_pickle=True); v = z["valid"][:, 0].astype(bool)
     mu0 = 2.0 * float(z["target_norm_sq"][0]) / float(z["reference_norm_sum_sq"][0])
     Q = z["coarse_power_ratio"][:, 0].astype(float) / mu0; Q = Q[v & np.isfinite(Q)]
     eta[ch] = {k: float(np.quantile(Q, q, method="higher")) for k, q in QS.items()}
@@ -46,13 +91,13 @@ lowb_bao = {}   # amendment 7: channel -> [(east-west median excess, epoch)] ove
 bao_gain = {}   # amendment 7: channel -> BAO-basis coherence time
 EW_CLASSES = ((1, 0), (2, 0), (3, 0))
 gain = {}   # amendments 3 and 5: coherence time per channel from cadence_tau.py (in-band row), keyed by channel; refused takes the cap
-for arg in sys.argv[2:]:
+for arg in ARGS:
     label, rest = arg.split("=", 1)
     if label == "lowbound":
         # amendment 6: per-channel, per-polarisation minimum over epochs of the in-band median excess (all frames, (0,1) class)
         for fr in rest.split(","):
             percls = {}
-            for r in csv.DictReader(open(fr)):
+            for r in csv.DictReader(open(record("lowbound", fr, "argument lowbound=", "frame_residual.py output (lowest-epoch bound)"))):
                 if r["frames"] == "all" and r["ew"] == "0" and r["ns"] == "1" and r["pol"] in ("0", "1") and r["excess_inband_median"]:
                     v = float(r["excess_inband_median"])
                     if np.isfinite(v): lowb.setdefault(int(r["channel"]), {}).setdefault(r["pol"], []).append((v, os.path.basename(fr)[15:29]))
@@ -65,17 +110,17 @@ for arg in sys.argv[2:]:
         continue
     if label == "bao":
         # amendment 7: BAO-basis coherence time per channel (gain_bao.csv built from the east-west classes)
-        for r in csv.DictReader(open(rest)):
+        for r in csv.DictReader(open(record("bao", rest, "argument bao=", "BAO-basis coherence times (gain_bao.csv)"))):
             if r["bins"] == "inband" and r["tau_c_s"]:
                 bao_gain[int(r["channel"])] = dict(status=r["status"], tau=float(r["tau_c_s"]), G=float(r["G"]), basis=r["basis"])
         continue
     if label == "gain":
-        for r in csv.DictReader(open(rest)):
+        for r in csv.DictReader(open(record("gain", rest, "argument gain=", "coherence times (cadence_tau.py)"))):
             if r["bins"] == "inband" and (r["status"] in ("measured", "bound", "constant") or r["status"].startswith("refused")):   # in-band level, the same quantity as A (amendment 5)
                 gain[int(r["channel"])] = dict(status=r["status"], tau=float(r["tau_c_s"]), tau_hi=float(r["tau_c_high_s"]), G=float(r["G"]))
         continue
     fr_csv, run_dir = rest.split(":", 1)
-    allrows = [r for r in csv.DictReader(open(fr_csv)) if r["frames"] == "all" and r["ew"] != "-1"]
+    allrows = [r for r in csv.DictReader(open(record(f"dump {label}: frame residual", fr_csv, f"argument {label}=", "frame_residual.py output for this dump"))) if r["frames"] == "all" and r["ew"] != "-1"]
     # amendment 4: A is the larger of the two same-polarisation readings on the (0, 1) class; G and phi from that polarisation
     ex = {}; expol = {}; exbao = {}
     percls = {}
@@ -98,7 +143,7 @@ for arg in sys.argv[2:]:
         v = float(r["excess_inband_median"] or "nan")
         if np.isfinite(v): typ.setdefault(int(r["channel"]), []).append(v)
     typ = {c: float(np.median(v)) for c, v in typ.items()}
-    d = np.load(os.path.join(run_dir, "chime_detector_outputs.npz"), allow_pickle=True)
+    d = np.load(record(f"dump {label}: detector outputs", os.path.join(run_dir, "chime_detector_outputs.npz"), f"argument {label}=", "kernel chime-run output for this dump"), allow_pickle=True)
     Qmed = {}
     for j, c in enumerate(d["physical_channel"]):
         v = d["valid"][:, j].astype(bool); Q = d["coarse_power_ratio"][:, j][v] / float(d["null_power_ratio"][j]); Qmed[int(c)] = float(np.median(Q))
@@ -237,3 +282,14 @@ print("ch  disposition   policy / reason                                        
 for ch in chans:
     (disp, reason), res = verdicts[ch]; ka = res["keep_all"]
     print(f"{ch:2d}  {disp:12s}  {reason[:70]:70s}  {ka['A']:.2e}  {ka['A_typ']:.2e}  {ka['G']:4.1f}  {ka['R_dep_G1']:8.2f}  {ka['R_dep_Gd']:8.2f}  {ka['R_dep_Ga']:9.1f}")
+# ---- provenance of every file read, beside the table
+side = os.path.splitext(sys.argv[1])[0] + ".inputs.json"
+with open(side, "w") as fh:
+    json.dump(dict(generated_utc=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), argv=sys.argv[1:],
+                   script=dict(path=os.path.abspath(__file__), sha256=sha256(__file__)), output=dict(path=os.path.abspath(sys.argv[1]), sha256=sha256(sys.argv[1])),
+                   located={k: dict(path=os.path.abspath(p), resolved_by=how) for k, (p, how) in SRC.items()}, inputs=PROV), fh, indent=1)
+    fh.write("\n")
+print(f"inputs: {len(PROV)} files read; sha256 and provenance in {side}")
+for k in ("channels", "worlds", "board"):
+    e = next(e for e in PROV if e["role"] == k); print(f"  {k:8s}  {e['sha256']}  {e['path']}  ({e['resolved_by']})")
+print(f"  archive   {sum(e['role'].startswith('archive:') for e in PROV)} per-pilot products from {os.path.abspath(ARCH)} ({SRC['archive'][1]})")

@@ -93,6 +93,8 @@ target-version = "py310"
 # linter would alter the record it exists to preserve, so they are not linted.
 # tools/capture/frame_analysis holds the capture ruling's scripts of record,
 # byte copies of the frozen ruling tree whose hashes are pinned; the same holds.
+# table_of_record.py alone takes its inputs from a configurable location (its
+# README); given the same inputs it writes the same table.
 extend-exclude = ["docs/evidence", "tools/capture/frame_analysis"]
 
 [tool.ruff.lint]
