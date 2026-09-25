@@ -24,3 +24,9 @@ scopes:
 
 reader: chime-baseband   # canonical reader; `scan` uses it when --reader is
                          # omitted (override for a different file format).
+
+# Site: the DRAO longitude (east-positive degrees) used for local mean sidereal
+# time, and the IANA zone of local civil time.
+site:
+  longitude_deg_east: -119.6175
+  time_zone: America/Vancouver

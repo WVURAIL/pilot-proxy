@@ -38,8 +38,9 @@ _INSTRUMENT_DIR = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "instruments")
 DEFAULT_NFFT = 16384
 _INSTRUMENT_KEYS = frozenset({
-    "name", "band", "nyquist_zone", "n_feeds", "nfft", "scopes", "reader",
+    "name", "band", "nyquist_zone", "n_feeds", "nfft", "scopes", "reader", "site",
 })
+_SITE_KEYS = frozenset({"longitude_deg_east", "time_zone"})
 _BAND_KEYS = frozenset({
     "f0_mhz", "bandwidth_mhz", "n_channels", "descending",
 })
@@ -64,11 +65,52 @@ class Instrument:
     reader: str = ""       # canonical reader for this telescope
                            # (e.g. "chime-baseband"); the default `scan` uses
                            # when --reader is omitted. Pure data, like the rest.
+    site_longitude_deg: Optional[float] = None  # east-positive site longitude;
+                           # None when the file records no site
+    local_time_zone: str = ""  # IANA zone of the site's civil time ("" if none)
 
     @property
     def fs_hz(self) -> float:
         """Per-channel (complex) sample rate = channel spacing."""
         return self.bandwidth_mhz * 1e6 / self.n_channels
+
+    @property
+    def sample_rate_hz(self) -> float:
+        """Complex sample rate of one channel (equal to the channel spacing)."""
+        return self.fs_hz
+
+    @property
+    def channel_width_hz(self) -> float:
+        """Spacing of adjacent channels in Hz."""
+        return self.fs_hz
+
+    @property
+    def f0_hz(self) -> float:
+        """Sky frequency of freq_id 0 in Hz (the band top when descending)."""
+        return self.f0_mhz * 1e6
+
+    @property
+    def n_inputs(self) -> int:
+        """Number of inputs summed incoherently (the feed count)."""
+        return self.n_feeds
+
+    def freq_id_of_hz(self, f_hz: float) -> int:
+        """Nearest freq_id for a sky frequency in Hz, computed in Hz.
+
+        This is the arithmetic of the former ``chime_freq_id_from_hz``:
+        ``round((f0 - f) / width)`` for a descending channelization.
+        """
+        width = self.channel_width_hz
+        if self.descending:
+            return int(round((self.f0_hz - float(f_hz)) / width))
+        return int(round((float(f_hz) - self.f0_hz) / width))
+
+    def hz_of_freq_id(self, freq_id: float) -> float:
+        """Channel-centre sky frequency in Hz for a freq_id, computed in Hz."""
+        width = self.channel_width_hz
+        if self.descending:
+            return self.f0_hz - freq_id * width
+        return self.f0_hz + freq_id * width
 
     @property
     def chan_step_mhz(self) -> float:
@@ -260,6 +302,9 @@ def _instrument_from_config(requested_name: str, cfg: Mapping) -> Instrument:
     if reader:
         reader = validate_identifier(reader, label="instrument reader")
 
+    site_longitude_deg, local_time_zone = _site_from_config(
+        requested_name, cfg.get("site"))
+
     return Instrument(
         name=configured_name,
         f0_mhz=f0_mhz,
@@ -271,7 +316,39 @@ def _instrument_from_config(requested_name: str, cfg: Mapping) -> Instrument:
         nfft=nfft,
         scopes=_coerce_scopes(cfg.get("scopes")),
         reader=reader,
+        site_longitude_deg=site_longitude_deg,
+        local_time_zone=local_time_zone,
     )
+
+
+def _site_from_config(requested_name: str, site) -> tuple[Optional[float], str]:
+    """Validate the optional ``site`` block: longitude and civil time zone.
+
+    ``site: null`` (as an outrigger that extends CHIME writes it) means the file
+    records no site, so a child never inherits its parent's coordinates.
+    """
+    if site is None:
+        return None, ""
+    if not isinstance(site, Mapping):
+        raise ValueError(f"instrument {requested_name!r}: site must be a mapping or null")
+    unknown = set(site) - _SITE_KEYS
+    if unknown:
+        raise ValueError(
+            f"instrument {requested_name!r}: unknown site key(s) "
+            f"{sorted(map(str, unknown))}")
+    longitude = site.get("longitude_deg_east")
+    if isinstance(longitude, bool) or not isinstance(longitude, (int, float)):
+        raise ValueError(
+            f"instrument {requested_name!r}: site.longitude_deg_east must be a number")
+    longitude = float(longitude)
+    if not math.isfinite(longitude) or not -180.0 <= longitude <= 180.0:
+        raise ValueError(
+            f"instrument {requested_name!r}: site.longitude_deg_east must be in [-180, 180]")
+    zone = site.get("time_zone", "")
+    if not isinstance(zone, str) or not zone.strip():
+        raise ValueError(
+            f"instrument {requested_name!r}: site.time_zone must be a non-empty string")
+    return longitude, zone.strip()
 
 
 def load_instrument(name: str, directory: Optional[str] = None) -> Instrument:
