@@ -279,7 +279,7 @@ LITERALS = {
     # ---- register ---------------------------------------------------------------
     "min_frames_per_false_alarm": (
         "pilot-proxy src/pilot_proxy/chime/injection_recovery.py:48 MIN_FRAMES_PER_FALSE_ALARM",
-        "pinned", 10.0, lambda: P.register.value("detection.minimum_frames_per_false_alarm")),
+        "replaced", 10.0, lambda: P.register.value("detection.minimum_frames_per_false_alarm")),
     "ruling_allowance_db": (
         "pilot-proxy tools/capture/frame_analysis/ruling_baseline.py:17 ALLOW_DB (record)",
         "pinned", 3.0, lambda: P.register.value("measurement_allowance_db")),
@@ -338,6 +338,9 @@ REPLACED_NAMES = {
     "archive_health.py": {
         "DRAO_LONGITUDE_DEGREES_EAST": "drao_longitude",
         "LOCAL_CIVIL_TIME_ZONE": "local_time_zone",
+    },
+    "chime/injection_recovery.py": {
+        "MIN_FRAMES_PER_FALSE_ALARM": "min_frames_per_false_alarm",
     },
     "chime/products.py": {
         "SAMPLE_RATE_HZ": "chime_products_sample_rate",

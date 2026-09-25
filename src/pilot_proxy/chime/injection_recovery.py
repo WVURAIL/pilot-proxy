@@ -33,6 +33,7 @@ from typing import Any, Sequence
 import numpy as np
 
 from pilot_proxy.chime.injection import INJECTION_MANIFEST_FILENAME
+from pilot_proxy.config.project import default_project
 from pilot_proxy.chime.products import (
     CHIME_DETECTOR_OUTPUTS_FILENAME,
     CHIME_SPECTROGRAM_CACHE_FILENAME,
@@ -44,8 +45,12 @@ RECOVERY_SUMMARY_FILENAME = "injection_recovery_summary.json"
 RECOVERY_FIGURE = "injection_recovery_linearity.png"
 BASELINE_FIGURE = "detector_vs_radiometer_pd.png"
 DEFAULT_FALSE_ALARM_RATES = (1e-2,)
-# An empirical quantile at P_fa needs enough H0 frames to be meaningful.
-MIN_FRAMES_PER_FALSE_ALARM = 10.0
+# An empirical quantile at P_fa needs enough H0 frames to be meaningful: at
+# least this many expected false alarms (detector register entry
+# detection.minimum_frames_per_false_alarm).
+MIN_FRAMES_PER_FALSE_ALARM = default_project().register.value(
+    "detection.minimum_frames_per_false_alarm"
+)
 
 
 def _load_point(point_dir: Path) -> dict[str, Any]:
