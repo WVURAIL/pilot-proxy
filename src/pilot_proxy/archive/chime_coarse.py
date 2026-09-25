@@ -19,11 +19,16 @@ from __future__ import annotations
 
 import re
 
+from pilot_proxy.config.instrument import load_instrument
+
+_CHIME = load_instrument("chime")
+
 # f0: top of the CHIME 400-800 MHz band. The coarse channel width is the
 # F-engine spacing 400e6 / 1024, which equals the baseband sample rate fs.
-CHIME_BAND_TOP_HZ = 800_000_000.0
-CHIME_N_COARSE_CHANNELS = 1024
-CHIME_COARSE_WIDTH_HZ = 400_000_000.0 / CHIME_N_COARSE_CHANNELS  # == 390625.0
+# All three come from the instrument file pilot_proxy/instruments/chime.yaml.
+CHIME_BAND_TOP_HZ = _CHIME.f0_hz
+CHIME_N_COARSE_CHANNELS = _CHIME.n_channels
+CHIME_COARSE_WIDTH_HZ = _CHIME.channel_width_hz  # == 390625.0
 
 
 def chime_freq_id_from_hz(
@@ -35,7 +40,8 @@ def chime_freq_id_from_hz(
 
     ``freq_id = round((f0 - f_center) / coarse_width)``. ``f0`` defaults to the
     CHIME band top (800 MHz) and ``coarse_width`` to 400e6/1024; pass an
-    instrument's own values for non-CHIME geometries.
+    instrument's own values for non-CHIME geometries. With the defaults this is
+    ``Instrument.freq_id_of_hz`` of the CHIME instrument file.
     """
     return int(round((float(f0_hz) - float(f_center_hz)) / float(coarse_width_hz)))
 

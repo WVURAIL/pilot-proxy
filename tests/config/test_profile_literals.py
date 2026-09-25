@@ -137,22 +137,22 @@ LITERALS = {
     # ---- instrument -------------------------------------------------------------
     "chime_band_top": (
         "pilot-proxy src/pilot_proxy/archive/chime_coarse.py:24 CHIME_BAND_TOP_HZ",
-        "pinned", 800_000_000.0, lambda: P.instrument.f0_hz),
+        "replaced", 800_000_000.0, lambda: P.instrument.f0_hz),
     "chime_n_coarse": (
         "pilot-proxy src/pilot_proxy/archive/chime_coarse.py:25 CHIME_N_COARSE_CHANNELS",
-        "pinned", 1024, lambda: P.instrument.n_channels),
+        "replaced", 1024, lambda: P.instrument.n_channels),
     "chime_coarse_width": (
         "pilot-proxy src/pilot_proxy/archive/chime_coarse.py:26 CHIME_COARSE_WIDTH_HZ",
-        "pinned", 400_000_000.0 / 1024, lambda: P.instrument.channel_width_hz),
+        "replaced", 400_000_000.0 / 1024, lambda: P.instrument.channel_width_hz),
     "chime_products_sample_rate": (
         "pilot-proxy src/pilot_proxy/chime/products.py:59 SAMPLE_RATE_HZ",
-        "pinned", 390_625.0, lambda: P.instrument.sample_rate_hz),
+        "replaced", 390_625.0, lambda: P.instrument.sample_rate_hz),
     "drao_longitude": (
         "pilot-proxy src/pilot_proxy/archive_health.py:81 DRAO_LONGITUDE_DEGREES_EAST",
-        "pinned", -119.6175, lambda: P.instrument.site_longitude_deg),
+        "replaced", -119.6175, lambda: P.instrument.site_longitude_deg),
     "local_time_zone": (
         "pilot-proxy src/pilot_proxy/archive_health.py:82 LOCAL_CIVIL_TIME_ZONE",
-        "pinned", "America/Vancouver", lambda: P.instrument.local_time_zone),
+        "replaced", "America/Vancouver", lambda: P.instrument.local_time_zone),
     "hdf5_coarse_width": (
         "pilot-proxy src/pilot_proxy/chime/hdf5_input.py:26 CHIME_COARSE_WIDTH_HZ",
         "pinned", 400_000_000.0 / 1024.0, lambda: P.instrument.channel_width_hz),
@@ -330,6 +330,18 @@ REPLACED_NAMES = {
         "ATSC_PILOT_OFFSET_HZ": "atsc_pilot_offset",
         "ATSC_UHF_CHANNEL_14_LOWER_EDGE_HZ": "atsc_ch14_lower_edge",
     },
+    "archive/chime_coarse.py": {
+        "CHIME_BAND_TOP_HZ": "chime_band_top",
+        "CHIME_N_COARSE_CHANNELS": "chime_n_coarse",
+        "CHIME_COARSE_WIDTH_HZ": "chime_coarse_width",
+    },
+    "archive_health.py": {
+        "DRAO_LONGITUDE_DEGREES_EAST": "drao_longitude",
+        "LOCAL_CIVIL_TIME_ZONE": "local_time_zone",
+    },
+    "chime/products.py": {
+        "SAMPLE_RATE_HZ": "chime_products_sample_rate",
+    },
     "dtv_units.py": {
         "DTV_BANDWIDTH_HZ": "dtv_bandwidth",
         "PILOT_BELOW_DATA_DB": "pilot_below_data_db",
@@ -391,6 +403,17 @@ def test_screened_bands_follow_the_uhf_raster():
         assert P.marker_hz(band) == low + 309_441.0
     control = P.frequency_plan.band("37")
     assert (control.low_mhz, control.high_mhz, control.role) == (608.0, 614.0, "control")
+
+
+def test_hz_freq_id_helpers_agree_on_every_target():
+    from pilot_proxy.archive.chime_coarse import chime_freq_id_from_hz
+
+    for band in P.frequency_plan.bands():
+        marker = P.marker_hz(band)
+        assert chime_freq_id_from_hz(marker) == P.instrument.freq_id_of_hz(marker)
+        assert P.instrument.freq_id_of_freq(marker / 1e6) == P.instrument.freq_id_of_hz(marker)
+        centre = P.instrument.hz_of_freq_id(P.target_freq_id(band))
+        assert abs(centre - marker) <= P.instrument.channel_width_hz / 2
 
 
 def test_register_copies_the_detector_entries_value_for_value():

@@ -14,6 +14,7 @@ from pilot_proxy.atomic_io import (
     create_temporary_sibling,
     fsync_directory,
 )
+from pilot_proxy.config.project import default_project
 from pilot_proxy.detector_contract import NORMALIZED_POSITIVE_EXCESS_MASK_RULE
 from pilot_proxy.json_utils import write_json_strict
 from pilot_proxy.schema_identity import schema_token
@@ -56,7 +57,8 @@ SCAN_INPUT_MANIFEST_SCHEMA_TOKEN = schema_token(
     SCAN_INPUT_MANIFEST_SCHEMA_NAME,
     SCAN_INPUT_MANIFEST_SCHEMA_REVISION,
 )
-SAMPLE_RATE_HZ = 390_625.0
+# The channel sample rate of the project's instrument (390625 Hz on CHIME).
+SAMPLE_RATE_HZ = default_project().instrument.sample_rate_hz
 
 
 def atomic_savez_compressed(path: Path, **arrays: np.ndarray) -> Path:

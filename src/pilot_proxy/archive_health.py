@@ -66,6 +66,7 @@ from pilot_proxy.fine_reduction import (
     independent_bin_mask,
     p_fa_to_threshold_k,
 )
+from pilot_proxy.config.project import default_project
 from pilot_proxy.product_contract import fine_power_ratio_of, null_power_ratio_of
 from pilot_proxy.json_utils import json_safe
 from pilot_proxy.provenance import file_sha256, package_source_sha256
@@ -78,8 +79,11 @@ DIAGNOSTIC_MANIFEST_SCHEMA_VERSION = "pilotproxy_archive_diagnostic_manifest_v1"
 CORRECTED_SPECTRA_SCHEMA_VERSION = "pilotproxy_archive_corrected_spectra_v1"
 RESIDUAL_HEALTH_VIEW_SCHEMA_VERSION = "pilotproxy_baonoise_health_view_v1"
 
-DRAO_LONGITUDE_DEGREES_EAST = -119.6175
-LOCAL_CIVIL_TIME_ZONE = "America/Vancouver"
+# Site of the project's instrument (CHIME at DRAO): east-positive longitude for
+# local mean sidereal time, and the IANA zone of local civil time.
+_INSTRUMENT = default_project().instrument
+DRAO_LONGITUDE_DEGREES_EAST = _INSTRUMENT.site_longitude_deg
+LOCAL_CIVIL_TIME_ZONE = _INSTRUMENT.local_time_zone
 LMST_FORMULA_VERSION = "utc_as_ut1_iau1982_style_gmst_polynomial_v1"
 LMST_FORMULA = (
     "JD = unix_utc_seconds / 86400 + 2440587.5; "
