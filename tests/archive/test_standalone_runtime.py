@@ -204,7 +204,7 @@ def test_wheel_contains_loadable_instrument_definitions(tmp_path) -> None:
     project.mkdir()
     for name in ("pyproject.toml", "setup.py", "MANIFEST.in", "README.md", "LICENSE"):
         shutil.copy2(REPO_ROOT / name, project / name)
-    for name in ("src", "configs", "weights"):
+    for name in ("src", "configs", "weights", "projects"):
         shutil.copytree(REPO_ROOT / name, project / name)
 
     wheel_dir = tmp_path / "wheel"
@@ -240,9 +240,16 @@ def test_wheel_contains_loadable_instrument_definitions(tmp_path) -> None:
         f"pilot_proxy/instruments/{name}.yaml"
         for name in INSTRUMENT_NAMES
     }
+    profile = {
+        "pilot_proxy/_resources/" + path.relative_to(REPO_ROOT).as_posix()
+        for path in (REPO_ROOT / "projects").rglob("*")
+        if path.is_file()
+    }
+    assert profile
     with zipfile.ZipFile(wheels[0]) as archive:
         wheel_names = set(archive.namelist())
         assert expected <= wheel_names
+        assert profile <= wheel_names
         unpacked = tmp_path / "unpacked"
         archive.extractall(unpacked)
 
@@ -270,6 +277,14 @@ def test_wheel_contains_loadable_instrument_definitions(tmp_path) -> None:
                     assert instrument.name == name
                     assert instrument.n_channels > 0
                     assert instrument.nfft > 0
+
+                from pilot_proxy.config.project import default_project
+                import pilot_proxy.dtv_units
+
+                project = default_project().load_all()
+                assert project.directory.resolve().is_relative_to(root)
+                assert project.directory.parent.parent.name == "_resources"
+                assert pilot_proxy.dtv_units.DTV_BANDWIDTH_HZ == 6.0e6
                 """
             ),
         ],

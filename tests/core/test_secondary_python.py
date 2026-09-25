@@ -101,6 +101,7 @@ def test_bridge_copies_package_when_symlinks_are_unavailable(
         ).is_file()
         assert (resources / "weights" / "chime_dtv_weights_k128.bin").is_file()
         assert (resources / "weights" / "chord_dtv_weights_k64.bin").is_file()
+        assert (resources / "projects" / "chime_atsc" / "project.yaml").is_file()
 
         result = subprocess.run(
             [
@@ -113,7 +114,10 @@ def test_bridge_copies_package_when_symlinks_are_unavailable(
                     "assert (CONFIGS_DIR / 'receiver_profiles' / "
                     "'chime_dtv_fengine.json').is_file(); "
                     "assert DEFAULT_WEIGHTS_PATH.is_file(); "
-                    "assert DEFAULT_CHORD_WEIGHTS_PATH.is_file()"
+                    "assert DEFAULT_CHORD_WEIGHTS_PATH.is_file(); "
+                    "from pilot_proxy.paths import DATA_ROOT; "
+                    "assert (DATA_ROOT / 'projects' / 'chime_atsc' / "
+                    "'project.yaml').is_file()"
                 ),
             ],
             cwd=tmp_path,

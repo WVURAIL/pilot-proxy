@@ -53,6 +53,8 @@ def _create_package_entry(shim_root: Path, package_root: Path) -> Path:
             packaged_weights.mkdir(parents=True)
             for source in sorted((DATA_ROOT / "weights").glob("*.bin*")):
                 shutil.copy2(source, packaged_weights / source.name)
+            if (DATA_ROOT / "projects").is_dir():
+                shutil.copytree(DATA_ROOT / "projects", resource_root / "projects")
     return entry
 
 
