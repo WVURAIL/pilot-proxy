@@ -48,22 +48,22 @@ LITERALS = {
     # ---- frequency plan and interference template -------------------------------
     "atsc_channel_width": (
         "pilot-proxy src/pilot_proxy/atsc_channels.py:12 ATSC_CHANNEL_WIDTH_HZ",
-        "pinned", 6.0e6, lambda: P.interference.band_width_hz),
+        "replaced", 6.0e6, lambda: P.interference.band_width_hz),
     "atsc_pilot_offset": (
         "pilot-proxy src/pilot_proxy/atsc_channels.py:13 ATSC_PILOT_OFFSET_HZ",
-        "pinned", 309_441.0, lambda: P.interference.marker.offset_hz),
+        "replaced", 309_441.0, lambda: P.interference.marker.offset_hz),
     "atsc_ch14_lower_edge": (
         "pilot-proxy src/pilot_proxy/atsc_channels.py:17 ATSC_UHF_CHANNEL_14_LOWER_EDGE_HZ",
-        "pinned", 470.0e6, lambda: _screened()[0].low_hz),
+        "replaced", 470.0e6, lambda: _screened()[0].low_hz),
     "dtv_bandwidth": (
         "pilot-proxy src/pilot_proxy/dtv_units.py:27 DTV_BANDWIDTH_HZ",
-        "pinned", 6.0e6, lambda: P.interference.band_width_hz),
+        "replaced", 6.0e6, lambda: P.interference.band_width_hz),
     "pilot_below_data_db": (
         "pilot-proxy src/pilot_proxy/dtv_units.py:39 PILOT_BELOW_DATA_DB",
-        "pinned", 11.3, lambda: P.interference.marker.marker_to_band_db),
+        "replaced", 11.3, lambda: P.interference.marker.marker_to_band_db),
     "pilot_capture_efficiency": (
         "pilot-proxy src/pilot_proxy/dtv_units.py:40 PILOT_CAPTURE_EFFICIENCY",
-        "pinned", 1.0, lambda: P.interference.marker.capture_efficiency),
+        "replaced", 1.0, lambda: P.interference.marker.capture_efficiency),
     "rfisher_pilot_below_shelf_db": (
         "RFIsher src/rfisher/selection_policy.py transfer.nominal_pilot_below_shelf_db",
         "pinned", 11.3, lambda: P.interference.marker.marker_to_band_db),
@@ -324,7 +324,18 @@ def test_profile_reproduces_literal(key):
 
 
 # Module-level names whose literal was replaced by a profile read, per file.
-REPLACED_NAMES = {}
+REPLACED_NAMES = {
+    "atsc_channels.py": {
+        "ATSC_CHANNEL_WIDTH_HZ": "atsc_channel_width",
+        "ATSC_PILOT_OFFSET_HZ": "atsc_pilot_offset",
+        "ATSC_UHF_CHANNEL_14_LOWER_EDGE_HZ": "atsc_ch14_lower_edge",
+    },
+    "dtv_units.py": {
+        "DTV_BANDWIDTH_HZ": "dtv_bandwidth",
+        "PILOT_BELOW_DATA_DB": "pilot_below_data_db",
+        "PILOT_CAPTURE_EFFICIENCY": "pilot_capture_efficiency",
+    },
+}
 
 
 def _assigned_literals(path: Path) -> dict[str, ast.AST]:

@@ -21,10 +21,16 @@ import operator
 
 import numpy as np
 
+from pilot_proxy.config.project import default_project
+
+# The DTV signal model (band width, pilot-to-data ratio, capture efficiency) is
+# read from the project's interference template.
+_TEMPLATE = default_project().interference
+
 REFERENCE_BANDWIDTH_HZ = 400.0e6
 REFERENCE_NUM_CHANNELS = 1024
 REFERENCE_CHANNEL_WIDTH_HZ = REFERENCE_BANDWIDTH_HZ / REFERENCE_NUM_CHANNELS
-DTV_BANDWIDTH_HZ = 6.0e6
+DTV_BANDWIDTH_HZ = _TEMPLATE.band_width_hz
 DETECTOR_WINDOW_SAMPLES = 128
 ENBW = 1.0
 
@@ -36,8 +42,8 @@ UNIT_DATA_SHELF_POWER = 1.0
 DEFAULT_THRESHOLD_MAX_DENOMINATOR = 2**32
 UINT64_MAX = (1 << 64) - 1
 
-PILOT_BELOW_DATA_DB = 11.3
-PILOT_CAPTURE_EFFICIENCY = 1.0
+PILOT_BELOW_DATA_DB = _TEMPLATE.marker.marker_to_band_db
+PILOT_CAPTURE_EFFICIENCY = _TEMPLATE.marker.capture_efficiency
 
 FINE_BIN_WIDTH_HZ = REFERENCE_CHANNEL_WIDTH_HZ / DETECTOR_WINDOW_SAMPLES
 EFFECTIVE_BIN_BW_HZ = ENBW * FINE_BIN_WIDTH_HZ
