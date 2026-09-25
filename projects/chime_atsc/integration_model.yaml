@@ -1,0 +1,4 @@
+# How the science analysis integrates a frame residual, for the residual chain.
+frame_seconds: 0.04194304            # 16384 samples at 390625 Hz
+coherence_cap_seconds: 86164.0905    # one mean sidereal day (the release literal)
+variance_split: booked_when_tau_usable   # or: off

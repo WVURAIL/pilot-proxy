@@ -1,0 +1,56 @@
+{
+  "schema": "pilot_proxy_transmitter_off_v1",
+  "source": "RFIsher src/rfisher/residual.py:125-153 at e041d5e (SIGN_ON_OFF_THROUGH, SIGN_OFF_FROM)",
+  "months": "YYYY-MM. from null means the start of the record; through null means open-ended.",
+  "independently_verified": "True only for a date confirmed by an external record (regulator or broadcaster) whose window contains the archive-dated boundary. The dates here were read from the archive's own pilot series.",
+  "bands": {
+    "19": [
+      {
+        "from": "2024-12",
+        "through": null,
+        "evidence": "Departure dated December 2024 by the archive's monthly pilot record.",
+        "independently_verified": false
+      }
+    ],
+    "20": [
+      {
+        "from": "2022-09",
+        "through": null,
+        "evidence": "A step-down rather than a departure: the 2022-09 step leaves a persistent live carrier (post-step months stay 97-100% masked), so the post-step floor is a measured ambient carrier level, conservative as a kept-frame bound but not a transmitter-off sensitivity floor.",
+        "independently_verified": false
+      }
+    ],
+    "26": [
+      {
+        "from": "2023-04",
+        "through": null,
+        "evidence": "Departure dated April 2023 by the archive's monthly pilot record.",
+        "independently_verified": false
+      }
+    ],
+    "27": [
+      {
+        "from": "2022-10",
+        "through": null,
+        "evidence": "Departure bounded inside the 2021-2022 collection gap: strong through 2020-11; first collected off month 2022-10. Any month inside a gap yields identical masks.",
+        "independently_verified": false
+      }
+    ],
+    "32": [
+      {
+        "from": "2023-02",
+        "through": null,
+        "evidence": "Departure bounded inside the 2021-2022 collection gap: strong through 2020-11; first collected off month 2023-02. Any month inside a gap yields identical masks. Superseded value: 2022-10 in pilot-proxy tools/make_chain_table.py:41 (OFF_FROM); the release uses 2023-02 (decision D14).",
+        "independently_verified": false
+      }
+    ],
+    "35": [
+      {
+        "from": null,
+        "through": "2021-10",
+        "evidence": "Off before sign-on: the monthly excess record steps on at 2021-11 (2021-09 and 2021-10 sit at the off level), so the off epoch runs through 2021-10. One later month, 2022-09, sits back at the off level; a single month-threshold mask cannot represent it and counts it on.",
+        "independently_verified": false
+      }
+    ]
+  }
+}
