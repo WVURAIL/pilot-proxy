@@ -1,10 +1,17 @@
 #!/bin/bash
-# Pull and process every reduced event as it completes on frb-analysis (280 products), once each.
+# Pull and process every reduced event as it completes on the analysis host (280 products), once each.
+# Site configuration: CHIME/FRB internal values, never committed; export them before running.
+#   JUMP_HOST      ssh jump host into the CHIME network
+#   ANALYSIS_HOST  ssh destination of the analysis host, <user>@<host>
+#   USER_DATA_DIR  the operator's user-data directory on the analysis host (products are in pilot_reduce/)
+# process_dump.sh, run for each completed event, reads the same three.
+# Reading CHIME baseband data requires CHIME/FRB authorization; see dumps/README.md.
+: "${JUMP_HOST:?}" "${ANALYSIS_HOST:?}" "${USER_DATA_DIR:?}"
 RB=/home/djg/rail/output/channel-ruling-execution-2026-09-14/rebuild/author_actions/capture-runbook
 DONE=$RB/reduce/done_events.txt; LOG=$RB/reduce/auto_process.log
 touch $DONE
 for i in $(seq 1 300); do
-  out=$(ssh -o ConnectTimeout=20 -J chimenet dgormley@frb-analysis 'for d in /data/user-data/dgormley/pilot_reduce/2026091*; do n=$(ls $d/*.npz 2>/dev/null | wc -l); [ "$n" -eq 280 ] && echo "$(basename $d)"; done' 2>/dev/null | grep -v conda)
+  out=$(ssh -o ConnectTimeout=20 -J "$JUMP_HOST" "$ANALYSIS_HOST" 'for d in '"$USER_DATA_DIR"'/pilot_reduce/2026091*; do n=$(ls $d/*.npz 2>/dev/null | wc -l); [ "$n" -eq 280 ] && echo "$(basename $d)"; done' 2>/dev/null | grep -v conda)
   for ev in $out; do
     grep -q "^$ev$" $DONE && continue
     echo "$(date -u +%FT%TZ) processing $ev" >> $LOG

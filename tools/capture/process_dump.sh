@@ -1,13 +1,19 @@
 #!/bin/bash
 # Bring one reduced dump home and run everything on it: products, pilot files, both kernel banks, frame analysis,
-# ladder placement. usage: process_dump.sh <event_id>   (needs the event reduced on frb-analysis: 280 products)
+# ladder placement. usage: process_dump.sh <event_id>   (needs the event reduced on the analysis host: 280 products)
+# Site configuration: CHIME/FRB internal values, never committed; export them before running.
+#   JUMP_HOST      ssh jump host into the CHIME network
+#   ANALYSIS_HOST  ssh destination of the analysis host, <user>@<host>
+#   USER_DATA_DIR  the operator's user-data directory on the analysis host (products are in pilot_reduce/)
+# Reading CHIME baseband data requires CHIME/FRB authorization; see dumps/README.md.
 set -u
+: "${JUMP_HOST:?}" "${ANALYSIS_HOST:?}" "${USER_DATA_DIR:?}"
 EV=$1
 R=/home/djg/rail/output/channel-ruling-execution-2026-09-14/rebuild/author_actions/capture-runbook/reduce
 PY=/home/djg/rail/venvs/archive-local/bin/python
 W=$R/weights_ch33/chime_dtv_weights_k128_ch33measured.bin
 mkdir -p /home/djg/rail/datasets/pilot_reduce_$EV
-rsync -a -e "ssh -o ConnectTimeout=20 -J chimenet" dgormley@frb-analysis:/data/user-data/dgormley/pilot_reduce/$EV/ /home/djg/rail/datasets/pilot_reduce_$EV/ 2>&1 | grep -v conda
+rsync -a -e "ssh -o ConnectTimeout=20 -J $JUMP_HOST" "$ANALYSIS_HOST:$USER_DATA_DIR/pilot_reduce/$EV/" /home/djg/rail/datasets/pilot_reduce_$EV/ 2>&1 | grep -v conda
 n=$(ls /home/djg/rail/datasets/pilot_reduce_$EV/*.npz 2>/dev/null | wc -l); echo "$EV products $n"; [ "$n" -ge 280 ] || { echo "not fully reduced"; exit 1; }
 $R/pull_pilots_ready.sh $EV 2>&1 | tail -1
 L=/home/djg/rail/datasets/pilot_dump_$EV; CH=""

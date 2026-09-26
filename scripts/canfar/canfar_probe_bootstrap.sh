@@ -3,13 +3,16 @@
 # Run inside ONE CANFAR session terminal. The session MUST use
 # images.canfar.net/skaha/astroml-cuda:latest -- the non-CUDA astroml
 # image has a GPU and driver but no toolkit, and cupy cannot JIT there.
-#   bash /arc/home/dgormley/pp_switch/canfar_probe_bootstrap.sh
+#   bash /arc/home/$CANFAR_USER/pp_switch/canfar_probe_bootstrap.sh
 # v2: phase 3 now restores the runtime OFFLINE from the freeze bundle's own
 # wheelhouse (cut at the frozen rev), per the lock's "install only from the
 # bundled wheelhouse" doctrine.  v1 tried PyPI and was correctly refused by
 # hash checking (different manylinux wheel variants for the same versions).
 # Read-only against the archive except ~25 timed test downloads to /tmp.
 set -uo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 say(){ printf '\n===== %s =====\n' "$*"; }
 
 TAG=archive-run-source-20260901
@@ -18,10 +21,10 @@ PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
 # The kernel qualified by the cross-arch smoke (H100 / sm90). A new session on
 # the same architecture reuses it instead of rebuilding, so its products carry
 # the same detector_version as the running shards.
-QKLIB=/arc/home/dgormley/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
+QKLIB=/arc/home/$CANFAR_USER/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
 QKSHA=33b6e1c45c472c65cf46031d4b009d6f6f96652b57c9bb362489f403dfeaedbd
 TARSHA=f37fe0410bff5233b4a5afd99262f47d9451d446a7be9274b943f5373e079ae6
-SW=/arc/home/dgormley/pp_switch
+SW=/arc/home/$CANFAR_USER/pp_switch
 PP="$HOME/pilot-proxy"
 FRZ="$HOME/pp_freeze"
 BUNDLE="$FRZ/archive-local-65b49971ffa6"
@@ -48,7 +51,7 @@ echo "nvcc      : $(command -v nvcc)"
 say "1. certificate"
 CERT="$HOME/.ssl/cadcproxy.pem"
 if [ ! -f "$CERT" ]; then
-  echo "NO CERT at $CERT -- run:  cadc-get-cert -u dgormley --days-valid 30"
+  echo "NO CERT at $CERT -- run:  cadc-get-cert -u $CANFAR_USER --days-valid 30"
   echo "then re-run this script."; exit 1
 fi
 chmod 600 "$CERT"
@@ -116,7 +119,7 @@ else
 fi
 if [ "$QUALIFIED" = 0 ]; then
   SHA=$(sha256sum cuda/libfstatistic.so | cut -d' ' -f1)
-  KDIR="/arc/home/dgormley/pp_kernels"
+  KDIR="/arc/home/$CANFAR_USER/pp_kernels"
   mkdir -p "$KDIR"
   KLIB="$KDIR/pilotproxy-detector-core-2.3.0-sm${SM}-${SHA:0:12}.so"
   cp --no-clobber cuda/libfstatistic.so "$KLIB"; chmod 555 "$KLIB" 2>/dev/null || true

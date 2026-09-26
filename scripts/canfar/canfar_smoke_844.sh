@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 # CANFAR cross-arch smoke -- pilot-proxy v5 at the frozen tag.
 # Run in notebook1 AFTER the probe bootstrap succeeded:
-#   bash /arc/home/dgormley/pp_switch/canfar_smoke_844.sh
+#   bash /arc/home/$CANFAR_USER/pp_switch/canfar_smoke_844.sh
 # Repeats the local B2d rehearsal scan shape (channel 844, first 8 files,
 # production worker profile) on the H100/sm90 kernel, then compares the
 # product against the local sm89 rehearsal product unit-by-unit.
 # v5 coarse/fine terms are exact integers: cross-arch agreement must be
 # bit-for-bit; only psd_frame_db_i16 is allowed +-1 code (0.01 dB).
 set -uo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 say(){ printf '\n===== %s =====\n' "$*"; }
 
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
-SW=/arc/home/dgormley/pp_switch
+SW=/arc/home/$CANFAR_USER/pp_switch
 PP="$HOME/pilot-proxy"
 VENV="$HOME/pp-venv-$(hostname)"
-KLIB=/arc/home/dgormley/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
+KLIB=/arc/home/$CANFAR_USER/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
 KSHA=33b6e1c45c472c65cf46031d4b009d6f6f96652b57c9bb362489f403dfeaedbd
 REF="$SW/ref_844_local_sm89.npz"
 REFSHA=13364564ef2ac396b4a3c0c1bcb4edbfbbf6d545f8b2ba0bdb34f8758776a7c6
-OUTDIR=/arc/home/dgormley/pp_runs/canfar_smoke_844_b59b5c0
+OUTDIR=/arc/home/$CANFAR_USER/pp_runs/canfar_smoke_844_b59b5c0
 SVC="${PP_STORAGE_SERVICE:-ivo://cadc.nrc.ca/uvic/minoc}"
 export PILOT_PROXY_STORAGE_SERVICE="$SVC"
 STG=/tmp/pp_smoke_stage

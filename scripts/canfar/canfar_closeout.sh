@@ -2,7 +2,7 @@
 # Closeout for the completed 2026-09 CHIME archive run: assemble, then hand
 # off to the results generator.
 #
-#   bash /arc/home/dgormley/pp_switch/canfar_closeout.sh assemble
+#   bash /arc/home/$CANFAR_USER/pp_switch/canfar_closeout.sh assemble
 #   then:  source "$HOME/pp-venv-$(hostname)/bin/activate"
 #          cd ~/pilot-proxy && python scripts/generate_results.py --run-dir <printed path>
 #
@@ -28,13 +28,16 @@
 # generate_results applies the registered rule instead and records the full
 # drop-curve either way.
 set -uo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 say(){ printf '\n===== %s =====\n' "$*"; }
 die(){ echo "CLOSEOUT-BLOCK: $*" >&2; exit 1; }
 
 MODE="${1:-assemble}"
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
 PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
-R=/arc/home/dgormley/pp_runs
+R=/arc/home/$CANFAR_USER/pp_runs
 S1=$R/chime_pilots_rebuild_20260829_canfar_shard1_b59b5c0
 S2=$R/chime_pilots_rebuild_20260829_canfar_shard2_b59b5c0
 ALL=$R/chime_pilots_rebuild_20260829_ALL23

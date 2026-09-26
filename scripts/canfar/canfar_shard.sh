@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # CANFAR two-shard production controller -- pilot-proxy v5, frozen tag.
-#   bash /arc/home/dgormley/pp_switch/canfar_shard.sh <1|2> <update|gate|launch|resume|tripwire|status|stop>
+#   bash /arc/home/$CANFAR_USER/pp_switch/canfar_shard.sh <1|2> <update|gate|launch|resume|tripwire|status|stop>
 #
 # Shard 1 (notebook1): 506,521,537,552,568,583,675,752,767,813,829  (13.50 TiB, 86,541 files)
 # Shard 2 (notebook2): 598,614,629,644,660,690,706,721,736,783,798,844  (13.46 TiB, 85,896 files)
@@ -19,6 +19,9 @@
 #     never a missing file.
 # launch requires PP_LAUNCH_CONFIRM=YES; resume requires PP_RESUME_CONFIRM=YES.
 set -uo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 umask 077
 die(){ echo "SHARD-BLOCK: $*" >&2; exit 1; }
 say(){ printf '\n===== %s =====\n' "$*"; }
@@ -38,11 +41,11 @@ SVC="${PP_STORAGE_SERVICE-}"
 export PILOT_PROXY_STORAGE_SERVICE="$SVC"
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
 PKG=3722012957975f7d5698c24ab3bf36b59ff26dd94fd84ae75b2eb0820d8ea34a
-KLIB=/arc/home/dgormley/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
+KLIB=/arc/home/$CANFAR_USER/pp_kernels/pilotproxy-detector-core-2.3.0-sm90-33b6e1c45c47.so
 KSHA=33b6e1c45c472c65cf46031d4b009d6f6f96652b57c9bb362489f403dfeaedbd
 INVSHA=e97a57f9349bcb44463d6fba9fcbfd71b03863fa5a44deca352910b59766be65
 WSHA=1383c6d0ca521a26b317d008feb6e09eb41427155bda9a320f70bca62e0e6259
-SW=/arc/home/dgormley/pp_switch
+SW=/arc/home/$CANFAR_USER/pp_switch
 PP="$HOME/pilot-proxy"
 VENV="$HOME/pp-venv-$(hostname)"
 INV="$SW/inventory.jsonl"
@@ -83,9 +86,9 @@ GATE_BYTES=91311880
 # 20260829-source products stay untouched as evidence, and this build starts
 # its own clean run rather than silently mixing implementations.
 SRC_SHORT=${REV:0:7}
-OUT=/arc/home/dgormley/pp_runs/chime_pilots_rebuild_20260829_canfar_shard${SHARD}_${SRC_SHORT}
+OUT=/arc/home/$CANFAR_USER/pp_runs/chime_pilots_rebuild_20260829_canfar_shard${SHARD}_${SRC_SHORT}
 STG=/tmp/pp_stage_shard${SHARD}_${SRC_SHORT}
-LOGDIR=/arc/home/dgormley/pp_runs/logs
+LOGDIR=/arc/home/$CANFAR_USER/pp_runs/logs
 LOG=$LOGDIR/canfar_shard${SHARD}_${SRC_SHORT}.log
 
 scan_args(){
@@ -126,18 +129,18 @@ gate(){
   echo "$WSHA  $PP/weights/chime_dtv_weights_k128.bin" | sha256sum --check --strict >/dev/null || die "weights sha mismatch"
   echo "identity  : source+package+kernel+inventory+weights all match frozen"
 
-  test -f "$CERT" || die "no cert at $CERT -- run: cadc-get-cert -u dgormley --days-valid 30"
+  test -f "$CERT" || die "no cert at $CERT -- run: cadc-get-cert -u $CANFAR_USER --days-valid 30"
   # CANFAR rewrites this shared file with a fresh 7-day delegated cert on every
   # session launch, so a 14-day floor made the gate unpassable after any new
   # session (it blocked shard 3 entirely). Supervisors resume constantly, so
   # what matters is that the cert outlives the next stretch of work, not the
   # whole run: refuse under 3 days, warn under 10.
   openssl x509 -in "$CERT" -noout -checkend $((3*86400)) >/dev/null \
-    || die "cert expires within 3 days ($(openssl x509 -in "$CERT" -noout -enddate)) -- run: cadc-get-cert -u dgormley --days-valid 30"
+    || die "cert expires within 3 days ($(openssl x509 -in "$CERT" -noout -enddate)) -- run: cadc-get-cert -u $CANFAR_USER --days-valid 30"
   if openssl x509 -in "$CERT" -noout -checkend $((10*86400)) >/dev/null; then
     echo "cert      : $(openssl x509 -in "$CERT" -noout -enddate)"
   else
-    echo "cert      : $(openssl x509 -in "$CERT" -noout -enddate)  << under 10 days; re-mint when convenient (cadc-get-cert -u dgormley --days-valid 30)"
+    echo "cert      : $(openssl x509 -in "$CERT" -noout -enddate)  << under 10 days; re-mint when convenient (cadc-get-cert -u $CANFAR_USER --days-valid 30)"
   fi
 
   for url in "$MINOC_CAPS_1" "$MINOC_CAPS_2"; do

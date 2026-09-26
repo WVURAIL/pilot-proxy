@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Keep one shard running across archive outages and transient fetch failures.
 #
-#   setsid -f bash /arc/home/dgormley/pp_switch/canfar_supervise.sh 1
+#   setsid -f bash /arc/home/$CANFAR_USER/pp_switch/canfar_supervise.sh 1
 #   (shard 1 on notebook1, shard 2 on notebook2)
 #
 # Why: a download worker that dies takes the whole scan with it, and not
@@ -23,16 +23,19 @@
 # requested scope" -- only quarantined rows left). Kill with:
 #   pkill -f canfar_supervise
 set -uo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 
 SHARD="${1:-}"
 case "$SHARD" in 1|2|3) ;; *) echo "usage: canfar_supervise.sh <1|2|3>"; exit 2;; esac
 
-SW=/arc/home/dgormley/pp_switch
+SW=/arc/home/$CANFAR_USER/pp_switch
 REV=b59b5c05fed2a9509a31e206f0911e76ca2d2885
 SRC_SHORT=${REV:0:7}
-OUT=/arc/home/dgormley/pp_runs/chime_pilots_rebuild_20260829_canfar_shard${SHARD}_${SRC_SHORT}
-LOG=/arc/home/dgormley/pp_runs/logs/canfar_shard${SHARD}_${SRC_SHORT}.log
-SLOG=/arc/home/dgormley/pp_runs/logs/supervise_shard${SHARD}.log
+OUT=/arc/home/$CANFAR_USER/pp_runs/chime_pilots_rebuild_20260829_canfar_shard${SHARD}_${SRC_SHORT}
+LOG=/arc/home/$CANFAR_USER/pp_runs/logs/canfar_shard${SHARD}_${SRC_SHORT}.log
+SLOG=/arc/home/$CANFAR_USER/pp_runs/logs/supervise_shard${SHARD}.log
 MAX_ATTEMPTS=400          # resume attempts of either kind; ~a week at the backoff cap
 BACKOFF_MIN=60
 BACKOFF_MAX=1800

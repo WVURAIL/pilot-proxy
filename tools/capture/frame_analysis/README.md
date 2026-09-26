@@ -8,10 +8,14 @@ checked before selection. Missing pilot data, incompatible banks,
 missing timing metadata, and unmatched frames refuse the affected comparison.
 
 ```sh
-python frame_policy_v1.py --root /home/djg/rail \
-  --output /home/djg/rail/output/new-frame-policy-release
+python frame_policy_v1.py --root "${WORKSPACE_ROOT:?}" \
+  --output "$WORKSPACE_ROOT/output/new-frame-policy-release"
 python -m unittest -v test_frame_policy_v1
 ```
+
+`WORKSPACE_ROOT` is the local workspace root, the directory that holds
+`output/`, `results/`, `products/` and `datasets/`. It is not committed; the
+command stops if it is unset.
 
 The output directory must not already exist. The four evaluated policies are
 the three saved calibration quantiles and keep-all. The quantiles are not

@@ -61,8 +61,8 @@ dissertation carry a "State of record, 2026-09-18" section.
 - Analysis tree (scripts, CSVs, notes): ~/rail/output/channel-ruling-execution-2026-09-14/rebuild/author_actions/
   (capture-runbook/reduce/frame_analysis/ is the working directory of every table and report). Mirrored on the WVU RAIL
   OneDrive under RFI Mitigation/Datasets/matched-capture-2026-09/. Scripts also here in tools/capture/.
-- Reduced dump products: ~/rail/datasets/pilot_reduce_<event>/ (14 events) and on frb-analysis under
-  /data/user-data/dgormley/pilot_reduce/. Raw dumps are on the CHIME archive (datatrail, baseband_<event>).
+- Reduced dump products: ~/rail/datasets/pilot_reduce_<event>/ (14 events) and on the analysis host under
+  $USER_DATA_DIR/pilot_reduce/ (see dumps/README.md). Raw dumps are on the CHIME archive (datatrail, baseband_<event>).
 - Channel 33 rescan products: author_actions/ch33_rescan/products/ (and OneDrive ch33_rescan/).
 - Table of record: frame_analysis/table_of_record.csv (sha256 9e090aa7...; the amendment-9 table is kept as table_of_record_before_amendment10.csv, sha256 8f1a510b, and the amendment-10 table as table_of_record_before_amendment11.csv, sha256 939546f4), vendored in the dissertation as
   figure_src/data/record/table_of_record.csv; fragments regenerate with
@@ -99,7 +99,7 @@ trim-spread refusals and constant-plateau returns, not missing lag coverage.
 2. Post the 1681 reply (draft in the session notes; close it). 1673 and 1677 are mergeable and await reviewers.
 3. Rik: the one-line follow-up on whether nodes will again be dropped for RFI after the X-engine upgrade
    (bins 767, 752, 690, 598, 583, 537). Upgrade hoped for October 2026; all 1024 channels planned.
-4. Post-upgrade dump (one 1.4 s dump once the upgraded correlator records all channels): trigger_dump.py, then
+4. Post-upgrade dump (one 1.4 s dump once the upgraded correlator records all channels): dumps/trigger_dump.py, then
    process_dump.sh <event>, then steps 1 to 3 above. Closes channel 24 and lets the six pilot bins' masks be read.
    Include a control block outside the DTV band if possible (audit S1).
 5. SDR bench: RUN AND CLOSED, 2026-09-19. Result: tools/capture/sdr-bench-2026-09-18/RESULT_2026-09-19.md.
@@ -122,8 +122,4 @@ trim-spread refusals and constant-plateau returns, not missing lag coverage.
    layout has Dmin 20 m; audit round 2, R3) so the 10 to 20 m classes are priced; calibrated-gain stacking to lower the
    estimator floor; a per-range uncertainty on the bars.
 7. Housekeeping: the chimestack recall on fir was cleaned off within hours (drop that route); the fir gain files were
-   released; the buffer key on outrigger-buffer (preflight only) can stay.
-
-## Memory
-Claude Code memory for this project: ~/.claude/projects/-home-djg-rail/memory/ (frame-analysis-state-2026-09-17.md
-holds the full chronology and the resume recipe; MEMORY.md is the index).
+   released; the buffer key on the buffer host (preflight only) can stay.

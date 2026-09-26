@@ -2,7 +2,7 @@
 # Copy-ahead merge: hand a channel finished by shard 3 to the shard that owns
 # it in its --select list, so the owner skips the channel when it arrives.
 #
-#   bash /arc/home/dgormley/pp_switch/canfar_merge_channel.sh <channel>
+#   bash /arc/home/$CANFAR_USER/pp_switch/canfar_merge_channel.sh <channel>
 #   (run on any session -- it works on /arc, and takes the same lock the scans do)
 #
 # Why this is sound: the per-channel product carries the full detector
@@ -18,13 +18,16 @@
 # unprocessed), the owner has no product for it yet, the owner is not
 # currently working it, and the provenance matches an existing owner product.
 set -euo pipefail
+# Site configuration: the CANFAR account name, never committed; export it before running (see README.md).
+#   CANFAR_USER  the CANFAR account; the kit and the runs live under /arc/home/$CANFAR_USER/
+: "${CANFAR_USER:?}"
 CH="${1:-}"
 case "$CH" in 767|813|829) OWNER=1 ;; 783|798|844) OWNER=2 ;;
   *) echo "usage: canfar_merge_channel.sh <767|813|829|783|798|844>"; exit 2 ;; esac
 die(){ echo "MERGE-BLOCK: $*" >&2; exit 1; }
 
-SW=/arc/home/dgormley/pp_switch          # inventory lives here
-R=/arc/home/dgormley/pp_runs
+SW=/arc/home/$CANFAR_USER/pp_switch          # inventory lives here
+R=/arc/home/$CANFAR_USER/pp_runs
 SRC=$R/chime_pilots_rebuild_20260829_canfar_shard3_b59b5c0
 DST=$R/chime_pilots_rebuild_20260829_canfar_shard${OWNER}_b59b5c0
 SRCP=$SRC/_per_pilot; DSTP=$DST/_per_pilot

@@ -2,9 +2,12 @@
 
 These are the scripts that ran the CHIME pilot-tone archive scan on CANFAR in
 September 2026, committed as provenance rather than as a general deployment
-kit. Paths under `/arc/home/dgormley/`, the session hostnames, the channel
+kit. Paths under `/arc/home/$CANFAR_USER/`, the session hostnames, the channel
 partition, and every digest they assert are specific to that run and are meant
 to be read alongside the run ledger.
+
+`CANFAR_USER` is the CANFAR account name. It is not committed: export it
+before running, and every shell script here stops if it is unset.
 
 **Session image must be `images.canfar.net/skaha/astroml-cuda:latest`.** The
 plain `astroml` image has a GPU and driver but no CUDA toolkit: every gate
@@ -23,7 +26,7 @@ bootstrap refuses such a session up front.
 | — | `canfar_compare_duplicates.py` | Field-level, NaN-aware comparison of the channels two shards both built; the basis of the byte-identical reproduction result in the ledger. |
 | 6 | `canfar_closeout.sh` | Assembles the 23 canonical products, split across two non-overlapping shard directories, into one run directory. |
 
-The CANFAR home these scripts name (`/arc/home/dgormley/`) holds nothing
+The CANFAR home these scripts name (`/arc/home/$CANFAR_USER/`) holds nothing
 unique any more: after the closeout its copy of the products was verified
 against the workstation copy and the home is being cleared. The qualified
 sm90 kernel, the `pp_switch` kit (inventory, launcher scripts) and the runtime
